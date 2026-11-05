@@ -9,6 +9,8 @@
 - Every change is tied to an issue. **Every pull request must reference the
   issue it closes** with a closing keyword in the description, e.g.
   `Closes #12`. If no issue exists for the work, create one first.
+- `main` is the base branch. Branch from `main` and open every PR against
+  `main`.
 - One small issue per PR where possible.
 - Before opening a PR: `npm run lint && npm run typecheck && npm test`.
 - Never log or commit secrets. Secrets come only from Google Secret Manager.
