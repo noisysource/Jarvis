@@ -49,7 +49,9 @@ same question with `domain` set. No session store, no sticky instances.
 | `src/types.ts` | Domain, AskRequest, AskResponse (discriminated union), Deps | #4 |
 | `src/config.ts` | `loadConfig(env)`: pure, zod-validated | #5 |
 | `src/secrets.ts` | Secret Manager access, memoised | #6 |
-| `src/llm.ts` | Claude client, effort, refusal fallback, error mapping | #10 |
+| `src/llm/types.ts` | Provider-neutral types: `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
+| `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
+| `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
 | `src/classify.ts` | `classify(deps, q) → kidclub \| personal \| unclear` | #11 |
 | `src/vendus/client.ts` | GET-only client with path allowlist | #8 |
 | `src/vendus/tools.ts` | `list_invoices`, `get_invoice` with trimmed output | #9 |
@@ -60,23 +62,47 @@ same question with `domain` set. No session store, no sticky instances.
 
 ## Components
 
-**Claude.** Official `@anthropic-ai/sdk`. Default model `claude-opus-5-5`;
-effort `low` for classification, `medium` for answers. Classifier uses
-structured output. Server-side refusal fallback enabled; `stop_reason` checked
-before reading content.
+**Models, behind a provider interface.** All model calls go through one
+provider-neutral function type:
+
+```ts
+type LlmCall = (req: LlmRequest) => Promise<Result<LlmResponse, LlmError>>;
+// LlmRequest:  { system, messages, tools?, outputSchema?, effort?, maxTokens }
+// LlmResponse: { kind: "text", text } | { kind: "tool_calls", calls } | { kind: "json", value }
+```
+
+Each provider is a module that exports a factory `(apiKey, model) => LlmCall`
+(pure functions, no classes). Models are picked by config as
+`provider:model` strings, one per role:
+
+- Classifier: `CLASSIFIER_MODEL=anthropic:claude-haiku-5-5`, effort `low`
+- Answers: `ANSWER_MODEL=anthropic:claude-sonnet-5-5`, effort `medium`
+
+Adding Gemini or Grok later means adding one provider module and its API-key
+secret, then changing those env vars; nothing else changes. Because of that,
+the KidClub tool loop is written in our own code over `LlmCall` rather than
+using a vendor SDK's tool runner.
+
+Anthropic provider: official `@anthropic-ai/sdk`; checks `stop_reason` before
+reading content; turns `refusal` / `max_tokens` into typed errors. Sonnet calls
+use the server-side refusal fallback (`fallbacks: "default"`); Haiku has no
+server-side fallback, so a refused classification simply becomes `unclear`.
 
 **Vendus.** Assumed base URL `https://www.vendus.pt/ws/v1.1/` with the API key
 as HTTP Basic username. **To be verified in #7 before #8.** Tools return compact
 summaries (number, date, client, totals, status), not raw payloads. If Vendus
 supports it, use a dedicated read-only API user as a second safety layer.
 
-**Secrets & config.** Secret Manager: `vendus-api-key`, `anthropic-api-key`.
-The Cloud Run service account gets `roles/secretmanager.secretAccessor` on
-those two secrets only. Non-secret env: `GOOGLE_CLOUD_PROJECT`,
-`VENDUS_SECRET_NAME`, `ANTHROPIC_SECRET_NAME`, `PORT`, `JARVIS_MODEL`.
+**Secrets & config.** Secret Manager: `vendus-api-key`, `anthropic-api-key`
+(one API-key secret per model provider in use). The Cloud Run service account
+gets `roles/secretmanager.secretAccessor` on those secrets only. Non-secret env:
+`GOOGLE_CLOUD_PROJECT`, `VENDUS_SECRET_NAME`, `ANTHROPIC_SECRET_NAME`, `PORT`,
+`CLASSIFIER_MODEL`, `ANSWER_MODEL`.
 
-**Deployment.** Node 22, multi-stage Dockerfile, non-root (#17). Cloud Run with
-`--no-allow-unauthenticated`, so it's callable only by IAM identities (#18).
+**Deployment.** Node 22, multi-stage Dockerfile, non-root (#17). Cloud Run in
+`europe-southwest1` (Madrid) with `--no-allow-unauthenticated`, so it's
+callable only by IAM identities (#18). Phone access (Siri Shortcut, messaging
+bots) needs its own auth method and is tracked separately in the backlog.
 
 **Quality.** Vitest unit tests with stubbed deps; CI runs lint, typecheck and
 tests on every PR (#3). Local stub mode for trying it without keys (#16).
@@ -92,13 +118,18 @@ tests on every PR (#3). Local stub mode for trying it without keys (#16).
 
 ## Decisions
 
-Proposed defaults, pending confirmation in #1:
+Confirmed in #1 (2026-11-05):
 
-- Model: `claude-opus-5-5` for classifier and answerer
-- Endpoint auth: Cloud Run IAM only
-- GCP region `europe-west1`; secret names as above
+- **Models:** Claude Haiku (`claude-haiku-5-5`) for the classifier, Claude
+  Sonnet (`claude-sonnet-5-5`) for answers, both behind the provider interface
+  so other providers (e.g. Gemini, Grok) are a config change.
+- **Endpoint auth:** Cloud Run IAM only for now. Phone access (Siri Shortcut,
+  messaging bots) and its auth method are a backlog item.
+- **GCP region:** `europe-southwest1` (Madrid).
+- **Secret names:** `vendus-api-key`, `anthropic-api-key`.
+- **Everything else** in this plan and in the v0 issues is approved as written.
 
 ## Out of scope for v0
 
 Conversation memory, personal data tools (Gmail, Drive, calendar), any writes
-to Vendus, a chat UI.
+to Vendus, a chat UI, phone access via Siri Shortcut or messaging bots (#19).
