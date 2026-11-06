@@ -26,6 +26,7 @@ describe("loadConfig", () => {
       },
       contextsPath: "contexts.md",
       profileSource: { kind: "file", path: "data/profile.md" },
+      timeZone: "Europe/Lisbon",
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
   });
@@ -50,6 +51,10 @@ describe("loadConfig", () => {
       profileSource: { kind: "file", path: "/secrets/profile.md" },
       secrets: { gcpProject: "jarvis-prod", anthropicSecretName: "claude-key", vendusSecretName: "vendus-api-key" },
     });
+  });
+
+  it("accepts another IANA time zone", () => {
+    expect(loadOk({ TIMEZONE: "Europe/Madrid" }).timeZone).toBe("Europe/Madrid");
   });
 
   it("treats empty values as unset", () => {
@@ -80,6 +85,7 @@ describe("loadConfig", () => {
     ["ANSWER_MODEL", { ANSWER_MODEL: "openai:gpt-5" }],
     ["PROFILE_SOURCE", { PROFILE_SOURCE: "gs://bucket/profile.md" }],
     ["PROFILE_SOURCE", { PROFILE_SOURCE: "file:" }],
+    ["TIMEZONE", { TIMEZONE: "Mars/Olympus_Mons" }],
   ])("rejects a bad %s", (name, env) => {
     expect(loadErr(env)).toMatch(new RegExp(`^${name}: `));
   });

@@ -69,6 +69,19 @@ describe("buildParams", () => {
     ]);
   });
 
+  it("puts an uncached suffix after the cached system prompt", () => {
+    expect(
+      buildParams("claude-sonnet-5-5", { ...base, cacheSystem: true, systemSuffix: "Now: Friday" }).system,
+    ).toEqual([
+      { type: "text", text: "You are Jarvis.", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "Now: Friday" },
+    ]);
+    expect(buildParams("claude-sonnet-5-5", { ...base, systemSuffix: "Now: Friday" }).system).toEqual([
+      { type: "text", text: "You are Jarvis." },
+      { type: "text", text: "Now: Friday" },
+    ]);
+  });
+
   it("maps tools as strict tools", () => {
     const params = buildParams("claude-sonnet-5-5", {
       ...base,

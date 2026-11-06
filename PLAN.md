@@ -91,7 +91,8 @@ question, and after a clarify response it re-sends the question with
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
 | `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
 | `src/classify.ts` | `makeClassifier`: local precheck, then the classifier model → context id or `unclear` | #11 |
-| `src/answer/personal.ts` | Answer model + profile, no tools | #13, #26 |
+| `src/answer/personal.ts` | Answer model: instructions + profile (cached), then Lisbon date/time and memories (uncached), history, no tools | #13 |
+| `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
 | `src/memory.ts` | Memory hook stubs | #23 |
 | `src/ask.ts` | `handleAsk(deps, req)`: orchestration entry point | #14, #26 |
 | `src/server.ts` | Hono: `POST /ask`, `GET /healthz`, `GET /` | #15, #27 |
@@ -152,6 +153,7 @@ Non-secret env (`src/config.ts`, all optional locally):
 | `ANSWER_MODEL` | `anthropic:claude-sonnet-5-5` | `provider:model` |
 | `CONTEXTS_PATH` | `contexts.md` | |
 | `PROFILE_SOURCE` | `file:data/profile.md` | Only `file:` for now |
+| `TIMEZONE` | `Europe/Lisbon` | For "now" in the answer prompt |
 | `GOOGLE_CLOUD_PROJECT` | none | **Required in production** |
 | `ANTHROPIC_SECRET_NAME` | `anthropic-api-key` | Secret Manager name |
 | `VENDUS_SECRET_NAME` | none | Not needed in M0 |
