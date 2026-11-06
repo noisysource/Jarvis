@@ -13,7 +13,8 @@ Fields (one `Key: value` per line):
 - `Recognition cues` (handoff only): comma list of words or phrases checked
   locally before any model runs. A match hands off immediately. Matching is
   whole-word and ignores accents; cues written in ALL CAPS (`EC`) are
-  case-sensitive, all others ignore case.
+  case-sensitive, all others ignore case. A hyphen in a cue matches a hyphen,
+  a space or nothing (`Cast-p` matches "Cast P" and "CastP").
 - `Unless` (handoff only, may repeat): `word, word -> context-id`. If one of
   these words appears together with a cue, the question goes to that context
   instead of being handed off.
@@ -43,5 +44,5 @@ Data: None. Handled by Kiro.
 Tools: none
 Handling: handoff
 Handoff to: Kiro (the EC's agent)
-Recognition cues: European Commission, the Commission, Comissão Europeia, EC, HRT, Kiro
+Recognition cues: European Commission, Comissão Europeia, EC, HRT, EPSO, CASP, Cast-p, Recruiter Portal UTP, Kiro
 Unless: invoice, invoices, invoiced, invoicing, bill, billing, fatura, faturas, faturar, faturação, factura, facturas -> noisysource

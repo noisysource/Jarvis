@@ -28,11 +28,15 @@ edit, not a code change.
 | `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
 
 **Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
-"European Commission", "EC", "HRT") that are matched locally, before any model
-runs: whole words, accents ignored, ALL-CAPS cues case-sensitive. A cue plus an
-invoicing word from its `Unless` list ("Invoice the Commission") routes straight
-to `noisysource`; a cue alone hands off to Kiro. Questions with no cue go to the
-classifier, which still has `ec-hrt` as an option as a backstop.
+"European Commission", "EC", "HRT", "EPSO", "CASP", "Cast-p", "Recruiter
+Portal UTP") that are matched locally, before any model runs: whole words,
+accents ignored, ALL-CAPS cues case-sensitive, a hyphen matching a hyphen,
+space or nothing. A cue plus an invoicing word from its `Unless` list ("Invoice
+the European Commission") routes straight to `noisysource`; a cue alone hands
+off to Kiro. Questions with no cue go to the classifier, which still has
+`ec-hrt` as an option as a backstop and is told that invoicing the EC is
+Noisy Source. "The Commission" is deliberately not a cue, because it also
+means a sales commission.
 
 ## Request flow (M0)
 

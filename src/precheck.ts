@@ -19,10 +19,17 @@ const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\
 /** ALL-CAPS cues such as "EC" are acronyms and match case-sensitively. */
 const isAcronym = (cue: string): boolean => /\p{Lu}/u.test(cue) && !/\p{Ll}/u.test(cue);
 
-/** Whole-word/phrase matcher that ignores accents (and case, unless the cue is an acronym). */
+/**
+ * Whole-word/phrase matcher that ignores accents (and case, unless the cue is
+ * an acronym). Spaces in a cue match any whitespace; a hyphen matches a hyphen,
+ * whitespace or nothing, since speech transcription often drops it.
+ */
 export const makeCueMatcher = (cue: string): ((text: string) => boolean) => {
   const normalized = stripAccents(cue.trim());
-  const body = normalized.split(/\s+/).map(escapeRegExp).join("\\s+");
+  const body = normalized
+    .split(/\s+/)
+    .map((word) => word.split("-").map(escapeRegExp).join("[-\\s]*"))
+    .join("\\s+");
   const pattern = new RegExp(
     `(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`,
     isAcronym(normalized) ? "u" : "iu",
