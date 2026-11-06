@@ -27,8 +27,9 @@ const outcome = (question: string): string => {
 describe("precheck with the real contexts.md", () => {
   it.each([
     // Invoicing words override the EC cues -> noisysource, no model.
-    ["Invoice the Commission for October", "route:noisysource"],
+    ["Invoice the European Commission for October", "route:noisysource"],
     ["Have I sent the European Commission invoice yet?", "route:noisysource"],
+    ["Bill EPSO for the October workshop", "route:noisysource"],
     ["Prepara a fatura para a Comissão Europeia", "route:noisysource"],
     ["Faturação da Comissao Europeia de outubro", "route:noisysource"],
     ["When did I last bill the EC?", "route:noisysource"],
@@ -38,7 +39,18 @@ describe("precheck with the real contexts.md", () => {
     ["Draft a reply to the EC about the new policy", "handoff:ec-hrt"],
     ["Ask Kiro about the deployment", "handoff:ec-hrt"],
     ["O que diz a Comissão Europeia sobre isto?", "handoff:ec-hrt"],
+    ["Any news from EPSO on the competition?", "handoff:ec-hrt"],
+    ["Check the CASP release notes", "handoff:ec-hrt"],
+    ["What changed in Cast-p this sprint?", "handoff:ec-hrt"],
+    ["what changed in cast p this sprint", "handoff:ec-hrt"],
+    ["Is CastP down?", "handoff:ec-hrt"],
+    ["Open the Recruiter Portal UTP ticket", "handoff:ec-hrt"],
+    ["open the recruiter portal utp ticket", "handoff:ec-hrt"],
+    ["Is UTP down again?", "handoff:ec-hrt"],
+    ["Invoice UTP for the October work", "route:noisysource"],
     // No EC cue -> classifier decides.
+    ["What's the commission on this sale?", "none"],
+    ["Invoice the Commission for October", "none"],
     ["Send the KidClub invoices for October", "none"],
     ["What's my daughter's birthday?", "none"],
     ["Which invoices are unpaid?", "none"],
@@ -54,6 +66,13 @@ describe("precheck with the real contexts.md", () => {
   it("matches acronyms case-sensitively", () => {
     expect(outcome("tell the ec about it")).toBe("none");
     expect(outcome("tell the EC about it")).toBe("handoff:ec-hrt");
+    expect(outcome("casp")).toBe("none");
+    expect(outcome("is utp down?")).toBe("none");
+  });
+
+  it("doesn't match new cues inside other words", () => {
+    expect(outcome("The forecast predicts rain")).toBe("none"); // "cast" inside a word
+    expect(outcome("Cast the vote")).toBe("none"); // "cast" alone is not "Cast-p"
   });
 });
 
@@ -69,6 +88,12 @@ describe("makeCueMatcher", () => {
   it("ignores accents on both sides", () => {
     expect(makeCueMatcher("faturação")("faturacao")).toBe(true);
     expect(makeCueMatcher("faturacao")("faturação")).toBe(true);
+  });
+
+  it("lets a hyphen match a hyphen, whitespace or nothing", () => {
+    const matches = makeCueMatcher("Cast-p");
+    expect(["Cast-p", "Cast P", "CastP", "cast - p"].map(matches)).toEqual([true, true, true, true]);
+    expect(matches("Castle")).toBe(false);
   });
 
   it("treats regex characters in cues literally", () => {
