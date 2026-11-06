@@ -62,7 +62,7 @@ describe("makePersonalAnswerer", () => {
     const { llm, requests } = stubLlm();
     const answer = makePersonalAnswerer({ llm, profile: profileSource(), timeZone: "Europe/Lisbon" });
 
-    expect(await answer(input())).toEqual({ ok: true, value: "She's 9." });
+    expect(await answer(input())).toEqual({ ok: true, value: { kind: "answer", text: "She's 9." } });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.tools).toBeUndefined();
     expect(requests[0]?.effort).toBe("medium");

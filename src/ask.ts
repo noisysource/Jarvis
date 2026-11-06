@@ -10,6 +10,7 @@
 //   unclear  → clarify: which context? (answerable contexts only)
 //   handoff  → fixed handoff message; nothing else runs
 //   answer   → loadMemories → answer → wrapUp → answer response
+//              (or an `unavailable` reply, e.g. "not connected yet": no wrapUp)
 //
 // Logs carry the context id and outcome only, never the question or answer.
 
@@ -80,16 +81,22 @@ export const handleAsk = async (deps: Deps, request: AskRequest): Promise<AskRes
       return { type: "error", message: answer.error.message };
     }
 
+    if (answer.value.kind === "unavailable") {
+      // A normal reply, but nothing was answered, so there's nothing to wrap up.
+      deps.log.info("ask", { context: context.id, outcome: "unavailable" });
+      return { type: "unavailable", context: context.id, message: answer.value.message };
+    }
+
     // Awaited so it finishes before the response (Cloud Run may throttle CPU afterwards).
     await deps.memory.wrapUp({
       question: request.question,
       contextId: context.id,
-      answer: answer.value,
+      answer: answer.value.text,
       memoriesUsed: memories,
     });
 
     deps.log.info("ask", { context: context.id, outcome: "answer" });
-    return { type: "answer", context: context.id, answer: answer.value };
+    return { type: "answer", context: context.id, answer: answer.value.text };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.
     deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });

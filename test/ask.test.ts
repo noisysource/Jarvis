@@ -7,6 +7,7 @@ import { makePrecheck } from "../src/precheck.js";
 import { err, ok } from "../src/result.js";
 import type {
   AnswerInput,
+  AnswerOutcome,
   AppError,
   Classification,
   Context,
@@ -35,7 +36,7 @@ const memory: Memory = { id: "m1", contextId: id("personal"), text: "Daughter: I
 const makeDeps = (
   options: {
     classification?: Classification;
-    answer?: Result<string, AppError>;
+    answer?: Result<AnswerOutcome, AppError>;
     memory?: MemoryHooks;
     throwInClassify?: boolean;
   } = {},
@@ -68,7 +69,7 @@ const makeDeps = (
     answer: async (input) => {
       calls.push("answer");
       answerInputs.push(input);
-      return options.answer ?? ok("2 September.");
+      return options.answer ?? ok({ kind: "answer", text: "2 September." });
     },
     memory: hooks,
     now: () => NOW,
@@ -116,6 +117,23 @@ describe("answered contexts", () => {
       message: "Sorry, I can't help with that one.",
     });
     expect(calls).toEqual(["classify", "loadMemories", "answer"]);
+  });
+});
+
+describe("unavailable contexts", () => {
+  it("reply with an unavailable message, not an error, and skip the wrap-up", async () => {
+    const { deps, calls, logs } = makeDeps({
+      classification: { kind: "context", contextId: id("kidclub") },
+      answer: ok({ kind: "unavailable", message: "KidClub isn't connected yet, so I can't answer that one." }),
+    });
+
+    expect(await handleAsk(deps, { question: "Which invoices are unpaid?" })).toEqual({
+      type: "unavailable",
+      context: "kidclub",
+      message: "KidClub isn't connected yet, so I can't answer that one.",
+    });
+    expect(calls).toEqual(["classify", "loadMemories", "answer"]);
+    expect(logs).toContainEqual({ level: "info", message: "ask", fields: { context: "kidclub", outcome: "unavailable" } });
   });
 });
 

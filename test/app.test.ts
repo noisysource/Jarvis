@@ -142,16 +142,17 @@ describe("contexts that aren't connected in M0", () => {
   it.each([
     ["kidclub", "Which KidClub invoices are unpaid?", "KidClub isn't connected yet, so I can't answer that one."],
     ["noisysource", "How much did Noisy Source bill last quarter?", "Noisy Source isn't connected yet, so I can't answer that one."],
-  ])("%s replies that it isn't connected, with no answer-model call", async (context, question, message) => {
+  ])("%s replies that it isn't connected (unavailable, not an error), with no answer-model call", async (context, question, message) => {
     const { result, requests } = await build({ classifyAs: context });
-    expect(await ask(depsOf(result), { question })).toEqual({ type: "error", message });
+    expect(await ask(depsOf(result), { question })).toEqual({ type: "unavailable", context, message });
     expect(requests.map((r) => r.model)).toEqual([CLASSIFIER]);
   });
 
   it("EC invoicing goes to noisysource without any model call", async () => {
     const { result, requests } = await build();
     expect(await ask(depsOf(result), { question: "Invoice the European Commission for October" })).toEqual({
-      type: "error",
+      type: "unavailable",
+      context: "noisysource",
       message: "Noisy Source isn't connected yet, so I can't answer that one.",
     });
     expect(requests).toEqual([]);

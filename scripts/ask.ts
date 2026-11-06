@@ -60,4 +60,4 @@ console.error(dim(`asking ${formatModelRef(config.models.answer)} (personal, ${c
 
 const result = await answer({ context: personal, question, history: [], memories: [], now: new Date() });
 if (!result.ok) fail(`${result.error.code}: ${result.error.message}`);
-if (result.ok) console.log(result.value);
+if (result.ok) console.log(result.value.kind === "answer" ? result.value.text : result.value.message);
