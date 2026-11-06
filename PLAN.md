@@ -1,64 +1,85 @@
-# Jarvis — Plan & Architecture (v0)
+# Jarvis — Plan & Architecture
 
-Jarvis is a personal AI orchestrator. v0 is deliberately small: one HTTP endpoint
-that answers a question, routes it to **KidClub** (the business) or **personal**,
-asks which when it can't tell, and answers KidClub invoice questions with a
-read-only Vendus API tool.
+Jarvis is a personal AI orchestrator. It answers questions, works out which
+**context** a question belongs to (from `contexts.md`), asks when it can't
+tell, and answers each context with the data and tools listed for it.
 
-Work is tracked in GitHub Issues (label `jarvis-v0`) and the **Jarvis** project
-board (Backlog → To Do → In Progress → Review → Done). Every PR closes an issue.
+Work is tracked in GitHub Issues and the **Jarvis** project board
+(Backlog → To Do → In Progress → Review → Done). Every PR closes an issue.
 
-## Request flow
+## Milestones
+
+| Milestone | Goal | Label |
+|---|---|---|
+| **M0: talk to Jarvis** | Chat page with voice, run locally; answers questions about you from your profile | `m0` |
+| v0: KidClub invoices | Read-only Vendus tool; Cloud Run deploy | `after-m0`, `jarvis-v0` |
+| After v0 | Memory in Firestore (#24), phone access (#19) | `after-v0`, `backlog` |
+
+## Contexts
+
+Defined in `contexts.md` (#22) and read at startup. Adding a context is a file
+edit, not a code change.
+
+| Context | Handling | Data |
+|---|---|---|
+| `personal` | answer | Your profile, `data/profile.md` (#25) |
+| `kidclub` | answer | Vendus, read-only (after M0; "not connected yet" in M0) |
+| `noisysource` | answer | None connected yet. **Invoicing the European Commission belongs here.** |
+| `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
+
+## Request flow (M0)
 
 ```
-POST /ask { question, domain? }
-   │
-   ├─ domain given? ──yes──────────────────────────┐
-   │                                               │
-   └─ no → classify(question) → kidclub | personal | unclear
-                                    │        │         │
-                                    │        │         └─► { type: "clarify",
-                                    │        │               message: "Is this about KidClub or something personal?",
-                                    │        │               options: ["kidclub","personal"] }
-                                    ▼        ▼
-                         answerKidClub   answerPersonal
-                         (Claude + Vendus  (Claude, no tools)
-                          read-only tools)
-                                    │
-                                    └─► { type: "answer", domain, answer }
+Chat page (GET /)                         Hono server (npm run dev, localhost)
+ ├ text box / mic (SpeechRecognition)      POST /ask { question, context?, history[] }
+ ├ history[] in page memory only   ───────►  classify(question, history)   ← contexts.md
+ └ speaks answer (speechSynthesis) ◄───────  ├ unclear     → clarify (context buttons)
+                                             ├ ec-hrt      → handoff: "This is for Kiro" (nothing else runs)
+                                             ├ kidclub /
+                                             │ noisysource → "not connected yet" (M0)
+                                             └ personal    → loadMemories (stub)
+                                                             → answer model: instructions + profile + history
+                                                             → wrapUp (stub)
 ```
 
-The service is **stateless**: after a clarify response, the client re-sends the
-same question with `domain` set. No session store, no sticky instances.
+The server is **stateless**: the page sends the conversation with each
+question, and after a clarify response it re-sends the question with
+`context` set.
 
 ## Principles
 
 - **Pure functions and types, no classes.** Enforced by lint. Dependencies
-  (LLM calls, Vendus GET, clock) are passed in as plain `Deps` objects so all
-  core logic is unit-testable with stubs. Library-provided objects (Anthropic
-  SDK client, Secret Manager client) are consumed, never defined.
-- **Never guess the domain.** Ambiguous → ask.
+  are passed in as plain `Deps` objects so core logic is unit-testable with
+  stubs. Library objects (Anthropic SDK client, Secret Manager client) are
+  consumed, never defined.
+- **Never guess the context.** Ambiguous → ask.
+- **Never guess facts about you.** If the profile doesn't say, Jarvis says so.
 - **Read-only by construction** for Vendus: the client only exposes `GET`, and
   paths are checked against an allowlist before any network call.
-- **Secrets only from Secret Manager**, fetched once per process, never logged.
+- **Secrets:** Secret Manager in the cloud. Locally only, `ANTHROPIC_API_KEY`
+  may come from a gitignored `.env`. Never logged, never committed. The
+  profile is treated the same way.
 
 ## Module layout
 
 | File | Responsibility | Issue |
 |---|---|---|
-| `src/types.ts` | Domain, AskRequest, AskResponse (discriminated union), Deps | #4 |
+| `src/result.ts` | `Result<T, E>` with `ok` / `err` | #4 |
+| `src/types.ts` | `ContextId`, `Context`, `Turn`, `AskRequest`, `AskResponse`, `Classification`, `Memory`, `MemoryHooks`, `AppError`, `Deps` | #4 |
+| `src/contexts.ts` | `parseContexts(markdown)` for `contexts.md` | #22 |
 | `src/config.ts` | `loadConfig(env)`: pure, zod-validated | #5 |
-| `src/secrets.ts` | Secret Manager access, memoised | #6 |
-| `src/llm/types.ts` | Provider-neutral types: `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
+| `src/secrets.ts` | Secret Manager access, memoised; local `.env` fallback outside production | #6 |
+| `src/profile.ts` | `ProfileSource`; file source now, secret/bucket later | #25 |
+| `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
 | `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
-| `src/classify.ts` | `classify(deps, q) → kidclub \| personal \| unclear` | #11 |
-| `src/vendus/client.ts` | GET-only client with path allowlist | #8 |
-| `src/vendus/tools.ts` | `list_invoices`, `get_invoice` with trimmed output | #9 |
-| `src/answer/kidclub.ts` | Claude + Vendus tool loop (≤ 5 rounds) | #12 |
-| `src/answer/personal.ts` | Claude, no tools | #13 |
-| `src/ask.ts` | `handleAsk(deps, req)`: orchestration entry point | #14 |
-| `src/server.ts` | Hono: `POST /ask`, `GET /healthz`, validation, logging | #15 |
+| `src/classify.ts` | `classify(deps, question, history) → Classification` | #11 |
+| `src/answer/personal.ts` | Answer model + profile, no tools | #13, #26 |
+| `src/memory.ts` | Memory hook stubs | #23 |
+| `src/ask.ts` | `handleAsk(deps, req)`: orchestration entry point | #14, #26 |
+| `src/server.ts` | Hono: `POST /ask`, `GET /healthz`, `GET /` | #15, #27 |
+| `src/web/` | Chat page: `index.html`, `app.js` | #27 |
+| `src/vendus/*`, `src/answer/kidclub.ts` | Vendus client, tools, KidClub answerer | #7–#9, #12 (after M0) |
 
 ## Components
 
@@ -71,65 +92,83 @@ type LlmCall = (req: LlmRequest) => Promise<Result<LlmResponse, LlmError>>;
 // LlmResponse: { kind: "text", text } | { kind: "tool_calls", calls } | { kind: "json", value }
 ```
 
-Each provider is a module that exports a factory `(apiKey, model) => LlmCall`
-(pure functions, no classes). Models are picked by config as
-`provider:model` strings, one per role:
+Each provider is a module that exports a factory `(apiKey, model) => LlmCall`.
+Models are picked by config as `provider:model` strings, one per role:
 
 - Classifier: `CLASSIFIER_MODEL=anthropic:claude-haiku-5-5`, effort `low`
 - Answers: `ANSWER_MODEL=anthropic:claude-sonnet-5-5`, effort `medium`
 
 Adding Gemini or Grok later means adding one provider module and its API-key
-secret, then changing those env vars; nothing else changes. Because of that,
-the KidClub tool loop is written in our own code over `LlmCall` rather than
-using a vendor SDK's tool runner.
+secret, then changing those env vars. The KidClub tool loop is our own code
+over `LlmCall`, not a vendor tool runner.
 
 Anthropic provider: official `@anthropic-ai/sdk`; checks `stop_reason` before
 reading content; turns `refusal` / `max_tokens` into typed errors. Sonnet calls
-use the server-side refusal fallback (`fallbacks: "default"`); Haiku has no
-server-side fallback, so a refused classification simply becomes `unclear`.
+use the server-side refusal fallback (`fallbacks: "default"`); Haiku has none,
+so a refused classification becomes `unclear`.
 
-**Vendus.** Assumed base URL `https://www.vendus.pt/ws/v1.1/` with the API key
-as HTTP Basic username. **To be verified in #7 before #8.** Tools return compact
-summaries (number, date, client, totals, status), not raw payloads. If Vendus
-supports it, use a dedicated read-only API user as a second safety layer.
+**Profile (M0).** `data/profile.md` is gitignored; `data/profile.example.md`
+is committed. Loaded through `ProfileSource` (`PROFILE_SOURCE=file:…` now;
+Secret Manager or a private bucket in the cloud later). The server refuses to
+start without a profile. Only the `personal` answerer sees it.
 
-**Secrets & config.** Secret Manager: `vendus-api-key`, `anthropic-api-key`
-(one API-key secret per model provider in use). The Cloud Run service account
-gets `roles/secretmanager.secretAccessor` on those secrets only. Non-secret env:
-`GOOGLE_CLOUD_PROJECT`, `VENDUS_SECRET_NAME`, `ANTHROPIC_SECRET_NAME`, `PORT`,
-`CLASSIFIER_MODEL`, `ANSWER_MODEL`.
+**Chat page (M0).** One HTML page and one JS file served by Hono, no build
+step, no external scripts. Browser speech recognition and synthesis; English
+by default with a `pt-PT` toggle. Conversation history lives only in the page.
 
-**Deployment.** Node 22, multi-stage Dockerfile, non-root (#17). Cloud Run in
-`europe-southwest1` (Madrid) with `--no-allow-unauthenticated`, so it's
-callable only by IAM identities (#18). Phone access (Siri Shortcut, messaging
-bots) needs its own auth method and is tracked separately in the backlog.
+**Vendus (after M0).** Assumed base URL `https://www.vendus.pt/ws/v1.1/` with
+the API key as HTTP Basic username, to be verified in #7 before #8. Tools
+return compact summaries, not raw payloads.
 
-**Quality.** Vitest unit tests with stubbed deps; CI runs lint, typecheck and
-tests on every PR (#3). Local stub mode for trying it without keys (#16).
+**Secrets & config.** Secret Manager: `anthropic-api-key`, later
+`vendus-api-key`. The Cloud Run service account gets
+`roles/secretmanager.secretAccessor` on those secrets only. Non-secret env:
+`GOOGLE_CLOUD_PROJECT`, `ANTHROPIC_SECRET_NAME`, `VENDUS_SECRET_NAME`, `PORT`,
+`CLASSIFIER_MODEL`, `ANSWER_MODEL`, `PROFILE_SOURCE`.
+
+**Deployment (after M0).** Node 22, multi-stage Dockerfile, non-root (#17).
+Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
+(#18). Phone access (Siri Shortcut, messaging bots) is #19.
+
+**Quality.** Vitest unit tests with stubbed deps; CI runs lint, typecheck,
+tests and build on every PR.
 
 ## Build order
 
-1. #1 decisions · #2 scaffold · #3 CI
-2. #4 types · #5 config · #6 secrets · #10 llm
-3. #7 Vendus spike → #8 client → #9 tools
-4. #11 classify · #12 KidClub answerer · #13 personal answerer
-5. #14 ask handler → #15 server → #16 stub dev mode
-6. #17 Dockerfile → #18 deploy guide
+Done: #1 decisions · #2 scaffold · #3 CI
+
+**M0: talk to Jarvis** (one PR per issue)
+1. #4 types → #22 contexts.md → #5 config → #6 secrets (+ local `.env`)
+2. #10 LLM interface → #25 profile → #11 classifier → #13 personal answerer
+3. #23 memory hook stubs → #14 ask handler → #26 M0 ask flow
+4. #15 server → #27 chat page with voice
+
+**After M0:** #7 Vendus spike → #8 client → #9 tools → #12 KidClub answerer;
+#17 Dockerfile → #18 Cloud Run deploy guide.
 
 ## Decisions
 
 Confirmed in #1 (2026-11-05):
 
 - **Models:** Claude Haiku (`claude-haiku-5-5`) for the classifier, Claude
-  Sonnet (`claude-sonnet-5-5`) for answers, both behind the provider interface
-  so other providers (e.g. Gemini, Grok) are a config change.
-- **Endpoint auth:** Cloud Run IAM only for now. Phone access (Siri Shortcut,
-  messaging bots) and its auth method are a backlog item.
+  Sonnet (`claude-sonnet-5-5`) for answers, both behind the provider interface.
+- **Endpoint auth:** Cloud Run IAM only for now; phone access is #19.
 - **GCP region:** `europe-southwest1` (Madrid).
-- **Secret names:** `vendus-api-key`, `anthropic-api-key`.
-- **Everything else** in this plan and in the v0 issues is approved as written.
+- **Secret names:** `anthropic-api-key`, `vendus-api-key`.
 
-## Out of scope for v0
+Confirmed for M0 (2026-11-06):
 
-Conversation memory, personal data tools (Gmail, Drive, calendar), any writes
-to Vendus, a chat UI, phone access via Siri Shortcut or messaging bots (#19).
+- **M0 before Vendus:** a local chat POC that answers questions about you
+  from your profile comes first; Vendus and Cloud Run follow.
+- **Local key:** `ANTHROPIC_API_KEY` may come from a gitignored `.env` for
+  local dev only; the cloud uses Secret Manager.
+- **Speech:** English by default, `pt-PT` toggle.
+- **Missing profile:** the server refuses to start.
+- **Contexts:** `noisysource` added (owns invoicing the European Commission);
+  `ec-hrt` (European Commission / HRT) is a handoff to Kiro, the EC's agent,
+  with no tools and no memory.
+
+## Out of scope for M0
+
+Vendus, Cloud Run deployment, real memory (#24), personal data tools (Gmail,
+Drive, calendar), phone access (#19).
