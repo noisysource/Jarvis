@@ -41,3 +41,15 @@ doesn't say" for the second list. No guessing.
 | What's the capital of Australia? | Canberra |
 | What day of the week is it? | The weekday from the prompt's "Now" line |
 | How many days until Christmas? | Counted from today's date |
+| What's on my plate today? | Says it can't see your calendar or tasks yet (daily brief is #49); may mention a profile routine for today, e.g. the gym on Mon/Wed/Fri; never invents plans |
+
+## Chatting: warm, not form-like
+
+| Question | Expected |
+|---|---|
+| Hello | Greets back and offers to help, in a sentence or two |
+| Thanks! | Acknowledges warmly, maybe offers more help; no lecture |
+| How are things going? | A friendly, natural reply, not a menu of options |
+| Can you book me a table for Friday? | Says it can't do that yet; never claims to have done it |
+| Help me prepare the UTP standup | Never reaches the model: the precheck hands off to Kiro |
+| What's my blood type? | Still a plain "your profile doesn't say", however chatty |

@@ -17,6 +17,7 @@ const FIELD_KEYS = [
   "handoff to",
   "recognition cues",
   "unless",
+  "aliases",
 ] as const;
 type FieldKey = (typeof FIELD_KEYS)[number];
 const REPEATABLE: readonly FieldKey[] = ["unless"];
@@ -136,6 +137,8 @@ const draftContext = (section: Section): { draft?: Draft; errors: string[] } => 
     errors.push(`${where}: unknown tool(s) ${unknownTools.join(", ")} (known: ${KNOWN_TOOLS.join(", ")})`);
   }
   const tools = toolNames.filter((t): t is ToolName => (KNOWN_TOOLS as readonly string[]).includes(t));
+  const aliases = parseList(single(section, "aliases") ?? "");
+  const withAliases = aliases.length > 0 ? { aliases } : {};
 
   const handlingRaw = (single(section, "handling") ?? "answer").toLowerCase();
   const handoffTo = single(section, "handoff to");
@@ -169,7 +172,7 @@ const draftContext = (section: Section): { draft?: Draft; errors: string[] } => 
           errors,
           draft: {
             section,
-            context: { id: asContextId(section.id), name, description, data, tools },
+            context: { id: asContextId(section.id), name, description, data, tools, ...withAliases },
             handling: { kind: "handoff", to: handoffTo ?? "", cues, unless },
           },
         };
@@ -185,7 +188,7 @@ const draftContext = (section: Section): { draft?: Draft; errors: string[] } => 
         errors,
         draft: {
           section,
-          context: { id: asContextId(section.id), name, description, data, tools },
+          context: { id: asContextId(section.id), name, description, data, tools, ...withAliases },
           handling: { kind: "answer" },
         },
       };
@@ -260,7 +263,9 @@ export const describeContexts = (contexts: readonly Context[]): string =>
 
 /** Options for a clarify response. Handoff contexts are never offered. */
 export const clarifyOptions = (contexts: readonly Context[]): readonly ContextOption[] =>
-  contexts.filter((c) => c.handling.kind === "answer").map((c) => ({ id: c.id, name: c.name }));
+  contexts
+    .filter((c) => c.handling.kind === "answer")
+    .map((c) => ({ id: c.id, name: c.name, ...(c.aliases && c.aliases.length > 0 ? { aliases: c.aliases } : {}) }));
 
 /** The fixed reply for a handoff context. */
 export const handoffMessage = (context: Context): string =>

@@ -17,6 +17,7 @@ import { handleAsk } from "./ask.js";
 import { withLogFields } from "./log.js";
 import { parseAskRequest } from "./request.js";
 import type { Deps } from "./types.js";
+import { WEB_SECURITY_HEADERS, type WebAssets } from "./web.js";
 
 /** Enough for a 2000-char question plus 20 turns of 4000 chars, with room for JSON overhead. */
 export const MAX_BODY_BYTES = 256 * 1024;
@@ -37,6 +38,8 @@ export const makeServer = (
     readonly newRequestId?: () => string;
     /** Accepted Host headers (case-insensitive). Unset = no Host check (production, behind Cloud Run IAM). */
     readonly allowedHosts?: readonly string[];
+    /** The chat page's files, served at their paths (e.g. "/", "/app.js"). */
+    readonly web?: WebAssets;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -76,6 +79,14 @@ export const makeServer = (
   }
 
   app.get("/healthz", (c) => c.json({ status: "ok" }));
+
+  for (const [path, asset] of Object.entries(options.web ?? {})) {
+    app.get(path, (c) => {
+      for (const [name, value] of Object.entries(WEB_SECURITY_HEADERS)) c.header(name, value);
+      c.header("Content-Type", asset.contentType);
+      return c.body(asset.body);
+    });
+  }
 
   app.post(
     "/ask",

@@ -1,23 +1,102 @@
 {
   "_note": "Expected contexts for example questions. Unit tests check every case that the local precheck decides; `npm run eval:classifier` runs all of them against the real classifier model.",
   "cases": [
-    { "question": "When is my daughter's birthday?", "expected": "personal" },
-    { "question": "What's my doctor's name?", "expected": "personal" },
-    { "question": "When does my passport expire?", "expected": "personal" },
-    { "question": "Which day do I go to the gym?", "expected": "personal" },
-    { "question": "How many KidClub invoices are still unpaid?", "expected": "kidclub" },
-    { "question": "Which KidClub clients paid this month?", "expected": "kidclub" },
-    { "question": "Who's on staff at KidClub on Saturday?", "expected": "kidclub" },
-    { "question": "How much did Noisy Source bill last quarter?", "expected": "noisysource" },
-    { "question": "Invoice the European Commission for October", "expected": "noisysource", "precheck": true },
-    { "question": "Bill EPSO for the October workshop", "expected": "noisysource", "precheck": true },
-    { "question": "Invoice the Commission for October", "expected": "noisysource" },
-    { "question": "Summarise the HRT steering meeting", "expected": "ec-hrt", "precheck": true },
-    { "question": "Is CASP down again?", "expected": "ec-hrt", "precheck": true },
-    { "question": "Open the Recruiter Portal UTP ticket", "expected": "ec-hrt", "precheck": true },
-    { "question": "What did the Commission team decide about the new recruitment workflow?", "expected": "ec-hrt" },
-    { "question": "How are things going?", "expected": "unclear" },
-    { "question": "Did the invoice get paid?", "expected": "unclear" },
-    { "question": "What's on my plate today?", "expected": "unclear" }
+    {
+      "question": "When is my daughter's birthday?",
+      "expected": "personal"
+    },
+    {
+      "question": "What's my doctor's name?",
+      "expected": "personal"
+    },
+    {
+      "question": "When does my passport expire?",
+      "expected": "personal"
+    },
+    {
+      "question": "Which day do I go to the gym?",
+      "expected": "personal"
+    },
+    {
+      "question": "How many KidClub invoices are still unpaid?",
+      "expected": "kidclub"
+    },
+    {
+      "question": "Which KidClub clients paid this month?",
+      "expected": "kidclub"
+    },
+    {
+      "question": "Who's on staff at KidClub on Saturday?",
+      "expected": "kidclub"
+    },
+    {
+      "question": "How much did Noisy Source bill last quarter?",
+      "expected": "noisysource"
+    },
+    {
+      "question": "Invoice the European Commission for October",
+      "expected": "noisysource",
+      "precheck": true
+    },
+    {
+      "question": "Bill EPSO for the October workshop",
+      "expected": "noisysource",
+      "precheck": true
+    },
+    {
+      "question": "Invoice the Commission for October",
+      "expected": "noisysource"
+    },
+    {
+      "question": "Summarise the HRT steering meeting",
+      "expected": "ec-hrt",
+      "precheck": true
+    },
+    {
+      "question": "Is CASP down again?",
+      "expected": "ec-hrt",
+      "precheck": true
+    },
+    {
+      "question": "Open the Recruiter Portal UTP ticket",
+      "expected": "ec-hrt",
+      "precheck": true
+    },
+    {
+      "question": "What did the Commission team decide about the new recruitment workflow?",
+      "expected": "ec-hrt"
+    },
+    {
+      "question": "Hello",
+      "expected": "personal"
+    },
+    {
+      "question": "How are things going?",
+      "expected": "personal"
+    },
+    {
+      "question": "Thanks!",
+      "expected": "personal"
+    },
+    {
+      "question": "What can you do?",
+      "expected": "personal"
+    },
+    {
+      "question": "What's the capital of Australia?",
+      "expected": "personal"
+    },
+    {
+      "question": "Did the invoice get paid?",
+      "expected": "unclear"
+    },
+    {
+      "question": "Check the invoices",
+      "expected": "unclear"
+    },
+    {
+      "question": "What's on my plate today?",
+      "expected": "personal"
+    }
   ]
 }

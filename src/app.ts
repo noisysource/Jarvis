@@ -16,7 +16,7 @@ import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
 import { err, ok, type Result } from "./result.js";
 import { makeGcpSecretAccess, makeSecretGetter, resolveAnthropicKey } from "./secrets.js";
-import type { Deps, Logger } from "./types.js";
+import type { Context, Deps, Logger } from "./types.js";
 
 export type AppInputs = {
   readonly config: Config;
@@ -28,6 +28,19 @@ export type AppInputs = {
   readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys) => Result<LlmCall, string>;
   readonly now?: () => Date;
 };
+
+/** "What Jarvis can do", from contexts.md and which contexts have an answerer. */
+export const capabilitiesText = (contexts: readonly Context[], answered: ReadonlySet<string>): string =>
+  [
+    "Jarvis can help with:",
+    ...contexts.map((c) => {
+      if (c.handling.kind === "handoff") return `- ${c.name}: not handled by Jarvis; those requests go to ${c.handling.to}.`;
+      if (answered.has(c.id)) return `- ${c.name}: ${c.description} (answered from: ${c.data})`;
+      return `- ${c.name}: not connected yet, so Jarvis can't answer these questions yet.`;
+    }),
+    "- General questions and conversation.",
+    "You can type or speak, and answers are read aloud in English or Portuguese.",
+  ].join("\n");
 
 export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>> => {
   const { config, env, log } = inputs;
@@ -65,7 +78,13 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     precheck: makePrecheck(contexts.value),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log }),
     answer: makeAnswerRouter({
-      personal: makePersonalAnswerer({ llm: answerLlm.value, profile, timeZone: config.timeZone, log }),
+      personal: makePersonalAnswerer({
+        llm: answerLlm.value,
+        profile,
+        timeZone: config.timeZone,
+        capabilities: capabilitiesText(contexts.value, new Set(["personal"])),
+        log,
+      }),
     }),
     memory: makeSafeMemoryHooks(stubMemoryHooks, { log }),
     now: inputs.now ?? (() => new Date()),

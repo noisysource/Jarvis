@@ -146,6 +146,29 @@ describe("classifier request", () => {
     expect(system).toContain("including invoicing and billing the European Commission");
   });
 
+  it("sends anything needing no context's data to personal, and clarifies only on ambiguous data requests", () => {
+    const system = classifierSystemPrompt(contexts);
+    expect(system).toContain(
+      `If it needs no context's data, reply "personal". That covers greetings, small talk, thanks, general-knowledge questions and questions about Jarvis itself`,
+    );
+    expect(system).toContain(
+      `Reply "unclear" only when the question needs some context's data and it's ambiguous which`,
+    );
+    expect(system).not.toContain("Pick a context only when the question clearly belongs to it");
+  });
+
+  it("sends questions about their own day, schedule or to-dos to personal", () => {
+    expect(classifierSystemPrompt(contexts)).toContain(
+      `Questions about their own day, schedule, calendar, agenda or to-dos are "personal" too (e.g. "what's on my plate today?"`,
+    );
+  });
+
+  it("leaves the default rule out when there's no personal context", () => {
+    const others = contexts.filter((c) => c.id !== "personal");
+    expect(classifierSystemPrompt(others)).not.toContain("If it needs no context's data");
+    expect(classifierSystemPrompt(others)).not.toContain("Questions about their own day");
+  });
+
   it("includes only the last few turns of history", () => {
     const history: Turn[] = Array.from({ length: 10 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "assistant",

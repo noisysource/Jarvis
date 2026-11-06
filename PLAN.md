@@ -13,7 +13,7 @@ Work is tracked in GitHub Issues and the **Jarvis** project board
 |---|---|---|
 | **M0: talk to Jarvis** | Chat page with voice, run locally; answers questions about you from your profile | `m0` |
 | v0: KidClub invoices | Read-only Vendus tool; Cloud Run deploy | `after-m0`, `jarvis-v0` |
-| After v0 | Memory in Firestore (#24), phone access (#19) | `after-v0`, `backlog` |
+| After v0 | Memory in Firestore (#24), phone access (#19), daily brief (#49) | `after-v0`, `backlog` |
 
 ## Contexts
 
@@ -26,6 +26,18 @@ edit, not a code change.
 | `kidclub` | answer | Vendus, read-only (after M0; "not connected yet" in M0) |
 | `noisysource` | answer | None connected yet. **Invoicing the European Commission belongs here.** |
 | `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
+
+**Routing rule.** Anything that needs no context's data (greetings, small
+talk, thanks, general knowledge, questions about Jarvis) goes to `personal`
+and is answered normally. So do questions about your own day, schedule or
+to-dos ("what's on my plate today?"): until the daily brief (#49) exists,
+Jarvis says honestly that it can't see your calendar or tasks yet. Jarvis asks "which context?" only when a request
+needs some context's data and it's ambiguous which ("did the invoice get
+paid?"). The personal answerer knows what Jarvis can do, from `contexts.md`. After
+a clarify, the page treats a reply that names an offered context (name, id
+or `Aliases` from `contexts.md`; case, accents and spacing ignored) as
+picking it, with no model call; anything else is a new question. Only one
+request is in flight at a time.
 
 **Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
 "European Commission", "EC", "HRT", "EPSO", "CASP", "UTP", "Cast-p", "Recruiter
@@ -108,7 +120,8 @@ question, and after a clarify response it re-sends the question with
 | `src/server.ts` | Hono: `POST /ask` (validated, 256 KB limit), `GET /healthz`, request ids, JSON 404/500 | #15 |
 | `src/main.ts` | Entry point: config → `buildDeps` (refuse to start on problems) → serve → graceful shutdown | #15 |
 | `src/log.ts` | JSON-lines logger with Cloud Logging `severity` | #15 |
-| `src/web/` | Chat page: `index.html`, `app.js` | #27 |
+| `src/web/` | Chat page, served as-is: `index.html`, `app.css`, `app.js` (DOM + Web Speech), `chat.js` (pure, tested) | #27 |
+| `src/web.ts` | Loads the page files at startup; strict CSP and mic-only Permissions-Policy | #27 |
 | `src/vendus/*`, `src/answer/kidclub.ts` | Vendus client, tools, KidClub answerer | #7–#9, #12 (after M0) |
 
 ## Components
@@ -144,7 +157,17 @@ start without a profile. Only the `personal` answerer sees it.
 
 **Chat page (M0).** One HTML page and one JS file served by Hono, no build
 step, no external scripts. Browser speech recognition and synthesis; English
-by default with a `pt-PT` toggle. Conversation history lives only in the page.
+by default with a `pt-PT` toggle. The voice is picked automatically (exact
+region first, then Premium > Enhanced > Natural/Neural/Online, then the system
+default), with a voice menu whose choice is remembered per language in
+localStorage. Conversation history lives only in the page.
+
+**Personality (M0).** The personal answerer is warm, natural and a little
+conversational: it greets back or acknowledges and adds a sentence of context
+or an offer to help when chatting, answers factual questions first and
+briefly, and uses a natural spoken length, usually short. The hard rules stay:
+no invented personal facts, EC/HRT goes to Kiro, nothing done without the
+user's OK.
 
 **Vendus (after M0).** Assumed base URL `https://www.vendus.pt/ws/v1.1/` with
 the API key as HTTP Basic username, to be verified in #7 before #8. Tools
@@ -206,7 +229,10 @@ Confirmed for M0 (2026-11-06):
   from your profile comes first; Vendus and Cloud Run follow.
 - **Local key:** `ANTHROPIC_API_KEY` may come from a gitignored `.env` for
   local dev only; the cloud uses Secret Manager.
-- **Speech:** English by default, `pt-PT` toggle.
+- **Speech:** English by default, `pt-PT` toggle; best installed voice by
+  default, with a remembered voice menu (#48).
+- **Personality:** warm and conversational, natural spoken length instead of
+  a sentence limit (#48).
 - **Missing profile:** the server refuses to start.
 - **Contexts:** `noisysource` added (owns invoicing the European Commission);
   `ec-hrt` (European Commission / HRT) is a handoff to Kiro, the EC's agent,

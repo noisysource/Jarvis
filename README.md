@@ -64,6 +64,20 @@ Requires Node 22.12 or later.
    npm run dev
    ```
 
+   Then open **http://localhost:8080** for the chat page: type, or press
+   🎤 Speak and talk (Chrome or Safari; the browser asks for microphone
+   access the first time). Answers are read aloud; 🔊 mutes them, and the
+   language menu switches speech between English and Português (pt-PT).
+   The voice menu defaults to "Automatic", the best installed voice for that
+   language (Premium, then Enhanced, then Natural/Neural ones); pick another
+   and it's remembered per language. On a Mac, better voices are under
+   System Settings → Accessibility → Spoken Content → System voice → Manage
+   Voices; reload the page after downloading one.
+   When Jarvis asks which context you mean, tap a button or just type or
+   say its name ("kid club", "pessoal"). The conversation lives only in
+   the page: reload or "New conversation" clears it. Chrome's speech recognition sends audio to Google's speech
+   service and Safari's to Apple's; Jarvis itself uses no other services.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding

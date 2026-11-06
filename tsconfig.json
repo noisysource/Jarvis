@@ -13,7 +13,10 @@
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true
   },
-  "include": ["src", "test", "scripts", "*.config.ts"]
+  "include": ["src", "test", "scripts", "*.config.ts"],
+  "exclude": ["src/web/app.js"]
 }

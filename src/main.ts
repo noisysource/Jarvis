@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { formatModelRef } from "./llm/model-ref.js";
 import { makeJsonLogger } from "./log.js";
 import { localHosts, makeServer } from "./server.js";
+import { loadWebAssets } from "./web.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -27,8 +28,11 @@ const deps = await buildDeps({ config: cfg, env: process.env, log });
 if (!deps.ok) refuse(deps.error);
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
+const web = await loadWebAssets();
+if (!web.ok) refuse(web.error);
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
+  web: web.ok ? web.value : refuse("unreachable"),
 });
 
 const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (info) => {
