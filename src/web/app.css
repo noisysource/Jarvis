@@ -202,6 +202,48 @@ button[type="submit"] {
   border-color: var(--accent);
 }
 
+.listening {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.6rem;
+  background: var(--error);
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.listening[hidden] {
+  display: none;
+}
+
+.listening .dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listening .dot {
+    animation: none;
+  }
+}
+
 button[aria-pressed="true"]#mic {
   background: var(--error);
   color: var(--error-text);

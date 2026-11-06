@@ -73,6 +73,13 @@ Requires Node 22.12 or later.
    and it's remembered per language. On a Mac, better voices are under
    System Settings → Accessibility → Spoken Content → System voice → Manage
    Voices; reload the page after downloading one.
+   **Conversation mode** (💬, on by default): once you've asked something by
+   voice, the mic reopens by itself after Jarvis finishes speaking, and a red
+   "Listening" banner shows while it's open. It never listens while Jarvis is
+   talking. It stops after about 8 seconds of silence, when you say "that's
+   all", "stop", "obrigado" or "é tudo", or when you tap ■ Stop. Typed
+   questions never open the mic. If the browser won't reopen the mic without a
+   tap, a note says so and you use 🎤 Speak as usual.
    When Jarvis asks which context you mean, tap a button or just type or
    say its name ("kid club", "pessoal"). The conversation lives only in
    the page: reload or "New conversation" clears it. Chrome's speech recognition sends audio to Google's speech

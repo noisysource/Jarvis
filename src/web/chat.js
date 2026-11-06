@@ -185,3 +185,59 @@ export const pickVoice = (voices, speechLang, preferredName) => {
 
 /** localStorage key for the chosen voice, per language. @param {"en" | "pt"} language */
 export const voiceKey = (language) => `jarvis.voice.${language}`;
+
+/** Conversation mode timings. */
+export const CONVERSATION = {
+  /** Stop listening after this long without hearing anything. */
+  silenceMs: 8000,
+  /** Pause between the end of Jarvis's speech and reopening the mic, so the tail of the audio isn't heard. */
+  reopenDelayMs: 400,
+};
+
+/** Whole utterances that end conversation mode (compared as normalised words). */
+const STOP_PHRASES = new Set(
+  [
+    "that's all",
+    "that is all",
+    "stop",
+    "stop listening",
+    "obrigado",
+    "obrigada",
+    "muito obrigado",
+    "muito obrigada",
+    "é tudo",
+  ].map((p) => nameWords(p).join(" ")),
+);
+
+/** Polite words around a stop phrase ("thanks, that's all", "obrigado, é tudo", "Jarvis, stop"). */
+const STOP_FILLERS = new Set(["ok", "okay", "jarvis", "thanks", "thank", "you", "please", "obrigado", "obrigada", "muito", "pronto"]);
+
+/**
+ * Is this spoken reply a request to stop listening? Only the whole utterance
+ * counts, so "stop the music" is a question, not a stop.
+ * @param {string} text
+ */
+export const isStopPhrase = (text) => {
+  const words = nameWords(text);
+  if (STOP_PHRASES.has(words.join(" "))) return true;
+  while (words.length > 0 && STOP_FILLERS.has(words[0] ?? "")) words.shift();
+  while (words.length > 0 && STOP_FILLERS.has(words[words.length - 1] ?? "")) words.pop();
+  return words.length > 0 && STOP_PHRASES.has(words.join(" "));
+};
+
+/**
+ * Should the mic reopen by itself after this reply? Only in conversation mode,
+ * during a spoken conversation, when the browser allows it, and not after an
+ * error (errors aren't spoken).
+ * @param {{ conversation: boolean, voiceSession: boolean, blocked: boolean, available: boolean, kind: ReplyView["kind"] }} s
+ */
+export const shouldReopenMic = ({ conversation, voiceSession, blocked, available, kind }) =>
+  conversation && voiceSession && !blocked && available && kind !== "error";
+
+/**
+ * The browser ended recognition with nothing heard (Chrome gives up after a
+ * few seconds). Keep listening if the silence window isn't over yet.
+ * @param {{ elapsedMs: number, heard: boolean, stopped: boolean }} s
+ */
+export const keepListening = ({ elapsedMs, heard, stopped }) =>
+  !stopped && !heard && elapsedMs < CONVERSATION.silenceMs;

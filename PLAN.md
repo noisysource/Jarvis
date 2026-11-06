@@ -162,6 +162,15 @@ region first, then Premium > Enhanced > Natural/Neural/Online, then the system
 default), with a voice menu whose choice is remembered per language in
 localStorage. Conversation history lives only in the page.
 
+**Conversation mode (M0, #51).** A toggle, on by default and remembered. In a
+spoken conversation the mic reopens about 0.4 s after speech synthesis
+finishes (never during; right away if muted). It closes after ~8 s of silence
+(resuming if the browser gives up sooner), on a whole-utterance stop phrase
+("that's all", "stop", "obrigado", "é tudo" and small variants; not sent to
+the server), or on the Stop tap. Typing ends the spoken conversation. If the
+browser refuses an automatic start (`not-allowed`, or `start()` throws), it's
+paused for the page and the normal mic button remains, with a note.
+
 **Personality (M0).** The personal answerer is warm, natural and a little
 conversational: it greets back or acknowledges and adds a sentence of context
 or an offer to help when chatting, answers factual questions first and
@@ -231,6 +240,8 @@ Confirmed for M0 (2026-11-06):
   local dev only; the cloud uses Secret Manager.
 - **Speech:** English by default, `pt-PT` toggle; best installed voice by
   default, with a remembered voice menu (#48).
+- **Conversation mode:** on by default; the mic reopens after Jarvis speaks,
+  stops on ~8 s silence, a stop phrase or a tap (#51).
 - **Personality:** warm and conversational, natural spoken length instead of
   a sentence limit (#48).
 - **Missing profile:** the server refuses to start.

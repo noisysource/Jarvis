@@ -22,6 +22,7 @@
           <span class="visually-hidden">Voice</span>
           <select id="voice" aria-label="Voice"></select>
         </label>
+        <button id="conversation" type="button" aria-pressed="true" title="After Jarvis speaks, listen for the next question">💬 Conversation on</button>
         <button id="mute" type="button" aria-pressed="false">🔊 Sound on</button>
         <button id="new-conversation" type="button">New conversation</button>
       </div>
@@ -32,6 +33,10 @@
     </main>
 
     <footer>
+      <p id="listening" class="listening" hidden>
+        <span class="dot" aria-hidden="true"></span>
+        <span>Listening… say “that's all” or “é tudo” to stop</span>
+      </p>
       <p id="status" role="status"></p>
       <form id="ask-form">
         <label for="question" class="visually-hidden">Ask Jarvis</label>
@@ -41,6 +46,10 @@
           <button id="send" type="submit">Send</button>
         </div>
       </form>
+      <p id="auto-note" class="note" hidden>
+        Your browser didn't let the microphone reopen by itself, so conversation mode is paused. Tap 🎤 Speak to answer;
+        turn Conversation off and on to try again.
+      </p>
       <p id="mic-note" class="note" hidden>
         Speech recognition isn't available in this browser. Typing works; for voice use Chrome or Safari.
       </p>
