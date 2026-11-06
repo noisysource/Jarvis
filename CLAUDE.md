@@ -21,4 +21,6 @@
 - The `ec-hrt` context (European Commission / HRT) is a handoff to Kiro, the
   EC's agent: Jarvis replies with the handoff message and does nothing else
   (no answer model, no tools, no memory). Invoicing the EC is `noisysource`.
+  The local precheck runs on every question, even when a context is supplied,
+  and wins over it.
 - Vendus access is read-only; do not add non-GET calls.

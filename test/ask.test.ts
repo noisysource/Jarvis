@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { clarifyMessage, handleAsk } from "../src/ask.js";
 import { parseContexts } from "../src/contexts.js";
 import { makeSafeMemoryHooks } from "../src/memory.js";
+import { makePrecheck } from "../src/precheck.js";
 import { err, ok } from "../src/result.js";
 import type {
   AnswerInput,
@@ -58,6 +59,7 @@ const makeDeps = (
 
   const deps: Deps = {
     contexts,
+    precheck: makePrecheck(contexts),
     classify: async () => {
       calls.push("classify");
       if (options.throwInClassify) throw new TypeError(`boom ${QUESTION}`);
@@ -141,9 +143,9 @@ describe("unclear", () => {
 });
 
 describe("handoff", () => {
-  it("hands off to Kiro and runs nothing else", async () => {
+  it("hands off to Kiro when the classifier picks ec-hrt, and runs nothing else", async () => {
     const { deps, calls, logs } = makeDeps({ classification: { kind: "context", contextId: id("ec-hrt") } });
-    const question = "Summarise the HRT steering meeting";
+    const question = "What did the team decide about the new recruitment workflow?";
 
     expect(await handleAsk(deps, { question })).toEqual({
       type: "handoff",
@@ -159,6 +161,46 @@ describe("handoff", () => {
     const { deps, calls } = makeDeps();
     expect((await handleAsk(deps, { question: "x", context: id("ec-hrt") })).type).toBe("handoff");
     expect(calls).toEqual([]);
+  });
+});
+
+describe("local precheck always runs first", () => {
+  it("hands 'Summarise the UTP standup' to Kiro even with context personal, without any model call", async () => {
+    const { deps, calls } = makeDeps();
+
+    expect(await handleAsk(deps, { question: "Summarise the UTP standup", context: id("personal") })).toEqual({
+      type: "handoff",
+      context: "ec-hrt",
+      to: "Kiro (the EC's agent)",
+      message: "This is for Kiro (the EC's agent). I don't handle European Commission / HRT requests.",
+    });
+    // No classifier, no answerer (the only model calls), no memory hooks.
+    expect(calls).toEqual([]);
+  });
+
+  it("routes EC + invoicing to noisysource even when another context was picked", async () => {
+    const { deps, calls, answerInputs } = makeDeps();
+
+    const response = await handleAsk(deps, {
+      question: "Invoice the European Commission for October",
+      context: id("personal"),
+    });
+
+    expect(response).toMatchObject({ type: "answer", context: "noisysource" });
+    expect(answerInputs[0]?.context.id).toBe("noisysource");
+    expect(calls).toEqual(["loadMemories", "answer", "wrapUp"]);
+  });
+
+  it("hands off without classifying when no context is given", async () => {
+    const { deps, calls } = makeDeps({ classification: { kind: "context", contextId: id("personal") } });
+    expect((await handleAsk(deps, { question: "Is CASP down again?" })).type).toBe("handoff");
+    expect(calls).toEqual([]);
+  });
+
+  it("uses the picked context when the precheck finds nothing", async () => {
+    const { deps, answerInputs } = makeDeps();
+    await handleAsk(deps, { question: QUESTION, context: id("kidclub") });
+    expect(answerInputs[0]?.context.id).toBe("kidclub");
   });
 });
 

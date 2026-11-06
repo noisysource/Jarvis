@@ -5,12 +5,9 @@
 //   2. a cue alone                 -> hand off
 // Nothing matched -> the question goes to the classifier.
 
-import type { Context, ContextId } from "./types.js";
+import type { Context, Precheck } from "./types.js";
 
-export type Precheck =
-  | { readonly kind: "handoff"; readonly context: Context }
-  | { readonly kind: "route"; readonly contextId: ContextId }
-  | { readonly kind: "none" };
+export type { Precheck };
 
 const stripAccents = (s: string): string => s.normalize("NFD").replace(/\p{M}+/gu, "");
 

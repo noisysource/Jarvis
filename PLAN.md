@@ -33,7 +33,8 @@ Portal UTP") that are matched locally, before any model runs: whole words,
 accents ignored, ALL-CAPS cues case-sensitive, a hyphen matching a hyphen,
 space or nothing. A cue plus an invoicing word from its `Unless` list ("Invoice
 the European Commission") routes straight to `noisysource`; a cue alone hands
-off to Kiro. Questions with no cue go to the classifier, which still has
+off to Kiro. The precheck runs on **every** question, even when a context was
+picked (e.g. after a clarify), so EC/HRT requests always reach Kiro. Questions with no cue go to the classifier, which still has
 `ec-hrt` as an option as a backstop and is told that invoicing the EC is
 Noisy Source. "The Commission" is deliberately not a cue, because it also
 means a sales commission.

@@ -1,7 +1,11 @@
 // The single entry point for a question.
 //
+//   precheck(question)  ← always, even when a context is supplied (no model)
+//     EC/HRT cue            → handoff, whatever context was picked
+//     EC cue + invoicing    → noisysource, whatever context was picked
+//     no match ↓
 //   context given? ─yes─────────────┐
-//         no → classify(question, history)   (precheck first, then model)
+//         no → classify(question, history)
 //                                    ▼
 //   unclear  → clarify: which context? (answerable contexts only)
 //   handoff  → fixed handoff message; nothing else runs
@@ -26,6 +30,14 @@ const resolveContext = async (
   request: AskRequest,
   history: readonly Turn[],
 ): Promise<{ kind: "context"; context: Context } | { kind: "unclear" } | { kind: "unknown" }> => {
+  // The local precheck wins over a picked context, so EC/HRT requests always reach Kiro.
+  const local = deps.precheck(request.question);
+  if (local.kind === "handoff") return { kind: "context", context: local.context };
+  if (local.kind === "route") {
+    const routed = deps.contexts.find((c) => c.id === local.contextId);
+    return routed ? { kind: "context", context: routed } : { kind: "unclear" };
+  }
+
   if (request.context !== undefined) {
     const chosen = deps.contexts.find((c) => c.id === request.context);
     return chosen ? { kind: "context", context: chosen } : { kind: "unknown" };

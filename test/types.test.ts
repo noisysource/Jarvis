@@ -89,6 +89,7 @@ describe("types", () => {
     const memories: Memory[] = [];
     const deps: Deps = {
       contexts: [personal, ecHrt],
+      precheck: () => ({ kind: "none" }),
       classify: async () => ({ kind: "context", contextId: personal.id }),
       answer: async ({ question }) => ok(`You asked: ${question}`),
       memory: {

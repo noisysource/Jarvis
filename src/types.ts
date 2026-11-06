@@ -66,6 +66,15 @@ export type Classification =
   | { readonly kind: "context"; readonly contextId: ContextId }
   | { readonly kind: "unclear" };
 
+/**
+ * Result of the local precheck (no model): a handoff cue was found, a cue plus
+ * an `Unless` word routes elsewhere, or nothing matched.
+ */
+export type Precheck =
+  | { readonly kind: "handoff"; readonly context: Context }
+  | { readonly kind: "route"; readonly contextId: ContextId }
+  | { readonly kind: "none" };
+
 export type ContextOption = {
   readonly id: ContextId;
   readonly name: string;
@@ -146,6 +155,11 @@ export type Logger = {
  */
 export type Deps = {
   readonly contexts: readonly Context[];
+  /**
+   * Local handoff check from contexts.md. Runs on every question, before a
+   * supplied context or the classifier is considered.
+   */
+  readonly precheck: (question: string) => Precheck;
   /** Never throws: failures and unparseable output become `unclear`. */
   readonly classify: (input: {
     readonly question: string;
