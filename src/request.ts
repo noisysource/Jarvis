@@ -1,0 +1,60 @@
+// Validates the body of POST /ask. The server stores nothing: the page sends
+// the conversation so far with each question.
+
+import { z } from "zod";
+import { err, ok, type Result } from "./result.js";
+import type { AskRequest, ContextId } from "./types.js";
+
+export const LIMITS = {
+  questionChars: 2_000,
+  historyTurns: 20,
+  turnChars: 4_000,
+} as const;
+
+const AskRequestSchema = z
+  .object({
+    question: z
+      .string({ error: "question must be text" })
+      .trim()
+      .min(1, { error: "question is empty" })
+      .max(LIMITS.questionChars, { error: `question is longer than ${LIMITS.questionChars} characters` }),
+    // Checked against contexts.md by the ask handler; here only the shape.
+    context: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/, { error: "context must be a context id" })
+      .optional(),
+    history: z
+      .array(
+        z
+          .object({
+            role: z.enum(["user", "assistant"], { error: 'history role must be "user" or "assistant"' }),
+            text: z
+              .string()
+              .min(1, { error: "history text is empty" })
+              .max(LIMITS.turnChars, { error: `a history turn is longer than ${LIMITS.turnChars} characters` }),
+          })
+          .strict(),
+        { error: "history must be a list of turns" },
+      )
+      .max(LIMITS.historyTurns, { error: `history has more than ${LIMITS.historyTurns} turns` })
+      .optional(),
+  })
+  .strict();
+
+/** Every problem in one string, e.g. "question: question is empty". */
+export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
+  const parsed = AskRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return err(
+      parsed.error.issues
+        .map((issue) => (issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message))
+        .join("; "),
+    );
+  }
+  const { question, context, history } = parsed.data;
+  return ok({
+    question,
+    ...(context !== undefined ? { context: context as ContextId } : {}),
+    ...(history !== undefined ? { history } : {}),
+  });
+};

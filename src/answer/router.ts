@@ -1,0 +1,16 @@
+// Picks the answerer for a context. Contexts without one (in M0: kidclub and
+// noisysource) get a fixed "not connected yet" reply and no model call.
+
+import { err } from "../result.js";
+import type { Context, Deps } from "../types.js";
+
+export const notConnectedMessage = (context: Context): string =>
+  `${context.name} isn't connected yet, so I can't answer that one.`;
+
+export const makeAnswerRouter = (answerers: Readonly<Record<string, Deps["answer"]>>): Deps["answer"] =>
+  async (input) => {
+    const answerer = answerers[input.context.id];
+    return answerer
+      ? answerer(input)
+      : err({ code: "not_connected", message: notConnectedMessage(input.context) });
+  };
