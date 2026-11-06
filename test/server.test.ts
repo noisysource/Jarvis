@@ -5,6 +5,7 @@ import { makeJsonLogger } from "../src/log.js";
 import { makePrecheck } from "../src/precheck.js";
 import { ok } from "../src/result.js";
 import { localHosts, MAX_BODY_BYTES, makeServer } from "../src/server.js";
+import { loadWebAssets, WEB_SECURITY_HEADERS, type WebAssets } from "../src/web.js";
 import type { Context, ContextId, Deps } from "../src/types.js";
 
 const QUESTION = "When is my daughter's birthday?";
@@ -17,7 +18,7 @@ beforeAll(async () => {
   contexts = parsed.value;
 });
 
-const setup = (options: { allowedHosts?: readonly string[] } = {}) => {
+const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = {}) => {
   const lines: string[] = [];
   const calls: string[] = [];
   const deps: Deps = {
@@ -249,5 +250,50 @@ describe("POST /ask content type (cross-site guard)", () => {
     const { post } = setup();
     const res = await post(JSON.stringify({ question: QUESTION }), { "content-type": contentType });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("chat page", () => {
+  const webSetup = async () => {
+    const web = await loadWebAssets();
+    if (!web.ok) throw new Error(web.error);
+    return setup({ web: web.value, allowedHosts: localHosts(8080) });
+  };
+  const get = (app: ReturnType<typeof setup>["app"], path: string) =>
+    app.request(`http://127.0.0.1:8080${path}`, { headers: { host: "127.0.0.1:8080" } });
+
+  it.each([
+    ["/", "text/html", "<title>Jarvis</title>"],
+    ["/app.js", "text/javascript", 'from "./chat.js"'],
+    ["/chat.js", "text/javascript", "export const replyView"],
+    ["/app.css", "text/css", "prefers-color-scheme"],
+  ])("serves %s as %s with the security headers", async (path, type, snippet) => {
+    const { app } = await webSetup();
+    const res = await get(app, path);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain(type);
+    for (const [name, value] of Object.entries(WEB_SECURITY_HEADERS)) expect(res.headers.get(name)).toBe(value);
+    expect(await res.text()).toContain(snippet);
+  });
+
+  it("is behind the Host guard too", async () => {
+    const { app } = await webSetup();
+    const res = await app.request("http://127.0.0.1:8080/", { headers: { host: "evil.example:8080" } });
+    expect(res.status).toBe(403);
+  });
+
+  it("loads only local scripts and styles", async () => {
+    const { app } = await webSetup();
+    const html = await (await get(app, "/")).text();
+    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).not.toMatch(/<script>(?!<\/script>)/);
+  });
+
+  it("fails clearly when a page file is missing", async () => {
+    const result = await loadWebAssets(async (p) => {
+      if (p.endsWith("app.css")) throw new Error("ENOENT");
+      return "x";
+    });
+    expect(result).toEqual({ ok: false, error: "Couldn't read the chat page file src/web/app.css" });
   });
 });

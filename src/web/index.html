@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Jarvis</h1>
+      <div class="settings">
+        <label>
+          <span class="visually-hidden">Language</span>
+          <select id="language" aria-label="Language">
+            <option value="en">English</option>
+            <option value="pt">Português</option>
+          </select>
+        </label>
+        <button id="mute" type="button" aria-pressed="false">🔊 Sound on</button>
+        <button id="new-conversation" type="button">New conversation</button>
+      </div>
+    </header>
+
+    <main>
+      <ol id="transcript" aria-live="polite"></ol>
+    </main>
+
+    <footer>
+      <p id="status" role="status"></p>
+      <form id="ask-form">
+        <label for="question" class="visually-hidden">Ask Jarvis</label>
+        <textarea id="question" rows="2" maxlength="2000" placeholder="Ask Jarvis…" autocomplete="off"></textarea>
+        <div class="actions">
+          <button id="mic" type="button" aria-pressed="false">🎤 Speak</button>
+          <button id="send" type="submit">Send</button>
+        </div>
+      </form>
+      <p id="mic-note" class="note" hidden>
+        Speech recognition isn't available in this browser. Typing works; for voice use Chrome or Safari.
+      </p>
+    </footer>
+  </body>
+</html>

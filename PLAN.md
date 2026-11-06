@@ -108,7 +108,8 @@ question, and after a clarify response it re-sends the question with
 | `src/server.ts` | Hono: `POST /ask` (validated, 256 KB limit), `GET /healthz`, request ids, JSON 404/500 | #15 |
 | `src/main.ts` | Entry point: config → `buildDeps` (refuse to start on problems) → serve → graceful shutdown | #15 |
 | `src/log.ts` | JSON-lines logger with Cloud Logging `severity` | #15 |
-| `src/web/` | Chat page: `index.html`, `app.js` | #27 |
+| `src/web/` | Chat page, served as-is: `index.html`, `app.css`, `app.js` (DOM + Web Speech), `chat.js` (pure, tested) | #27 |
+| `src/web.ts` | Loads the page files at startup; strict CSP and mic-only Permissions-Policy | #27 |
 | `src/vendus/*`, `src/answer/kidclub.ts` | Vendus client, tools, KidClub answerer | #7–#9, #12 (after M0) |
 
 ## Components

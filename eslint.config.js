@@ -32,4 +32,9 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": "error",
     },
   },
+  {
+    // The chat page runs in the browser as plain ES modules.
+    files: ["src/web/**/*.js"],
+    languageOptions: { globals: { ...globals.browser }, sourceType: "module" },
+  },
 );
