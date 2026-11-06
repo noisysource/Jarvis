@@ -46,6 +46,8 @@ describe("precheck with the real contexts.md", () => {
     ["Is CastP down?", "handoff:ec-hrt"],
     ["Open the Recruiter Portal UTP ticket", "handoff:ec-hrt"],
     ["open the recruiter portal utp ticket", "handoff:ec-hrt"],
+    ["Is UTP down again?", "handoff:ec-hrt"],
+    ["Invoice UTP for the October work", "route:noisysource"],
     // No EC cue -> classifier decides.
     ["What's the commission on this sale?", "none"],
     ["Invoice the Commission for October", "none"],
@@ -65,6 +67,7 @@ describe("precheck with the real contexts.md", () => {
     expect(outcome("tell the ec about it")).toBe("none");
     expect(outcome("tell the EC about it")).toBe("handoff:ec-hrt");
     expect(outcome("casp")).toBe("none");
+    expect(outcome("is utp down?")).toBe("none");
   });
 
   it("doesn't match new cues inside other words", () => {

@@ -44,5 +44,5 @@ Data: None. Handled by Kiro.
 Tools: none
 Handling: handoff
 Handoff to: Kiro (the EC's agent)
-Recognition cues: European Commission, Comissão Europeia, EC, HRT, EPSO, CASP, Cast-p, Recruiter Portal UTP, Kiro
+Recognition cues: European Commission, Comissão Europeia, EC, HRT, EPSO, CASP, Cast-p, Recruiter Portal UTP, UTP, Kiro
 Unless: invoice, invoices, invoiced, invoicing, bill, billing, fatura, faturas, faturar, faturação, factura, facturas -> noisysource

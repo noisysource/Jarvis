@@ -28,7 +28,7 @@ edit, not a code change.
 | `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
 
 **Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
-"European Commission", "EC", "HRT", "EPSO", "CASP", "Cast-p", "Recruiter
+"European Commission", "EC", "HRT", "EPSO", "CASP", "UTP", "Cast-p", "Recruiter
 Portal UTP") that are matched locally, before any model runs: whole words,
 accents ignored, ALL-CAPS cues case-sensitive, a hyphen matching a hyphen,
 space or nothing. A cue plus an invoicing word from its `Unless` list ("Invoice
