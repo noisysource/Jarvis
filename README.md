@@ -24,7 +24,14 @@ Requires Node 22.12 or later.
    set `GOOGLE_CLOUD_PROJECT` to read the key from Secret Manager with your
    `gcloud auth application-default login` credentials.
 
-3. Start the dev server:
+3. Optional: check the models answer with your key. This makes two tiny
+   calls, one to the classifier model and one to the answer model:
+
+   ```bash
+   npm run smoke:llm
+   ```
+
+4. Start the dev server:
 
    ```bash
    npm run dev
