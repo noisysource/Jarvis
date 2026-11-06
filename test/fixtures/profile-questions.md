@@ -41,6 +41,7 @@ doesn't say" for the second list. No guessing.
 | What's the capital of Australia? | Canberra |
 | What day of the week is it? | The weekday from the prompt's "Now" line |
 | How many days until Christmas? | Counted from today's date |
+| What's on my plate today? | Says it can't see your calendar or tasks yet (daily brief is #49); may mention a profile routine for today, e.g. the gym on Mon/Wed/Fri; never invents plans |
 
 ## Chatting: warm, not form-like
 

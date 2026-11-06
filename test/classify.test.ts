@@ -157,9 +157,16 @@ describe("classifier request", () => {
     expect(system).not.toContain("Pick a context only when the question clearly belongs to it");
   });
 
+  it("sends questions about their own day, schedule or to-dos to personal", () => {
+    expect(classifierSystemPrompt(contexts)).toContain(
+      `Questions about their own day, schedule, calendar, agenda or to-dos are "personal" too (e.g. "what's on my plate today?"`,
+    );
+  });
+
   it("leaves the default rule out when there's no personal context", () => {
     const others = contexts.filter((c) => c.id !== "personal");
     expect(classifierSystemPrompt(others)).not.toContain("If it needs no context's data");
+    expect(classifierSystemPrompt(others)).not.toContain("Questions about their own day");
   });
 
   it("includes only the last few turns of history", () => {

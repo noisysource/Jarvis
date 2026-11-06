@@ -24,7 +24,7 @@ Fields (one `Key: value` per line):
 
 ## personal
 Name: Personal
-Description: My own life, not my businesses: me, my family, home, health, preferences, routines, plans and anything in my personal profile. Also the default for anything that needs no business data: greetings, small talk, thanks, general-knowledge questions and questions about Jarvis itself.
+Description: My own life, not my businesses: me, my family, home, health, preferences, routines, plans, my day, schedule and to-dos, and anything in my personal profile. Also the default for anything that needs no business data: greetings, small talk, thanks, general-knowledge questions and questions about Jarvis itself.
 Data: My profile (data/profile.md)
 Tools: none
 Aliases: pessoal, me, myself

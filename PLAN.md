@@ -13,7 +13,7 @@ Work is tracked in GitHub Issues and the **Jarvis** project board
 |---|---|---|
 | **M0: talk to Jarvis** | Chat page with voice, run locally; answers questions about you from your profile | `m0` |
 | v0: KidClub invoices | Read-only Vendus tool; Cloud Run deploy | `after-m0`, `jarvis-v0` |
-| After v0 | Memory in Firestore (#24), phone access (#19) | `after-v0`, `backlog` |
+| After v0 | Memory in Firestore (#24), phone access (#19), daily brief (#49) | `after-v0`, `backlog` |
 
 ## Contexts
 
@@ -29,7 +29,9 @@ edit, not a code change.
 
 **Routing rule.** Anything that needs no context's data (greetings, small
 talk, thanks, general knowledge, questions about Jarvis) goes to `personal`
-and is answered normally. Jarvis asks "which context?" only when a request
+and is answered normally. So do questions about your own day, schedule or
+to-dos ("what's on my plate today?"): until the daily brief (#49) exists,
+Jarvis says honestly that it can't see your calendar or tasks yet. Jarvis asks "which context?" only when a request
 needs some context's data and it's ambiguous which ("did the invoice get
 paid?"). The personal answerer knows what Jarvis can do, from `contexts.md`. After
 a clarify, the page treats a reply that names an offered context (name, id

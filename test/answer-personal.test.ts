@@ -143,6 +143,12 @@ describe("makePersonalAnswerer", () => {
     expect(system).toContain("Never do anything on their behalf without their explicit OK");
   });
 
+  it("says honestly it can't see their calendar or tasks yet, and never invents plans", () => {
+    const system = personalSystemPrompt(PROFILE);
+    expect(system).toContain("say honestly that you can't see their calendar or tasks yet");
+    expect(system).toContain("never invent plans or appointments");
+  });
+
   it("gives Jarvis a warm, conversational personality with natural spoken length", () => {
     const system = personalSystemPrompt(PROFILE);
     expect(system).toContain("Warm, natural and a little conversational");

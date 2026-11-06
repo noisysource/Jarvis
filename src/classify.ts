@@ -41,6 +41,7 @@ export const classifierSystemPrompt = (contexts: readonly Context[]): string => 
     ...(hasDefault
       ? [
           `- If it needs no context's data, reply "${DEFAULT_CONTEXT_ID}". That covers greetings, small talk, thanks, general-knowledge questions and questions about Jarvis itself (e.g. "hello", "thanks", "what can you do?", "what's the capital of Australia?").`,
+          `- Questions about their own day, schedule, calendar, agenda or to-dos are "${DEFAULT_CONTEXT_ID}" too (e.g. "what's on my plate today?", "what do I have tomorrow?").`,
         ]
       : []),
     `- Reply "${UNCLEAR}" only when the question needs some context's data and it's ambiguous which (e.g. "did the invoice get paid?" could be KidClub or Noisy Source).`,

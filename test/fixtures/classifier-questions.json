@@ -96,7 +96,7 @@
     },
     {
       "question": "What's on my plate today?",
-      "expected": "unclear"
+      "expected": "personal"
     }
   ]
 }
