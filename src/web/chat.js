@@ -17,7 +17,7 @@ export const parseLanguage = (value) => (value === "pt" ? "pt" : DEFAULT_LANGUAG
 
 /**
  * @typedef {{ role: "user" | "assistant", text: string }} Turn
- * @typedef {{ id: string, name: string }} ContextOption
+ * @typedef {{ id: string, name: string, aliases?: string[] }} ContextOption
  * @typedef {
  *   | { type: "answer", context: string, answer: string }
  *   | { type: "unavailable", context: string, message: string }
@@ -84,6 +84,45 @@ export const viewFromHttp = (status, body) => {
     return replyView(/** @type {AskResponse} */ (body));
   }
   return replyView({ type: "error", message: `Sorry, the server answered with status ${status}.` });
+};
+
+/** Words people put in front of a context name when answering "which one?" ("a pessoal", "it's KidClub"). */
+const FILLER_WORDS = new Set(["a", "o", "the", "its", "it", "s", "is", "e", "about", "para", "sobre", "do", "da", "de"]);
+
+/**
+ * Lowercase, accents removed, split into words on anything that isn't a
+ * letter or digit. "Kid-Club!" → ["kid", "club"].
+ * @param {string} text @returns {string[]}
+ */
+export const nameWords = (text) =>
+  text
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 0);
+
+/** @param {string} text */
+const squash = (text) => nameWords(text).join("");
+
+/**
+ * After a clarify: if the whole reply names one of the offered contexts (its
+ * name, id or an alias), return it; otherwise it's a new question. Case,
+ * accents, spaces and punctuation don't matter, and leading filler words are
+ * ignored. Matched locally, with no model call.
+ * @param {string} reply @param {readonly ContextOption[]} options
+ * @returns {ContextOption | undefined}
+ */
+export const matchContextOption = (reply, options) => {
+  const words = nameWords(reply);
+  // Drop leading filler words, but never the last word ("a" on its own isn't a pick).
+  while (words.length > 1 && FILLER_WORDS.has(words[0] ?? "")) words.shift();
+  const said = words.join("");
+  if (said === "") return undefined;
+  const matches = options.filter((o) =>
+    [o.name, o.id, ...(o.aliases ?? [])].some((n) => squash(n) === said),
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 };
 
 /**

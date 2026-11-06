@@ -31,7 +31,11 @@ edit, not a code change.
 talk, thanks, general knowledge, questions about Jarvis) goes to `personal`
 and is answered normally. Jarvis asks "which context?" only when a request
 needs some context's data and it's ambiguous which ("did the invoice get
-paid?"). The personal answerer knows what Jarvis can do, from `contexts.md`.
+paid?"). The personal answerer knows what Jarvis can do, from `contexts.md`. After
+a clarify, the page treats a reply that names an offered context (name, id
+or `Aliases` from `contexts.md`; case, accents and spacing ignored) as
+picking it, with no model call; anything else is a new question. Only one
+request is in flight at a time.
 
 **Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
 "European Commission", "EC", "HRT", "EPSO", "CASP", "UTP", "Cast-p", "Recruiter

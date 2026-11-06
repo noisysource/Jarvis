@@ -61,6 +61,17 @@ describe("parseContexts", () => {
     });
   });
 
+  it("parses optional aliases and passes them to clarify options", () => {
+    const md = "## personal\nName: Personal\nDescription: d\nData: x\nTools: none\nAliases: pessoal, me\n\n## kidclub\nName: KidClub\nDescription: d\nData: x\nTools: none\n";
+    const contexts = parseOk(md);
+    expect(contexts[0]?.aliases).toEqual(["pessoal", "me"]);
+    expect(contexts[1]).not.toHaveProperty("aliases");
+    expect(clarifyOptions(contexts)).toEqual([
+      { id: "personal", name: "Personal", aliases: ["pessoal", "me"] },
+      { id: "kidclub", name: "KidClub" },
+    ]);
+  });
+
   it("parses a known tool", () => {
     const md = "## kidclub\nName: KidClub\nDescription: d\nData: Vendus\nTools: vendus\n";
     expect(parseOk(md)[0]?.tools).toEqual(["vendus"]);

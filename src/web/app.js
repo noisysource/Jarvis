@@ -7,6 +7,7 @@ import {
   LANGUAGES,
   appendTurn,
   buildAskBody,
+  matchContextOption,
   parseLanguage,
   pickVoice,
   viewFromHttp,
@@ -47,13 +48,20 @@ const save = (key, value) => {
   }
 };
 
-/** @type {{ history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean, listening: boolean }} */
+/**
+ * A clarify waiting for an answer: the question it was about, the offered
+ * contexts and their buttons.
+ * @typedef {{ question: string, options: import("./chat.js").ContextOption[], buttons: HTMLButtonElement[] }} PendingClarify
+ */
+
+/** @type {{ history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean, listening: boolean, pending: PendingClarify | null }} */
 const state = {
   history: [],
   language: parseLanguage(load("jarvis.language")),
   muted: load("jarvis.muted") === "true",
   busy: false,
   listening: false,
+  pending: null,
 };
 
 // ---- rendering ----
@@ -87,6 +95,8 @@ const addMessage = (kind, text) => {
 
 const renderControls = () => {
   sendButton.disabled = state.busy;
+  // Context buttons can't be used while a request is in flight.
+  for (const b of state.pending?.buttons ?? []) b.disabled = state.busy;
   micButton.setAttribute("aria-pressed", String(state.listening));
   micButton.textContent = state.listening ? "■ Stop" : "🎤 Speak";
   muteButton.setAttribute("aria-pressed", String(state.muted));
@@ -115,7 +125,15 @@ const speak = (text) => {
 
 // ---- asking ----
 
+/** The clarify is answered or superseded: its buttons stop working. */
+const retirePending = () => {
+  for (const b of state.pending?.buttons ?? []) b.disabled = true;
+  state.pending = null;
+};
+
 /**
+ * Sends one question. Only one request at a time, so replies can't arrive
+ * out of order.
  * @param {string} question
  * @param {string} [context] set when the user picked a context after a clarify
  */
@@ -147,18 +165,19 @@ const ask = async (question, context) => {
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";
+    /** @type {HTMLButtonElement[]} */
+    const buttons = [];
     for (const option of view.options) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = option.name;
-      button.addEventListener("click", () => {
-        for (const b of choices.querySelectorAll("button")) b.disabled = true;
-        button.classList.add("picked");
-        void ask(text, option.id);
-      });
+      button.dataset.context = option.id;
+      button.addEventListener("click", () => pick(option.id));
       choices.append(button);
+      buttons.push(button);
     }
     item.append(choices);
+    state.pending = { question: text, options: view.options, buttons };
   }
   if (view.remember) {
     state.history = appendTurn(appendTurn(state.history, "user", text), "assistant", view.text);
@@ -171,11 +190,47 @@ const ask = async (question, context) => {
   if (!state.listening) input.focus();
 };
 
+/**
+ * Picks a context for the pending clarify, by button or by name.
+ * @param {string} contextId
+ */
+const pick = (contextId) => {
+  const pending = state.pending;
+  if (!pending || state.busy) return; // ignored while a request is in flight
+  for (const b of pending.buttons) if (b.dataset.context === contextId) b.classList.add("picked");
+  retirePending();
+  void ask(pending.question, contextId);
+};
+
+/**
+ * Typed or spoken input. After a clarify, a reply that names one of the
+ * offered contexts picks it (matched here, no model call); anything else is a
+ * new question.
+ * @param {string} raw
+ */
+const submit = (raw) => {
+  const text = raw.trim();
+  if (text === "") return;
+  if (state.busy) {
+    // Keep the text so nothing is lost; it can be sent once the answer arrives.
+    input.value = text;
+    setStatus("Still answering the last question…");
+    return;
+  }
+  input.value = "";
+  const chosen = state.pending ? matchContextOption(text, state.pending.options) : undefined;
+  if (chosen) {
+    addMessage("user", text);
+    pick(chosen.id);
+    return;
+  }
+  retirePending();
+  void ask(text);
+};
+
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  const question = input.value;
-  input.value = "";
-  void ask(question);
+  submit(input.value);
 });
 
 input.addEventListener("keydown", (event) => {
@@ -210,10 +265,7 @@ if (!Recognition) {
       final = final || result.isFinal;
     }
     input.value = heard;
-    if (final) {
-      input.value = "";
-      void ask(heard);
-    }
+    if (final) submit(heard);
   };
   recognition.onend = () => {
     state.listening = false;
@@ -268,6 +320,7 @@ languageSelect.addEventListener("change", () => {
 
 newButton.addEventListener("click", () => {
   stopSpeaking();
+  retirePending();
   state.history = [];
   transcript.replaceChildren();
   setStatus("New conversation.");

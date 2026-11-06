@@ -4,6 +4,8 @@ import {
   LIMITS,
   appendTurn,
   buildAskBody,
+  matchContextOption,
+  nameWords,
   parseLanguage,
   pickVoice,
   replyView,
@@ -97,5 +99,59 @@ describe("pickVoice", () => {
     expect(pickVoice(voices, "en-GB")).toEqual({ lang: "en-GB" });
     expect(pickVoice([{ lang: "pt_BR" }], "pt-PT")).toEqual({ lang: "pt_BR" });
     expect(pickVoice([{ lang: "fr-FR" }], "pt-PT")).toBeUndefined();
+  });
+});
+
+describe("matchContextOption (typed or spoken pick after a clarify)", () => {
+  const options = [
+    { id: "personal", name: "Personal", aliases: ["pessoal", "me", "myself"] },
+    { id: "kidclub", name: "KidClub" },
+    { id: "noisysource", name: "Noisy Source" },
+  ];
+  const picked = (reply: string) => matchContextOption(reply, options)?.id;
+
+  it.each([
+    ["kidclub", "kidclub"],
+    ["KidClub", "kidclub"],
+    ["kid club", "kidclub"],
+    ["  Kid-Club! ", "kidclub"],
+    ["KÍDCLUB", "kidclub"],
+    ["personal", "personal"],
+    ["Personal.", "personal"],
+    ["pessoal", "personal"],
+    ["a pessoal", "personal"],
+    ["Pessoál", "personal"],
+    ["me", "personal"],
+    ["the personal", "personal"],
+    ["noisy source", "noisysource"],
+    ["Noisy Source", "noisysource"],
+    ["noisysource", "noisysource"],
+    ["it's KidClub", "kidclub"],
+    ["é a KidClub", "kidclub"],
+    ["about noisy source", "noisysource"],
+  ])("%j picks %s", (reply, id) => {
+    expect(picked(reply)).toBe(id);
+  });
+
+  it.each([
+    "check the kidclub invoices",
+    "kidclub invoices",
+    "hello",
+    "the",
+    "a",
+    "",
+    "   ",
+    "noisy",
+    "personal stuff please",
+  ])("%j is a new question, not a pick", (reply) => {
+    expect(picked(reply)).toBeUndefined();
+  });
+
+  it("only offers what the clarify offered", () => {
+    expect(matchContextOption("noisy source", [{ id: "personal", name: "Personal" }])).toBeUndefined();
+  });
+
+  it("normalises names to words", () => {
+    expect(nameWords("Kid-Club! Comissão")).toEqual(["kid", "club", "comissao"]);
   });
 });

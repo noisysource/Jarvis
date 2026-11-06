@@ -199,7 +199,7 @@ describe("unclear questions", () => {
       type: "clarify",
       message: "I'm not sure which this is about. Is it Personal, KidClub or Noisy Source?",
       options: [
-        { id: "personal", name: "Personal" },
+        { id: "personal", name: "Personal", aliases: ["pessoal", "me", "myself"] },
         { id: "kidclub", name: "KidClub" },
         { id: "noisysource", name: "Noisy Source" },
       ],

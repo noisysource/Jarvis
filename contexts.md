@@ -8,6 +8,9 @@ Fields (one `Key: value` per line):
 - `Name`, `Description`, `Data`, `Tools` (required). `Tools` is a comma list
   of known tools (`vendus`) or `none`. The classifier reads the name and
   description, so write the description for it.
+- `Aliases` (optional): other names for the context, comma-separated. After
+  Jarvis asks "which context?", typing or saying a context's name, id or
+  alias picks it.
 - `Handling`: `answer` (default) or `handoff`.
 - `Handoff to`: who handles a handoff context (required for `handoff`).
 - `Recognition cues` (handoff only): comma list of words or phrases checked
@@ -24,6 +27,7 @@ Name: Personal
 Description: My own life, not my businesses: me, my family, home, health, preferences, routines, plans and anything in my personal profile. Also the default for anything that needs no business data: greetings, small talk, thanks, general-knowledge questions and questions about Jarvis itself.
 Data: My profile (data/profile.md)
 Tools: none
+Aliases: pessoal, me, myself
 
 ## kidclub
 Name: KidClub

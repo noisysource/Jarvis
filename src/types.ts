@@ -47,6 +47,8 @@ export type Context = {
   readonly data: string;
   readonly tools: readonly ToolName[];
   readonly handling: ContextHandling;
+  /** Other names people use for it (e.g. "pessoal"), for picking it after a clarify. */
+  readonly aliases?: readonly string[];
 };
 
 /** One earlier message in the conversation. The page keeps these; the server stores nothing. */
@@ -78,6 +80,8 @@ export type Precheck =
 export type ContextOption = {
   readonly id: ContextId;
   readonly name: string;
+  /** Sent so the page can match a typed or spoken pick ("pessoal") without a model call. */
+  readonly aliases?: readonly string[];
 };
 
 export type AskResponse =
