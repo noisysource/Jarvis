@@ -85,7 +85,7 @@ question, and after a clarify response it re-sends the question with
 | `src/precheck.ts` | `makePrecheck(contexts)`: local cue matching for handoff contexts, no model | #22 |
 | `src/config.ts` | `loadConfig(env)`: pure, zod-validated | #5 |
 | `src/llm/model-ref.ts` | `parseModelRef("provider:model")`, known providers | #5, #10 |
-| `src/secrets.ts` | Secret Manager access, memoised; local `.env` fallback outside production | #6 |
+| `src/secrets.ts` | `makeSecretGetter` (Secret Manager, memoised, failures retried), `resolveAnthropicKey` (`.env` locally only) | #6 |
 | `src/profile.ts` | `ProfileSource`; file source now, secret/bucket later | #25 |
 | `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
