@@ -70,6 +70,12 @@ question, and after a clarify response it re-sends the question with
   consumed, never defined.
 - **Never guess the context.** Ambiguous → ask.
 - **Never guess facts about you.** If the profile doesn't say, Jarvis says so.
+- **Local server, no login, so other sites are kept out:** outside
+  production it only accepts `Host: 127.0.0.1:<port>` or `localhost:<port>`
+  (403 otherwise; blocks DNS rebinding), and `POST /ask` requires
+  `application/json` (415 otherwise; blocks cross-site forms and simple
+  requests, and no CORS preflight is ever answered). On Cloud Run, IAM
+  protects the endpoint instead (#18).
 - **Read-only by construction** for Vendus: the client only exposes `GET`, and
   paths are checked against an allowlist before any network call.
 - **Secrets:** Secret Manager in the cloud. Locally only, `ANTHROPIC_API_KEY`
@@ -99,7 +105,9 @@ question, and after a clarify response it re-sends the question with
 | `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
 | `src/answer/router.ts` | Answerer per context; contexts without one give an `unavailable` reply ("not connected yet"), not an error | #26 |
 | `src/app.ts` | `buildDeps(config)`: wires the real deps; refuses to start without contexts, profile or key | #26 |
-| `src/server.ts` | Hono: `POST /ask`, `GET /healthz`, `GET /` | #15, #27 |
+| `src/server.ts` | Hono: `POST /ask` (validated, 256 KB limit), `GET /healthz`, request ids, JSON 404/500 | #15 |
+| `src/main.ts` | Entry point: config → `buildDeps` (refuse to start on problems) → serve → graceful shutdown | #15 |
+| `src/log.ts` | JSON-lines logger with Cloud Logging `severity` | #15 |
 | `src/web/` | Chat page: `index.html`, `app.js` | #27 |
 | `src/vendus/*`, `src/answer/kidclub.ts` | Vendus client, tools, KidClub answerer | #7–#9, #12 (after M0) |
 
