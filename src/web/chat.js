@@ -126,14 +126,62 @@ export const matchContextOption = (reply, options) => {
 };
 
 /**
- * Picks a voice for the language: an exact match, then same language, else none (browser default).
- * @param {readonly { lang: string }[]} voices @param {string} speechLang
+ * The parts of a SpeechSynthesisVoice we use.
+ * @typedef {{ name: string, lang: string, default?: boolean }} VoiceInfo
  */
-export const pickVoice = (voices, speechLang) => {
-  const want = speechLang.toLowerCase();
-  const base = want.split("-")[0] ?? want;
-  return (
-    voices.find((v) => v.lang.toLowerCase() === want) ??
-    voices.find((v) => v.lang.toLowerCase().replace("_", "-").split("-")[0] === base)
-  );
+
+/** @param {string} lang e.g. "pt_BR" → "pt-br" */
+const normalizeLang = (lang) => lang.toLowerCase().replace("_", "-");
+
+/**
+ * How good a voice sounds, from its name: Premium > Enhanced > Natural/Neural > the rest.
+ * (macOS/iOS label their better downloadable voices "Premium" and "Enhanced";
+ * Edge and Chrome use "Natural", "Neural" or "Online" for theirs.)
+ * @param {string} name
+ */
+export const voiceQuality = (name) => {
+  if (/premium/i.test(name)) return 3;
+  if (/enhanced|melhorad/i.test(name)) return 2;
+  if (/natural|neural|online/i.test(name)) return 1;
+  return 0;
 };
+
+/**
+ * The installed voices for a language, best first: the exact region
+ * (pt-PT before pt-BR) first, then quality, then the system default.
+ * @template {VoiceInfo} V
+ * @param {readonly V[]} voices @param {string} speechLang
+ * @returns {V[]}
+ */
+export const voicesFor = (voices, speechLang) => {
+  const want = normalizeLang(speechLang);
+  const base = want.split("-")[0];
+  return voices
+    .filter((v) => normalizeLang(v.lang).split("-")[0] === base)
+    .map((v) => ({
+      v,
+      exact: normalizeLang(v.lang) === want ? 1 : 0,
+      quality: voiceQuality(v.name),
+      isDefault: v.default ? 1 : 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.exact - a.exact || b.quality - a.quality || b.isDefault - a.isDefault || a.v.name.localeCompare(b.v.name),
+    )
+    .map((x) => x.v);
+};
+
+/**
+ * The voice to speak with: the user's choice for this language if it's still
+ * installed, otherwise the best one. Undefined = browser default.
+ * @template {VoiceInfo} V
+ * @param {readonly V[]} voices @param {string} speechLang @param {string | null} [preferredName]
+ * @returns {V | undefined}
+ */
+export const pickVoice = (voices, speechLang, preferredName) => {
+  const ranked = voicesFor(voices, speechLang);
+  return (preferredName ? ranked.find((v) => v.name === preferredName) : undefined) ?? ranked[0];
+};
+
+/** localStorage key for the chosen voice, per language. @param {"en" | "pt"} language */
+export const voiceKey = (language) => `jarvis.voice.${language}`;

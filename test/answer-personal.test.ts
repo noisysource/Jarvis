@@ -135,11 +135,21 @@ describe("makePersonalAnswerer", () => {
     ]);
   });
 
-  it("tells the model to say when the profile doesn't know, and to keep replies speakable", () => {
+  it("keeps the hard rules: no invented facts, EC to Kiro, nothing without their OK", () => {
     const system = personalSystemPrompt(PROFILE);
     expect(system).toContain("If the profile doesn't say, tell them plainly that their profile doesn't say");
     expect(system).toContain("Never guess or invent personal details");
-    expect(system).toContain("read aloud");
+    expect(system).toContain("say it's for Kiro, the EC's agent");
+    expect(system).toContain("Never do anything on their behalf without their explicit OK");
+  });
+
+  it("gives Jarvis a warm, conversational personality with natural spoken length", () => {
+    const system = personalSystemPrompt(PROFILE);
+    expect(system).toContain("Warm, natural and a little conversational");
+    expect(system).toContain("greet back or acknowledge, then add a sentence of context or an offer to help");
+    expect(system).toContain("use a natural spoken length, usually short");
+    expect(system).toContain("No markdown");
+    expect(system).not.toContain("one to three sentences");
   });
 
   it("returns a safe error when the profile can't be read, without calling the model", async () => {

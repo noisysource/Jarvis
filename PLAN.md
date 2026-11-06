@@ -155,7 +155,17 @@ start without a profile. Only the `personal` answerer sees it.
 
 **Chat page (M0).** One HTML page and one JS file served by Hono, no build
 step, no external scripts. Browser speech recognition and synthesis; English
-by default with a `pt-PT` toggle. Conversation history lives only in the page.
+by default with a `pt-PT` toggle. The voice is picked automatically (exact
+region first, then Premium > Enhanced > Natural/Neural/Online, then the system
+default), with a voice menu whose choice is remembered per language in
+localStorage. Conversation history lives only in the page.
+
+**Personality (M0).** The personal answerer is warm, natural and a little
+conversational: it greets back or acknowledges and adds a sentence of context
+or an offer to help when chatting, answers factual questions first and
+briefly, and uses a natural spoken length, usually short. The hard rules stay:
+no invented personal facts, EC/HRT goes to Kiro, nothing done without the
+user's OK.
 
 **Vendus (after M0).** Assumed base URL `https://www.vendus.pt/ws/v1.1/` with
 the API key as HTTP Basic username, to be verified in #7 before #8. Tools
@@ -217,7 +227,10 @@ Confirmed for M0 (2026-11-06):
   from your profile comes first; Vendus and Cloud Run follow.
 - **Local key:** `ANTHROPIC_API_KEY` may come from a gitignored `.env` for
   local dev only; the cloud uses Secret Manager.
-- **Speech:** English by default, `pt-PT` toggle.
+- **Speech:** English by default, `pt-PT` toggle; best installed voice by
+  default, with a remembered voice menu (#48).
+- **Personality:** warm and conversational, natural spoken length instead of
+  a sentence limit (#48).
 - **Missing profile:** the server refuses to start.
 - **Contexts:** `noisysource` added (owns invoicing the European Commission);
   `ec-hrt` (European Commission / HRT) is a handoff to Kiro, the EC's agent,

@@ -74,6 +74,10 @@ h1 {
   gap: 0.5rem;
 }
 
+#voice {
+  max-width: 14rem;
+}
+
 main {
   flex: 1;
 }

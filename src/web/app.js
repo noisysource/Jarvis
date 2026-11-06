@@ -11,6 +11,8 @@ import {
   parseLanguage,
   pickVoice,
   viewFromHttp,
+  voiceKey,
+  voicesFor,
 } from "./chat.js";
 
 /** @param {string} id @returns {HTMLElement} */
@@ -27,6 +29,7 @@ const sendButton = /** @type {HTMLButtonElement} */ (byId("send"));
 const micButton = /** @type {HTMLButtonElement} */ (byId("mic"));
 const muteButton = /** @type {HTMLButtonElement} */ (byId("mute"));
 const languageSelect = /** @type {HTMLSelectElement} */ (byId("language"));
+const voiceSelect = /** @type {HTMLSelectElement} */ (byId("voice"));
 const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
 const status = byId("status");
 
@@ -111,6 +114,32 @@ const synth = "speechSynthesis" in window ? window.speechSynthesis : null;
 
 const stopSpeaking = () => synth?.cancel();
 
+const voices = () => (synth ? synth.getVoices() : []);
+
+/** The user's chosen voice for the current language, or null for "Automatic (best)". */
+const chosenVoiceName = () => load(voiceKey(state.language));
+
+/** Fills the voice menu with this language's installed voices, best first. */
+const renderVoices = () => {
+  const lang = LANGUAGES[state.language].speech;
+  const ranked = voicesFor(voices(), lang);
+  const best = ranked[0];
+  const chosen = chosenVoiceName();
+
+  const automatic = document.createElement("option");
+  automatic.value = "";
+  automatic.textContent = best ? `Automatic (${best.name})` : "Automatic";
+  const options = ranked.map((v) => {
+    const option = document.createElement("option");
+    option.value = v.name;
+    option.textContent = `${v.name} (${v.lang})`;
+    return option;
+  });
+  voiceSelect.replaceChildren(automatic, ...options);
+  voiceSelect.value = chosen && ranked.some((v) => v.name === chosen) ? chosen : "";
+  voiceSelect.disabled = !synth || ranked.length === 0;
+};
+
 /** @param {string} text */
 const speak = (text) => {
   if (!synth || state.muted) return;
@@ -118,8 +147,8 @@ const speak = (text) => {
   const utterance = new SpeechSynthesisUtterance(text);
   const lang = LANGUAGES[state.language].speech;
   utterance.lang = lang;
-  const voice = pickVoice(synth.getVoices(), lang);
-  if (voice) utterance.voice = /** @type {SpeechSynthesisVoice} */ (voice);
+  const voice = pickVoice(voices(), lang, chosenVoiceName());
+  if (voice) utterance.voice = voice;
   synth.speak(utterance);
 };
 
@@ -316,6 +345,20 @@ languageSelect.addEventListener("change", () => {
   state.language = parseLanguage(languageSelect.value);
   save("jarvis.language", state.language);
   renderControls();
+  renderVoices();
+});
+
+voiceSelect.addEventListener("change", () => {
+  // "" means Automatic: forget the choice so the best voice is used.
+  if (voiceSelect.value === "") {
+    try {
+      window.localStorage.removeItem(voiceKey(state.language));
+    } catch {
+      /* ignore */
+    }
+  } else {
+    save(voiceKey(state.language), voiceSelect.value);
+  }
 });
 
 newButton.addEventListener("click", () => {
@@ -327,8 +370,9 @@ newButton.addEventListener("click", () => {
   input.focus();
 });
 
-// Some browsers load voices asynchronously; nothing to do but make sure they load.
-synth?.addEventListener?.("voiceschanged", () => undefined);
+// Browsers load voices asynchronously; refresh the menu when they arrive.
+synth?.addEventListener?.("voiceschanged", renderVoices);
 
 renderControls();
+renderVoices();
 input.focus();

@@ -10,6 +10,9 @@ import {
   pickVoice,
   replyView,
   viewFromHttp,
+  voiceKey,
+  voiceQuality,
+  voicesFor,
 } from "../src/web/chat.js";
 
 describe("languages", () => {
@@ -92,13 +95,59 @@ describe("viewFromHttp", () => {
   });
 });
 
-describe("pickVoice", () => {
-  const voices = [{ lang: "en-US" }, { lang: "pt_BR" }, { lang: "pt-PT" }, { lang: "en-GB" }];
-  it("prefers an exact match, then the same language", () => {
-    expect(pickVoice(voices, "pt-PT")).toEqual({ lang: "pt-PT" });
-    expect(pickVoice(voices, "en-GB")).toEqual({ lang: "en-GB" });
-    expect(pickVoice([{ lang: "pt_BR" }], "pt-PT")).toEqual({ lang: "pt_BR" });
-    expect(pickVoice([{ lang: "fr-FR" }], "pt-PT")).toBeUndefined();
+describe("voices", () => {
+  const installed = [
+    { name: "Samantha", lang: "en-US", default: true },
+    { name: "Daniel", lang: "en-GB" },
+    { name: "Serena (Premium)", lang: "en-GB" },
+    { name: "Kate (Enhanced)", lang: "en-GB" },
+    { name: "Google UK English Female", lang: "en-GB" },
+    { name: "Microsoft Sonia Online (Natural) - English (United Kingdom)", lang: "en-GB" },
+    { name: "Joana", lang: "pt-PT" },
+    { name: "Joana (Melhorada)", lang: "pt_PT" },
+    { name: "Luciana (Enhanced)", lang: "pt-BR" },
+    { name: "Amélie", lang: "fr-CA" },
+  ];
+  const names = (lang: string) => voicesFor(installed, lang).map((v) => v.name);
+
+  it("rates names: Premium > Enhanced > Natural/Neural/Online > others", () => {
+    expect(voiceQuality("Serena (Premium)")).toBe(3);
+    expect(voiceQuality("Kate (Enhanced)")).toBe(2);
+    expect(voiceQuality("Joana (Melhorada)")).toBe(2);
+    expect(voiceQuality("Microsoft Sonia Online (Natural)")).toBe(1);
+    expect(voiceQuality("Daniel")).toBe(0);
+  });
+
+  it("lists this language's voices, exact region first, then best quality", () => {
+    expect(names("en-GB")).toEqual([
+      "Serena (Premium)",
+      "Kate (Enhanced)",
+      "Microsoft Sonia Online (Natural) - English (United Kingdom)",
+      "Daniel",
+      "Google UK English Female",
+      "Samantha",
+    ]);
+    expect(names("pt-PT")).toEqual(["Joana (Melhorada)", "Joana", "Luciana (Enhanced)"]);
+    expect(names("de-DE")).toEqual([]);
+  });
+
+  it("picks the best voice automatically", () => {
+    expect(pickVoice(installed, "en-GB")?.name).toBe("Serena (Premium)");
+    expect(pickVoice(installed, "pt-PT")?.name).toBe("Joana (Melhorada)");
+    expect(pickVoice([{ name: "Luciana", lang: "pt-BR" }], "pt-PT")?.name).toBe("Luciana");
+    expect(pickVoice(installed, "de-DE")).toBeUndefined();
+  });
+
+  it("uses the remembered voice when it's still installed for this language", () => {
+    expect(pickVoice(installed, "en-GB", "Daniel")?.name).toBe("Daniel");
+    expect(pickVoice(installed, "en-GB", "Uninstalled Voice")?.name).toBe("Serena (Premium)");
+    expect(pickVoice(installed, "en-GB", "Joana")?.name).toBe("Serena (Premium)"); // wrong language
+    expect(pickVoice(installed, "en-GB", null)?.name).toBe("Serena (Premium)");
+  });
+
+  it("remembers the voice per language", () => {
+    expect(voiceKey("en")).toBe("jarvis.voice.en");
+    expect(voiceKey("pt")).toBe("jarvis.voice.pt");
   });
 });
 
