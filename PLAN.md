@@ -90,7 +90,7 @@ question, and after a clarify response it re-sends the question with
 | `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
 | `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
-| `src/classify.ts` | `classify(deps, question, history) → Classification` | #11 |
+| `src/classify.ts` | `makeClassifier`: local precheck, then the classifier model → context id or `unclear` | #11 |
 | `src/answer/personal.ts` | Answer model + profile, no tools | #13, #26 |
 | `src/memory.ts` | Memory hook stubs | #23 |
 | `src/ask.ts` | `handleAsk(deps, req)`: orchestration entry point | #14, #26 |
