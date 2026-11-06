@@ -64,6 +64,8 @@ describe("types", () => {
           return `${r.message} [${r.options.map((o) => o.name).join(", ")}]`;
         case "handoff":
           return `${r.context} -> ${r.to}: ${r.message}`;
+        case "unavailable":
+          return `${r.context} unavailable: ${r.message}`;
         case "error":
           return r.message;
       }
@@ -91,7 +93,7 @@ describe("types", () => {
       contexts: [personal, ecHrt],
       precheck: () => ({ kind: "none" }),
       classify: async () => ({ kind: "context", contextId: personal.id }),
-      answer: async ({ question }) => ok(`You asked: ${question}`),
+      answer: async ({ question }) => ok({ kind: "answer", text: `You asked: ${question}` }),
       memory: {
         loadMemories: async () => memories,
         wrapUp: async () => undefined,
@@ -110,6 +112,6 @@ describe("types", () => {
       memories: [],
       now: deps.now(),
     });
-    expect(answer).toEqual({ ok: true, value: "You asked: Where do I live?" });
+    expect(answer).toEqual({ ok: true, value: { kind: "answer", text: "You asked: Where do I live?" } });
   });
 });

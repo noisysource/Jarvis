@@ -94,6 +94,8 @@ export type AskResponse =
       readonly to: string;
       readonly message: string;
     }
+  /** The context exists but its data isn't connected yet (e.g. KidClub in M0). A normal reply, not a failure. */
+  | { readonly type: "unavailable"; readonly context: ContextId; readonly message: string }
   | { readonly type: "error"; readonly message: string };
 
 export type Memory = {
@@ -123,7 +125,6 @@ export type AppErrorCode =
   | "llm_failed"
   | "llm_refused"
   | "timeout"
-  | "not_connected"
   | "config";
 
 /** An expected failure. `message` must be safe to show the user: no secrets, no profile text. */
@@ -131,6 +132,11 @@ export type AppError = {
   readonly code: AppErrorCode;
   readonly message: string;
 };
+
+/** What an answerer produces: an answer, or a reply that the context can't be answered yet. */
+export type AnswerOutcome =
+  | { readonly kind: "answer"; readonly text: string }
+  | { readonly kind: "unavailable"; readonly message: string };
 
 export type AnswerInput = {
   readonly context: Context;
@@ -165,7 +171,8 @@ export type Deps = {
     readonly question: string;
     readonly history: readonly Turn[];
   }) => Promise<Classification>;
-  readonly answer: (input: AnswerInput) => Promise<Result<string, AppError>>;
+  /** Errors are for things that actually failed; "not connected yet" is an `unavailable` outcome. */
+  readonly answer: (input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>;
   readonly memory: MemoryHooks;
   readonly now: () => Date;
   readonly log: Logger;

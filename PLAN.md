@@ -52,7 +52,7 @@ Chat page (GET /)                         Hono server (npm run dev, localhost)
                                              ├ unclear     → clarify (context buttons)
                                              ├ ec-hrt      → handoff: "This is for Kiro" (backstop; nothing else runs)
                                              ├ kidclub /
-                                             │ noisysource → "not connected yet" (M0)
+                                             │ noisysource → unavailable: "not connected yet" (M0)
                                              └ personal    → loadMemories (stub)
                                                              → answer model: instructions + profile + history
                                                              → wrapUp (stub)
@@ -96,6 +96,9 @@ question, and after a clarify response it re-sends the question with
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
 | `src/memory.ts` | Memory hook stubs; `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / loadMemories → answer → wrapUp | #14 |
+| `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
+| `src/answer/router.ts` | Answerer per context; contexts without one give an `unavailable` reply ("not connected yet"), not an error | #26 |
+| `src/app.ts` | `buildDeps(config)`: wires the real deps; refuses to start without contexts, profile or key | #26 |
 | `src/server.ts` | Hono: `POST /ask`, `GET /healthz`, `GET /` | #15, #27 |
 | `src/web/` | Chat page: `index.html`, `app.js` | #27 |
 | `src/vendus/*`, `src/answer/kidclub.ts` | Vendus client, tools, KidClub answerer | #7–#9, #12 (after M0) |

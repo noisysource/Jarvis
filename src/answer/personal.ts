@@ -10,7 +10,7 @@ import type { LlmCall, LlmError, LlmMessage } from "../llm/types.js";
 import type { ProfileSource } from "../profile.js";
 import { err, ok, type Result } from "../result.js";
 import { formatNow } from "../time.js";
-import type { AnswerInput, AppError, Logger, Memory, Turn } from "../types.js";
+import type { AnswerInput, AnswerOutcome, AppError, Logger, Memory, Turn } from "../types.js";
 
 const ANSWER_MAX_TOKENS = 8000;
 
@@ -64,7 +64,7 @@ export const makePersonalAnswerer = (deps: {
   readonly profile: ProfileSource;
   readonly timeZone: string;
   readonly log?: Logger;
-}): ((input: AnswerInput) => Promise<Result<string, AppError>>) => {
+}): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   return async ({ question, history, memories, now }) => {
     const profile = await deps.profile();
     if (!profile.ok) {
@@ -96,6 +96,6 @@ export const makePersonalAnswerer = (deps: {
       cacheReadTokens: result.value.usage.cacheReadTokens,
       outputTokens: result.value.usage.outputTokens,
     });
-    return ok(result.value.text);
+    return ok({ kind: "answer", text: result.value.text });
   };
 };
