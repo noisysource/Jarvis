@@ -24,14 +24,25 @@ Requires Node 22.12 or later.
    set `GOOGLE_CLOUD_PROJECT` to read the key from Secret Manager with your
    `gcloud auth application-default login` credentials.
 
-3. Optional: check the models answer with your key. This makes two tiny
+3. Create your profile. Jarvis answers questions about you only from this
+   file, and it won't start without it:
+
+   ```bash
+   cp data/profile.example.md data/profile.md
+   ```
+
+   Then replace the example with your own details. `data/profile.md` is
+   gitignored and CI fails if it's ever committed. Edits apply without a
+   restart. Limit: 50 KB.
+
+4. Optional: check the models answer with your key. This makes two tiny
    calls, one to the classifier model and one to the answer model:
 
    ```bash
    npm run smoke:llm
    ```
 
-4. Start the dev server:
+5. Start the dev server:
 
    ```bash
    npm run dev

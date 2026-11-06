@@ -5,3 +5,5 @@ coverage/
 .env.*
 !.env.example
 *.log
+# Personal profile: never commit (only data/profile.example.md is tracked)
+data/profile.md

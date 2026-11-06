@@ -20,6 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Personal profile is not committed
+        run: |
+          if git ls-files --error-unmatch data/profile.md >/dev/null 2>&1; then
+            echo "::error file=data/profile.md::data/profile.md is personal data and must not be committed. Remove it with 'git rm --cached data/profile.md'."
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
