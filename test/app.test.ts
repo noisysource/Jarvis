@@ -3,7 +3,9 @@
 // calls and the profile file are stubbed.
 
 import { describe, expect, it } from "vitest";
-import { buildDeps, type AppInputs } from "../src/app.js";
+import { buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
+import { parseContexts } from "../src/contexts.js";
+import { readFile } from "node:fs/promises";
 import { handleAsk } from "../src/ask.js";
 import { loadConfig } from "../src/config.js";
 import { formatModelRef, type ModelRef } from "../src/llm/model-ref.js";
@@ -117,6 +119,17 @@ describe("personal questions", () => {
     expect(answerRequest?.tools).toBeUndefined();
   });
 
+  it("tell the answerer truthfully what Jarvis can do", async () => {
+    const { result, requests } = await build();
+    await ask(depsOf(result), { question: "What can you do?" });
+    const system = requests[1]?.request.system ?? "";
+    expect(system).toContain("<what_jarvis_can_do>");
+    expect(system).toContain("- KidClub: not connected yet, so Jarvis can't answer these questions yet.");
+    expect(system).toContain("- Noisy Source: not connected yet, so Jarvis can't answer these questions yet.");
+    expect(system).toContain("- European Commission / HRT: not handled by Jarvis; those requests go to Kiro (the EC's agent).");
+    expect(system).toContain("- Personal: My own life");
+  });
+
   it("send the history to both the classifier and the answerer", async () => {
     const { result, requests } = await build();
     await ask(depsOf(result), {
@@ -197,5 +210,17 @@ describe("unclear questions", () => {
     const { result, requests } = await build({ classifyAs: "unclear" });
     expect((await ask(depsOf(result), { question: "Did it get paid?", context: "personal" as never })).type).toBe("answer");
     expect(requests.map((r) => r.model)).toEqual([ANSWER]);
+  });
+});
+
+describe("capabilitiesText", () => {
+  it("describes each context by how Jarvis handles it", async () => {
+    const parsed = parseContexts(await readFile("contexts.md", "utf8"));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const text = capabilitiesText(parsed.value, new Set(["personal"]));
+    expect(text.split("\n")[0]).toBe("Jarvis can help with:");
+    expect(text).toContain("(answered from: My profile (data/profile.md))");
+    expect(text).toContain("- General questions and conversation.");
+    expect(text).toContain("answers are read aloud in English or Portuguese");
   });
 });

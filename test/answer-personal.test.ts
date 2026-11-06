@@ -77,6 +77,20 @@ describe("makePersonalAnswerer", () => {
     expect(requests[0]?.system).not.toContain("Now:");
   });
 
+  it("adds a 'what Jarvis can do' section to the cached prompt when given", async () => {
+    const { llm, requests } = stubLlm();
+    await makePersonalAnswerer({
+      llm,
+      profile: profileSource(),
+      timeZone: "Europe/Lisbon",
+      capabilities: "Jarvis can help with:\n- Personal: your life",
+    })(input({ question: "What can you do?" }));
+    expect(requests[0]?.system).toBe(
+      `${PERSONAL_INSTRUCTIONS}\n\n<what_jarvis_can_do>\nJarvis can help with:\n- Personal: your life\n</what_jarvis_can_do>\n\n<profile>\n${PROFILE}\n</profile>`,
+    );
+    expect(requests[0]?.cacheSystem).toBe(true);
+  });
+
   it("puts the Lisbon date and time after the cached block", async () => {
     const { llm, requests } = stubLlm();
     await makePersonalAnswerer({ llm, profile: profileSource(), timeZone: "Europe/Lisbon" })(input());

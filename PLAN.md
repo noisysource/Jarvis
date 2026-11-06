@@ -27,6 +27,12 @@ edit, not a code change.
 | `noisysource` | answer | None connected yet. **Invoicing the European Commission belongs here.** |
 | `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
 
+**Routing rule.** Anything that needs no context's data (greetings, small
+talk, thanks, general knowledge, questions about Jarvis) goes to `personal`
+and is answered normally. Jarvis asks "which context?" only when a request
+needs some context's data and it's ambiguous which ("did the invoice get
+paid?"). The personal answerer knows what Jarvis can do, from `contexts.md`.
+
 **Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
 "European Commission", "EC", "HRT", "EPSO", "CASP", "UTP", "Cast-p", "Recruiter
 Portal UTP") that are matched locally, before any model runs: whole words,
