@@ -80,9 +80,17 @@ const toMessageParam = (message: LlmMessage): MessageParam => {
 export const buildParams = (model: string, request: LlmRequest): CreateParams => ({
   model,
   max_tokens: request.maxTokens,
-  system: request.cacheSystem
-    ? [{ type: "text", text: request.system, cache_control: { type: "ephemeral" } }]
-    : request.system,
+  system:
+    request.cacheSystem || request.systemSuffix
+      ? [
+          {
+            type: "text" as const,
+            text: request.system,
+            ...(request.cacheSystem ? { cache_control: { type: "ephemeral" as const } } : {}),
+          },
+          ...(request.systemSuffix ? [{ type: "text" as const, text: request.systemSuffix }] : []),
+        ]
+      : request.system,
   messages: request.messages.map(toMessageParam),
   ...(request.tools && request.tools.length > 0
     ? {

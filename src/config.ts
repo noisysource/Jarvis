@@ -23,6 +23,8 @@ export type Config = {
   };
   readonly contextsPath: string;
   readonly profileSource: ProfileSourceRef;
+  /** IANA time zone for "now" in prompts, e.g. Europe/Lisbon. */
+  readonly timeZone: string;
   readonly secrets: {
     /** Required in production; optional locally, where the key may come from .env. */
     readonly gcpProject: string | undefined;
@@ -41,6 +43,7 @@ export const DEFAULTS = {
   contextsPath: "contexts.md",
   profileSource: "file:data/profile.md",
   anthropicSecretName: "anthropic-api-key",
+  timeZone: "Europe/Lisbon",
 } as const;
 
 const PORT_ERROR = "must be a whole number from 1 to 65535";
@@ -70,6 +73,7 @@ const EnvSchema = z.object({
   ANSWER_MODEL: optionalString,
   CONTEXTS_PATH: optionalString,
   PROFILE_SOURCE: optionalString,
+  TIMEZONE: optionalString,
   GOOGLE_CLOUD_PROJECT: optionalString,
   ANTHROPIC_SECRET_NAME: optionalString,
   VENDUS_SECRET_NAME: optionalString,
@@ -82,6 +86,14 @@ export const parseProfileSource = (value: string): Result<ProfileSourceRef, stri
   if (scheme === "file" && rest !== "") return ok({ kind: "file", path: rest });
   if (scheme === "file") return err(`"file:" needs a path, e.g. "file:data/profile.md"`);
   return err(`unknown scheme in "${value}" (supported: file:<path>)`);
+};
+
+export const parseTimeZone = (value: string): Result<string, string> => {
+  try {
+    return ok(new Intl.DateTimeFormat("en-GB", { timeZone: value }).resolvedOptions().timeZone);
+  } catch {
+    return err(`unknown time zone "${value}" (use an IANA name such as Europe/Lisbon)`);
+  }
 };
 
 export const loadConfig = (env: Env): Result<Config, string> => {
@@ -105,13 +117,14 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   const classifier = field("CLASSIFIER_MODEL", parseModelRef(raw("CLASSIFIER_MODEL") ?? DEFAULTS.classifierModel));
   const answer = field("ANSWER_MODEL", parseModelRef(raw("ANSWER_MODEL") ?? DEFAULTS.answerModel));
   const profileSource = field("PROFILE_SOURCE", parseProfileSource(raw("PROFILE_SOURCE") ?? DEFAULTS.profileSource));
+  const timeZone = field("TIMEZONE", parseTimeZone(raw("TIMEZONE") ?? DEFAULTS.timeZone));
 
   const production = raw("NODE_ENV") === "production";
   if (production && raw("GOOGLE_CLOUD_PROJECT") === undefined) {
     errors.push("GOOGLE_CLOUD_PROJECT: required in production (secrets come from Secret Manager)");
   }
 
-  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource) {
+  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone) {
     return err(errors.join("\n"));
   }
   const e = parsed.data;
@@ -124,6 +137,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     models: { classifier, answer },
     contextsPath: e.CONTEXTS_PATH ?? DEFAULTS.contextsPath,
     profileSource,
+    timeZone,
     secrets: {
       gcpProject: e.GOOGLE_CLOUD_PROJECT,
       anthropicSecretName: e.ANTHROPIC_SECRET_NAME ?? DEFAULTS.anthropicSecretName,

@@ -57,6 +57,11 @@ export type LlmRequest = {
   readonly system: string;
   /** Mark the system prompt as cacheable (it must be stable across requests). */
   readonly cacheSystem?: boolean;
+  /**
+   * Text appended after `system` and never cached, for parts that change on
+   * every request (e.g. the current time), so they don't break the cache.
+   */
+  readonly systemSuffix?: string;
   readonly messages: readonly LlmMessage[];
   readonly tools?: readonly LlmTool[];
   /** Ask for JSON matching this schema; the response is then `kind: "json"`. */
