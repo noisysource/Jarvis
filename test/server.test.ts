@@ -4,7 +4,7 @@ import { parseContexts } from "../src/contexts.js";
 import { makeJsonLogger } from "../src/log.js";
 import { makePrecheck } from "../src/precheck.js";
 import { ok } from "../src/result.js";
-import { MAX_BODY_BYTES, makeServer } from "../src/server.js";
+import { localHosts, MAX_BODY_BYTES, makeServer } from "../src/server.js";
 import type { Context, ContextId, Deps } from "../src/types.js";
 
 const QUESTION = "When is my daughter's birthday?";
@@ -17,7 +17,7 @@ beforeAll(async () => {
   contexts = parsed.value;
 });
 
-const setup = () => {
+const setup = (options: { allowedHosts?: readonly string[] } = {}) => {
   const lines: string[] = [];
   const calls: string[] = [];
   const deps: Deps = {
@@ -36,7 +36,7 @@ const setup = () => {
     log: makeJsonLogger({ write: (l) => lines.push(l), now: () => new Date("2026-11-06T17:20:00Z") }),
   };
   let n = 0;
-  const app = makeServer(deps, { newRequestId: () => `req-${++n}` });
+  const app = makeServer(deps, { newRequestId: () => `req-${++n}`, ...options });
   const post = (body: string, headers: Record<string, string> = { "content-type": "application/json" }) =>
     app.request("/ask", { method: "POST", body, headers });
   return { app, post, lines, calls };
@@ -100,9 +100,9 @@ describe("POST /ask", () => {
     expect(calls).toEqual([]);
   });
 
-  it("rejects a body that isn't JSON", async () => {
+  it("rejects a JSON content type with a body that isn't JSON", async () => {
     const { post } = setup();
-    const res = await post("question=hi", { "content-type": "application/x-www-form-urlencoded" });
+    const res = await post("question=hi");
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ type: "error", message: "The request body must be JSON." });
   });
@@ -159,5 +159,95 @@ describe("logging", () => {
     const all = lines.join("\n");
     expect(all).not.toContain(QUESTION);
     expect(all).not.toContain(ANSWER);
+  });
+});
+
+describe("Host allowlist (DNS-rebinding guard)", () => {
+  const PORT = 8080;
+  const guarded = () => setup({ allowedHosts: localHosts(PORT) });
+  const get = (app: ReturnType<typeof setup>["app"], host?: string) =>
+    app.request(`http://127.0.0.1:${PORT}/healthz`, { headers: host === undefined ? {} : { host } });
+
+  it.each(["127.0.0.1:8080", "localhost:8080", "LOCALHOST:8080", " localhost:8080 "])("allows %s", async (host) => {
+    const { app } = guarded();
+    expect((await get(app, host)).status).toBe(200);
+  });
+
+  it.each([
+    ["a rebinding hostname", "evil.example:8080"],
+    ["the right name on another port", "localhost:9999"],
+    ["no port", "localhost"],
+    ["IPv6 loopback", "[::1]:8080"],
+    ["a LAN address", "192.168.1.20:8080"],
+    ["a lookalike", "localhost.evil.example:8080"],
+  ])("rejects %s with 403", async (_label, host) => {
+    const { app, calls, lines } = guarded();
+    const res = await get(app, host);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ type: "error", message: "This server only accepts requests to localhost." });
+    expect(calls).toEqual([]);
+    expect(lines.map((l) => JSON.parse(l) as Record<string, unknown>)).toContainEqual(
+      expect.objectContaining({ message: "rejected request", reason: "host_not_allowed" }),
+    );
+  });
+
+  it("rejects a request with no Host header", async () => {
+    const { app, lines } = guarded();
+    expect((await get(app)).status).toBe(403);
+    expect(lines.join("\n")).toContain('"reason":"missing_host"');
+  });
+
+  it("guards POST /ask before reading the body, and 404s too", async () => {
+    const { app, calls } = guarded();
+    const res = await app.request(`http://127.0.0.1:${PORT}/ask`, {
+      method: "POST",
+      headers: { host: "evil.example:8080", "content-type": "application/json" },
+      body: JSON.stringify({ question: QUESTION }),
+    });
+    expect(res.status).toBe(403);
+    expect(calls).toEqual([]);
+    expect((await app.request(`http://127.0.0.1:${PORT}/nope`, { headers: { host: "evil.example:8080" } })).status).toBe(403);
+  });
+
+  it("answers normally on an allowed host", async () => {
+    const { app } = guarded();
+    const res = await app.request(`http://127.0.0.1:${PORT}/ask`, {
+      method: "POST",
+      headers: { host: "localhost:8080", "content-type": "application/json" },
+      body: JSON.stringify({ question: QUESTION }),
+    });
+    expect(await res.json()).toMatchObject({ type: "answer" });
+  });
+
+  it("is off when no allowlist is given (production behind Cloud Run IAM)", async () => {
+    const { app } = setup();
+    expect((await get(app, "jarvis-abc123-ew.a.run.app")).status).toBe(200);
+  });
+});
+
+describe("POST /ask content type (cross-site guard)", () => {
+  it.each([
+    ["text/plain", "text/plain"],
+    ["a form post", "application/x-www-form-urlencoded"],
+    ["multipart", "multipart/form-data; boundary=x"],
+    ["a JSON lookalike", "application/json-patch+json"],
+  ])("rejects %s with 415", async (_label, contentType) => {
+    const { post, calls, lines } = setup();
+    const res = await post(JSON.stringify({ question: QUESTION }), { "content-type": contentType });
+    expect(res.status).toBe(415);
+    expect(await res.json()).toEqual({ type: "error", message: "POST /ask needs Content-Type: application/json." });
+    expect(calls).toEqual([]);
+    expect(lines.join("\n")).not.toContain(QUESTION);
+  });
+
+  it("rejects a missing content type with 415", async () => {
+    const { post } = setup();
+    expect((await post(JSON.stringify({ question: QUESTION }), {})).status).toBe(415);
+  });
+
+  it.each(["application/json; charset=utf-8", "Application/JSON"])("accepts %s", async (contentType) => {
+    const { post } = setup();
+    const res = await post(JSON.stringify({ question: QUESTION }), { "content-type": contentType });
+    expect(res.status).toBe(200);
   });
 });

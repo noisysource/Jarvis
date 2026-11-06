@@ -70,6 +70,12 @@ question, and after a clarify response it re-sends the question with
   consumed, never defined.
 - **Never guess the context.** Ambiguous → ask.
 - **Never guess facts about you.** If the profile doesn't say, Jarvis says so.
+- **Local server, no login, so other sites are kept out:** outside
+  production it only accepts `Host: 127.0.0.1:<port>` or `localhost:<port>`
+  (403 otherwise; blocks DNS rebinding), and `POST /ask` requires
+  `application/json` (415 otherwise; blocks cross-site forms and simple
+  requests, and no CORS preflight is ever answered). On Cloud Run, IAM
+  protects the endpoint instead (#18).
 - **Read-only by construction** for Vendus: the client only exposes `GET`, and
   paths are checked against an allowlist before any network call.
 - **Secrets:** Secret Manager in the cloud. Locally only, `ANTHROPIC_API_KEY`

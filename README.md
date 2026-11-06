@@ -65,6 +65,10 @@ Requires Node 22.12 or later.
    ```
 
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
+   It also only accepts requests addressed to `127.0.0.1:8080` or
+   `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding
+   tricks), and `POST /ask` only takes `Content-Type: application/json` (415
+   otherwise, which blocks cross-site form posts).
    It won't start without a valid `contexts.md`, your profile and a key, and
    says what's missing. Try it:
 
