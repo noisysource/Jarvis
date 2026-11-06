@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONVERSATION,
   LANGUAGES,
   LIMITS,
   appendTurn,
   buildAskBody,
+  isStopPhrase,
+  keepListening,
   matchContextOption,
   nameWords,
   parseLanguage,
   pickVoice,
   replyView,
+  shouldReopenMic,
   viewFromHttp,
   voiceKey,
   voiceQuality,
@@ -202,5 +206,71 @@ describe("matchContextOption (typed or spoken pick after a clarify)", () => {
 
   it("normalises names to words", () => {
     expect(nameWords("Kid-Club! Comissão")).toEqual(["kid", "club", "comissao"]);
+  });
+});
+
+describe("conversation mode", () => {
+  it.each([
+    "that's all",
+    "That's all.",
+    "that is all",
+    "Stop",
+    "stop!",
+    "stop listening",
+    "obrigado",
+    "Obrigada",
+    "muito obrigado",
+    "é tudo",
+    "É tudo.",
+    "e tudo",
+    "thanks, that's all",
+    "OK, that's all, thank you",
+    "obrigado, é tudo",
+    "é tudo, obrigado",
+    "Jarvis, stop",
+    "ok stop",
+  ])("%j stops listening", (text) => {
+    expect(isStopPhrase(text)).toBe(true);
+  });
+
+  it.each([
+    "stop the music",
+    "don't stop",
+    "is that all?",
+    "that's all I wanted to know about her birthday",
+    "obrigado pela ajuda, e agora a fatura?",
+    "thank you",
+    "thanks",
+    "ok",
+    "",
+    "tudo bem?",
+  ])("%j is a normal question", (text) => {
+    expect(isStopPhrase(text)).toBe(false);
+  });
+
+  const reopen = {
+    conversation: true,
+    voiceSession: true,
+    blocked: false,
+    available: true,
+    kind: "answer" as const,
+  };
+
+  it("reopens the mic only in a spoken conversation with conversation mode on", () => {
+    expect(shouldReopenMic(reopen)).toBe(true);
+    for (const kind of ["unavailable", "handoff", "clarify"] as const) expect(shouldReopenMic({ ...reopen, kind })).toBe(true);
+    expect(shouldReopenMic({ ...reopen, conversation: false })).toBe(false);
+    expect(shouldReopenMic({ ...reopen, voiceSession: false })).toBe(false); // typed question
+    expect(shouldReopenMic({ ...reopen, blocked: true })).toBe(false); // browser blocked it: use the button
+    expect(shouldReopenMic({ ...reopen, available: false })).toBe(false);
+    expect(shouldReopenMic({ ...reopen, kind: "error" })).toBe(false);
+  });
+
+  it("keeps listening through about 8 seconds of silence, then stops", () => {
+    expect(CONVERSATION.silenceMs).toBe(8000);
+    expect(keepListening({ elapsedMs: 5000, heard: false, stopped: false })).toBe(true);
+    expect(keepListening({ elapsedMs: 8000, heard: false, stopped: false })).toBe(false);
+    expect(keepListening({ elapsedMs: 3000, heard: true, stopped: false })).toBe(false);
+    expect(keepListening({ elapsedMs: 3000, heard: false, stopped: true })).toBe(false);
   });
 });
