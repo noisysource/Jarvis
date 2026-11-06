@@ -42,6 +42,14 @@ Requires Node 22.12 or later.
    npm run smoke:llm
    ```
 
+   And see how the classifier routes the example questions in
+   `test/fixtures/classifier-questions.json` (about a dozen small classifier
+   calls; the EC/HRT precheck cases make none):
+
+   ```bash
+   npm run eval:classifier
+   ```
+
 5. Start the dev server:
 
    ```bash
