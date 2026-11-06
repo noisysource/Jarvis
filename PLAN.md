@@ -84,6 +84,7 @@ question, and after a clarify response it re-sends the question with
 | `src/contexts.ts` | `parseContexts(markdown)` for `contexts.md`; classifier/clarify/handoff helpers | #22 |
 | `src/precheck.ts` | `makePrecheck(contexts)`: local cue matching for handoff contexts, no model | #22 |
 | `src/config.ts` | `loadConfig(env)`: pure, zod-validated | #5 |
+| `src/llm/model-ref.ts` | `parseModelRef("provider:model")`, known providers | #5, #10 |
 | `src/secrets.ts` | Secret Manager access, memoised; local `.env` fallback outside production | #6 |
 | `src/profile.ts` | `ProfileSource`; file source now, secret/bucket later | #25 |
 | `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
@@ -138,9 +139,22 @@ return compact summaries, not raw payloads.
 
 **Secrets & config.** Secret Manager: `anthropic-api-key`, later
 `vendus-api-key`. The Cloud Run service account gets
-`roles/secretmanager.secretAccessor` on those secrets only. Non-secret env:
-`GOOGLE_CLOUD_PROJECT`, `ANTHROPIC_SECRET_NAME`, `VENDUS_SECRET_NAME`, `PORT`,
-`CLASSIFIER_MODEL`, `ANSWER_MODEL`, `PROFILE_SOURCE`.
+`roles/secretmanager.secretAccessor` on those secrets only.
+
+Non-secret env (`src/config.ts`, all optional locally):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `NODE_ENV` | `development` | `production` / `development` / `test` |
+| `HOST` | `127.0.0.1` (`0.0.0.0` in production) | Local server has no auth, so loopback only |
+| `PORT` | `8080` | |
+| `CLASSIFIER_MODEL` | `anthropic:claude-haiku-5-5` | `provider:model` |
+| `ANSWER_MODEL` | `anthropic:claude-sonnet-5-5` | `provider:model` |
+| `CONTEXTS_PATH` | `contexts.md` | |
+| `PROFILE_SOURCE` | `file:data/profile.md` | Only `file:` for now |
+| `GOOGLE_CLOUD_PROJECT` | none | **Required in production** |
+| `ANTHROPIC_SECRET_NAME` | `anthropic-api-key` | Secret Manager name |
+| `VENDUS_SECRET_NAME` | none | Not needed in M0 |
 
 **Deployment (after M0).** Node 22, multi-stage Dockerfile, non-root (#17).
 Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
