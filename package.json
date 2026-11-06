@@ -12,6 +12,7 @@
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "smoke:llm": "tsx --env-file-if-exists=.env scripts/smoke-llm.ts",
     "eval:classifier": "tsx --env-file-if-exists=.env scripts/eval-classifier.ts",
+    "ask": "tsx --env-file-if-exists=.env scripts/ask.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
