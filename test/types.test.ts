@@ -28,7 +28,12 @@ const ecHrt: Context = {
   description: "Work for the European Commission / HRT itself.",
   data: "none (handled by Kiro)",
   tools: [],
-  handling: { kind: "handoff", to: "Kiro (the EC's agent)" },
+  handling: {
+    kind: "handoff",
+    to: "Kiro (the EC's agent)",
+    cues: ["European Commission", "HRT"],
+    unless: [{ words: ["invoice"], routeTo: id("noisysource") }],
+  },
 };
 
 describe("types", () => {
@@ -44,12 +49,9 @@ describe("types", () => {
   });
 
   it("handoff contexts must name a target", () => {
-    expectTypeOf<Extract<Context["handling"], { kind: "handoff" }>>().toEqualTypeOf<{
-      readonly kind: "handoff";
-      readonly to: string;
-    }>();
+    expectTypeOf<Extract<Context["handling"], { kind: "handoff" }>["to"]>().toEqualTypeOf<string>();
     // @ts-expect-error handoff without `to`
-    const bad: Context["handling"] = { kind: "handoff" };
+    const bad: Context["handling"] = { kind: "handoff", cues: [], unless: [] };
     expect(bad.kind).toBe("handoff");
   });
 

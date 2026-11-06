@@ -27,14 +27,25 @@ edit, not a code change.
 | `noisysource` | answer | None connected yet. **Invoicing the European Commission belongs here.** |
 | `ec-hrt` (European Commission / HRT) | **handoff to Kiro** | None. Jarvis replies that this is for Kiro (the EC's agent) and stops: no answer model, no tools, no memory. |
 
+**Local precheck for handoffs.** `ec-hrt` lists *recognition cues* (e.g.
+"European Commission", "EC", "HRT") that are matched locally, before any model
+runs: whole words, accents ignored, ALL-CAPS cues case-sensitive. A cue plus an
+invoicing word from its `Unless` list ("Invoice the Commission") routes straight
+to `noisysource`; a cue alone hands off to Kiro. Questions with no cue go to the
+classifier, which still has `ec-hrt` as an option as a backstop.
+
 ## Request flow (M0)
 
 ```
 Chat page (GET /)                         Hono server (npm run dev, localhost)
  ├ text box / mic (SpeechRecognition)      POST /ask { question, context?, history[] }
- ├ history[] in page memory only   ───────►  classify(question, history)   ← contexts.md
- └ speaks answer (speechSynthesis) ◄───────  ├ unclear     → clarify (context buttons)
-                                             ├ ec-hrt      → handoff: "This is for Kiro" (nothing else runs)
+ ├ history[] in page memory only   ───────►  precheck(question)            ← cues in contexts.md, no model
+ │                                           ├ EC cue + invoicing word → noisysource
+ │                                           ├ EC cue                  → handoff: "This is for Kiro"
+ │                                           └ no match ↓
+ └ speaks answer (speechSynthesis) ◄───────  classify(question, history)   ← contexts.md
+                                             ├ unclear     → clarify (context buttons)
+                                             ├ ec-hrt      → handoff: "This is for Kiro" (backstop; nothing else runs)
                                              ├ kidclub /
                                              │ noisysource → "not connected yet" (M0)
                                              └ personal    → loadMemories (stub)
@@ -66,7 +77,8 @@ question, and after a clarify response it re-sends the question with
 |---|---|---|
 | `src/result.ts` | `Result<T, E>` with `ok` / `err` | #4 |
 | `src/types.ts` | `ContextId`, `Context`, `Turn`, `AskRequest`, `AskResponse`, `Classification`, `Memory`, `MemoryHooks`, `AppError`, `Deps` | #4 |
-| `src/contexts.ts` | `parseContexts(markdown)` for `contexts.md` | #22 |
+| `src/contexts.ts` | `parseContexts(markdown)` for `contexts.md`; classifier/clarify/handoff helpers | #22 |
+| `src/precheck.ts` | `makePrecheck(contexts)`: local cue matching for handoff contexts, no model | #22 |
 | `src/config.ts` | `loadConfig(env)`: pure, zod-validated | #5 |
 | `src/secrets.ts` | Secret Manager access, memoised; local `.env` fallback outside production | #6 |
 | `src/profile.ts` | `ProfileSource`; file source now, secret/bucket later | #25 |
@@ -167,6 +179,9 @@ Confirmed for M0 (2026-11-06):
 - **Contexts:** `noisysource` added (owns invoicing the European Commission);
   `ec-hrt` (European Commission / HRT) is a handoff to Kiro, the EC's agent,
   with no tools and no memory.
+- **EC precheck:** `ec-hrt` is recognised locally from cues in `contexts.md`
+  and handed off without calling any model; invoicing words override the EC
+  cues and route to `noisysource`.
 
 ## Out of scope for M0
 

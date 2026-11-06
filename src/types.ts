@@ -14,14 +14,30 @@ export type ContextId = string & { readonly [contextIdBrand]: true };
 export type ToolName = "vendus";
 
 /**
+ * An exception to a handoff: when one of these words appears together with a
+ * handoff cue, the question goes to `routeTo` instead. Example: "Invoice the
+ * Commission" goes to noisysource, not to Kiro.
+ */
+export type UnlessRule = {
+  readonly words: readonly string[];
+  readonly routeTo: ContextId;
+};
+
+/**
  * How Jarvis handles a context:
  * - answer: Jarvis answers it (possibly with tools and memory).
  * - handoff: Jarvis recognises it, says which agent handles it, and stops:
- *   no answer-model call, no tools, no memory.
+ *   no answer-model call, no tools, no memory. `cues` are matched locally,
+ *   before any model runs.
  */
 export type ContextHandling =
   | { readonly kind: "answer" }
-  | { readonly kind: "handoff"; readonly to: string };
+  | {
+      readonly kind: "handoff";
+      readonly to: string;
+      readonly cues: readonly string[];
+      readonly unless: readonly UnlessRule[];
+    };
 
 export type Context = {
   readonly id: ContextId;
