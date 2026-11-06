@@ -50,6 +50,14 @@ Requires Node 22.12 or later.
    npm run eval:classifier
    ```
 
+   Ask the personal answerer a question directly, using your real profile
+   (one answer-model call; skips the classifier). The model and token use,
+   including cache reads, are printed dimmed below the answer:
+
+   ```bash
+   npm run ask "When is my daughter's birthday?"
+   ```
+
 5. Start the dev server:
 
    ```bash
