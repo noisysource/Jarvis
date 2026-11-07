@@ -229,7 +229,7 @@ Non-secret env (`src/config.ts`, all optional locally):
 | `ANTHROPIC_SECRET_NAME` | `anthropic-api-key` | Secret Manager name |
 | `VENDUS_SECRET_NAME` | none | Not needed in M0 |
 
-**Deployment (after M0).** Node 22, multi-stage Dockerfile, non-root (#17).
+**Deployment (after M0).** Node 22 (22.13 or later, for `node:sqlite`), multi-stage Dockerfile, non-root (#17).
 Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
 (#18). Phone access (Siri Shortcut, messaging bots) is #19.
 

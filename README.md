@@ -5,7 +5,7 @@ A personal AI orchestrator. Architecture, milestones and decisions are in
 
 ## Run locally
 
-Requires Node 22.12 or later.
+Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a flag before 22.13).
 
 1. Install dependencies:
 

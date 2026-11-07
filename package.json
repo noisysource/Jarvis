@@ -5,7 +5,7 @@
   "description": "Jarvis, a personal AI orchestrator (KidClub + personal), for Google Cloud Run",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
