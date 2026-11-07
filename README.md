@@ -101,7 +101,10 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    in code: nothing about EC/HRT work, no secrets, no invoice data, and
    health, money or sensitive things about other people only when you say
    so ("remember", "take note", "lembra", "guarda", "não te esqueças",
-   "anota"). To keep certain names out of memory altogether (EC colleagues,
+   "anota"). To keep one exchange out of memory entirely, history line
+   included, say so: "não guardes isto", "não te lembres", "esquece isto",
+   "don't remember/keep/save this" or "off the record". To keep certain
+   names out of memory altogether (EC colleagues,
    say), copy `data/never-remember.example.txt` to `data/never-remember.txt`
    (gitignored) and list them, one per line.
 

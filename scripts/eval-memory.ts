@@ -24,6 +24,8 @@ type Fixture = {
   related?: { id: string; kind: "fact" | "playbook"; text: string }[];
   expect: "keep" | "delete" | "nothing";
   includes?: string;
+  /** "none": no history line may be kept for this exchange. */
+  history?: "none";
 };
 
 const fail = (message: string): never => {
@@ -79,17 +81,19 @@ for (const f of cases) {
   const result = await extract({ question: f.question, answer: f.answer, contextId: f.context as ContextId, related, now });
   const texts = result.decisions.flatMap((d) => (d.action === "delete" ? [] : [d.text]));
   const deletes = result.decisions.filter((d) => d.action === "delete").length;
-  const okay =
+  const historyOkay = f.history !== "none" || result.historyLine === undefined;
+  const decisionsOkay =
     f.expect === "nothing"
       ? result.decisions.length === 0
       : f.expect === "delete"
         ? deletes > 0
         : texts.some((t) => t.toLowerCase().includes((f.includes ?? "").toLowerCase()));
+  const okay = decisionsOkay && historyOkay;
   if (okay) passed += 1;
   const kept = result.decisions.map((d) => (d.action === "delete" ? `delete ${d.id}` : `${d.action}: ${d.text}`));
   console.log(
-    `${okay ? "✓" : "✗"} [${f.context}] ${f.question}\n    expected ${f.expect}${f.includes ? ` "${f.includes}"` : ""}; kept ${kept.length ? kept.join(" | ") : "nothing"}` +
-      `${result.historyLine ? `\n    history: ${result.historyLine}` : ""}${notes.length ? `\n    (${notes.join("; ")})` : ""}`,
+    `${okay ? "✓" : "✗"} [${f.context}] ${f.question}\n    expected ${f.expect}${f.includes ? ` "${f.includes}"` : ""}${f.history === "none" ? ", no history" : ""}; kept ${kept.length ? kept.join(" | ") : "nothing"}` +
+      `${result.historyLine ? `\n    history: ${result.historyLine}${historyOkay ? "" : "  ← should be none"}` : ""}${notes.length ? `\n    (${notes.join("; ")})` : ""}`,
   );
 }
 console.log(`\n${passed}/${cases.length} as expected`);

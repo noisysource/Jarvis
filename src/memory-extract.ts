@@ -9,6 +9,7 @@
 import type { JsonObjectSchema, LlmCall } from "./llm/types.js";
 import type { Extract, ExtractInput, ExtractResult, MemoryDecision } from "./memory.js";
 import {
+  asksNotToRemember,
   asksToForget,
   asksToRemember,
   containsSecret,
@@ -54,6 +55,7 @@ export const EXTRACT_SYSTEM_PROMPT = [
   "- Set \"explicit\" to true only when the user explicitly asked you to remember that item.",
   "",
   "If the user asks you to forget something, use action \"delete\" with the id of the matching related memory.",
+  "If the user asks to keep this exchange out of memory (não guardes, não te lembres, esquece isto, don't remember/keep/save this, off the record), return no memories and an empty history_line.",
   "",
   "Write each memory as one short, plain sentence in the user's language, without dates relative to today (\"tomorrow\").",
   "\"confidence\" is how sure you are that it should be kept (0 to 1).",
@@ -210,7 +212,9 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
     return [{ action: "add", kind: s.kind, text: s.text, origin }];
   });
 
-  // The history line is always automatic, so the sensitive rule always applies to it.
+  // The history line gets the same content checks as a fact or playbook
+  // (secrets, EC/HRT, business records, sensitive), and it's always
+  // automatic, so the sensitive rule always applies to it.
   const line = input.historyLine.slice(0, EXTRACT_LIMITS.maxHistoryChars).trim();
   const lineProblem = line === "" ? null : contentProblem(line, input.ecInvoicing ? "playbook" : "history", false, false);
   if (lineProblem) drop(lineProblem);
@@ -256,6 +260,12 @@ export const makeModelExtract = (deps: {
   return async (input) => {
     const context = deps.contexts.find((c) => c.id === input.contextId);
     if (!context || context.handling.kind === "handoff") return nothing;
+
+    // The user's opt-out wins over everything: no model call, no history line.
+    if (asksNotToRemember(input.question)) {
+      deps.log?.info("memory extract skipped", { contextId: context.id, reason: "opt_out" });
+      return nothing;
+    }
 
     // EC/HRT: a handoff never gets here. Any other EC question keeps nothing,
     // except the invoicing exception routed to this context (Noisy Source).

@@ -71,6 +71,31 @@ export const asksToRemember = (question: string): boolean => {
     .some((p) => hasPlainPhrase(words, p));
 };
 
+/**
+ * "Keep this out of memory": the whole exchange is skipped, history line
+ * included, before any model call. Matched as phrases anywhere in the
+ * user's words ("Não guardes isto, mas…"). "Esquece isto" opts out of this
+ * exchange; "esquece que tomo café" is a request to forget a memory.
+ */
+export const OPT_OUT_PHRASES: readonly string[] = [
+  "não guardes",
+  "não te lembres",
+  "esquece isto",
+  "don't remember this",
+  "do not remember this",
+  "don't keep this",
+  "do not keep this",
+  "don't save this",
+  "do not save this",
+  "off the record",
+];
+
+/** Did the user ask for this exchange to stay out of memory? */
+export const asksNotToRemember = (question: string): boolean => {
+  const words = foldWords(question);
+  return OPT_OUT_PHRASES.some((p) => findPhrase(words, phrase(p)) !== -1);
+};
+
 const FORGET_PHRASES = ["forget", "esquece", "esqueca", "esquecer", "apaga", "apague", "delete", "remove", "erase"].map(phrase);
 
 /** Did the user ask Jarvis to forget something? Deletes are only allowed when they did. "Don't forget" isn't one. */

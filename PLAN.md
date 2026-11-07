@@ -216,8 +216,13 @@ list) only when explicit. "Explicit" needs the model's flag and the user's
 own words: remember, take note, lembra/lembre, guarda, não te esqueças,
 anota, don't forget (any case, accents optional, whole words, not negated:
 "don't remember this" and "do you remember…?" don't count). The history
-line follows the same rules and is never explicit. Any EC question outside
-that exception keeps nothing and makes no model call.
+line goes through the same code checks as facts (secrets, EC/HRT, business
+records, sensitive) and is never explicit. Any EC question outside that
+exception keeps nothing and makes no model call. An opt-out in the user's
+own words ("não guardes", "não te lembres", "esquece isto", "don't
+remember/keep/save this", "off the record") skips the whole exchange,
+history line included, before any model call: checked in code by the
+memory hooks and again by the extract step.
 
 **Personality (M0).** The personal answerer is warm, natural and a little
 conversational: it greets back or acknowledges and adds a sentence of context

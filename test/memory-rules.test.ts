@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseContexts } from "../src/contexts.js";
 import {
+  asksNotToRemember,
   asksToForget,
   asksToRemember,
   containsSecret,
@@ -55,6 +56,35 @@ describe("asksToRemember (an explicit request, in the user's own words)", () => 
   ])("%j doesn't count", (question) => {
     expect(asksToRemember(question)).toBe(false);
   });
+});
+
+describe("asksNotToRemember (keep this exchange out of memory)", () => {
+  it.each([
+    "Não guardes isto, mas estou a pensar mudar de emprego",
+    "nao guardes isto",
+    "Não guardes isso, ok?",
+    "não te lembres disto: tive uma discussão com o chefe",
+    "Esquece isto, foi só um desabafo",
+    "ESQUECE ISTO",
+    "Don't remember this, but I'm thinking of quitting",
+    "do not remember this",
+    "Don't keep this: I'm interviewing elsewhere",
+    "don't save this please",
+    "Do not save this",
+    "Off the record, I'm unhappy at work",
+    "this is off the record",
+  ])("%j opts out", (q) => expect(asksNotToRemember(q)).toBe(true));
+
+  it.each([
+    "Remember that Inês's teacher is Ms Rita",
+    "guarda isto: a renda sobe em janeiro",
+    "Forget that I take espresso",
+    "esquece que tomo café",
+    "I don't remember her name",
+    "não me lembro do nome dela",
+    "What's the record for the marathon?",
+    "hello",
+  ])("%j doesn't", (q) => expect(asksNotToRemember(q)).toBe(false));
 });
 
 describe("asksToForget", () => {
