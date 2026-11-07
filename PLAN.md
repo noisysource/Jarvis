@@ -13,7 +13,7 @@ Work is tracked in GitHub Issues and the **Jarvis** project board
 |---|---|---|
 | **M0: talk to Jarvis** | Chat page with voice, run locally; answers questions about you from your profile | `m0` |
 | v0: KidClub invoices | Read-only Vendus tool; Cloud Run deploy | `after-m0`, `jarvis-v0` |
-| After v0 | Memory in Firestore (#24), phone access (#19), daily brief (#49) | `after-v0`, `backlog` |
+| After v0 | Memory in Firestore (#24) and its performance (#56), phone access (#19; Pi + Tailscale #53), daily brief (#49), local speech (#54), local models via Ollama (#55) | `after-v0`, `backlog` |
 
 ## Contexts
 
@@ -222,6 +222,25 @@ Done: #1 decisions · #2 scaffold · #3 CI
 **After M0:** #7 Vendus spike → #8 client → #9 tools → #12 KidClub answerer;
 #17 Dockerfile → #18 Cloud Run deploy guide.
 
+Backlog after M0 (labels in brackets):
+- #53 Run Jarvis on the Raspberry Pi with Tailscale for phone access
+  [`infra`, `backlog`]: a private alternative to Cloud Run (#17, #18).
+  systemd service; `tailscale serve` for HTTPS (the mic needs it) on the
+  Pi's tailnet name; an `ALLOWED_HOSTS` setting for the Host guard (#44);
+  secrets in a mode-600 `.env` (needs the secrets rule updated for
+  self-hosting). Nothing reachable outside the tailnet.
+- #54 Local speech: Whisper for listening, Piper or Kokoro for speaking
+  [`voice`, `privacy`, `backlog`]: optional server-side speech so voice
+  never leaves your machines; English and pt-PT; compared on the M1 Pro and
+  the Pi.
+- #55 Ollama provider and model comparison [`llm`, `backlog`]: an `ollama:`
+  provider behind `LlmCall`; `eval:classifier` and the profile questions
+  run against any model, side by side with Claude. Defaults don't change
+  until a local model passes.
+- #56 Memory performance [`memory`, `backlog`; before or with #24]: run the
+  wrap-up after the reply is sent; skip the memory load for contexts with
+  no answerer.
+
 ## Decisions
 
 Confirmed in #1 (2026-11-05):
@@ -254,5 +273,6 @@ Confirmed for M0 (2026-11-06):
 
 ## Out of scope for M0
 
-Vendus, Cloud Run deployment, real memory (#24), personal data tools (Gmail,
-Drive, calendar), phone access (#19).
+Vendus, Cloud Run deployment or the Pi (#53), real memory (#24, #56),
+personal data tools (Gmail, Drive, calendar), phone access (#19), local speech
+(#54) and local models (#55).
