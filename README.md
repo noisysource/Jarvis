@@ -51,8 +51,11 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    ```
 
    And see what the memory wrap-up keeps and drops for the examples in
-   `test/fixtures/memory-extraction.json` (one small classifier-model call
-   per case; English and pt-PT):
+   `test/fixtures/memory-extraction.json` (English and pt-PT). Each case
+   goes through the same flow as the server, so contexts that aren't
+   connected yet get no wrap-up; it uses a throwaway in-memory store, never
+   your `data/memory.sqlite`, and makes at most one small classifier-model
+   call per case:
 
    ```bash
    npm run eval:memory

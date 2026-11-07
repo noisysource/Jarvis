@@ -6,7 +6,10 @@ import {
   asksToForget,
   asksToRemember,
   containsSecret,
+  contextNameWords,
   looksLikeBusinessRecord,
+  mentionsCustomerOrDebt,
+  namesSomeone,
   makeEcMatchers,
   parseNeverRemember,
   sensitiveCategories,
@@ -142,6 +145,34 @@ describe("looksLikeBusinessRecord (never kept from a business context)", () => {
     "Invoice the EC on the first working day of the month",
     "Monthly fees are due by the 8th",
   ])("%j isn't", (text) => expect(looksLikeBusinessRecord(text)).toBe(false));
+});
+
+describe("people in business contexts", () => {
+  it.each([
+    "Asked about the Silva family's unpaid balance",
+    "Asked whether Ana Costa paid",
+    "Perguntou se a família Silva já pagou",
+    "Checked on Rui's fees",
+  ])("%j names someone", (text) => expect(namesSomeone(text, contextNameWords(contexts))).toBe(true));
+
+  it.each([
+    "Asked about an unpaid KidClub invoice",
+    "Perguntou por uma fatura da KidClub por pagar",
+    "Asked how Noisy Source invoices the EC",
+    "Asked about invoices due on Monday in March",
+    "Silva: nothing else", // the first word of a sentence isn't counted
+    "Invoice the European Commission on the first working day",
+  ])("%j doesn't", (text) => expect(namesSomeone(text, contextNameWords(contexts))).toBe(false));
+
+  it.each(["Asked which families haven't paid", "A family owes two months", "Perguntou pelas dívidas", "Asked about a customer's debt", "o cliente da sala 2"])(
+    "%j mentions a customer, family or debt",
+    (text) => expect(mentionsCustomerOrDebt(text)).toBe(true),
+  );
+
+  it.each(["Asked about an unpaid KidClub invoice", "Asked which invoices are overdue", "Perguntou pelas faturas em atraso"])(
+    "%j doesn't",
+    (text) => expect(mentionsCustomerOrDebt(text)).toBe(false),
+  );
 });
 
 describe("sensitiveCategories (only on an explicit request)", () => {

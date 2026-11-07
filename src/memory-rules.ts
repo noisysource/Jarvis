@@ -171,6 +171,57 @@ export const looksLikeBusinessRecord = (text: string): boolean => {
   return CUSTOMER_WORDS.some((p) => findPhrase(words, p) !== -1) && NAME_LIST.test(text);
 };
 
+// ---- people in business contexts ----
+
+/** Capitalised words that aren't people: weekdays, months, languages, products. Context names are added per call. */
+const NOT_NAMES = new Set(
+  [
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+    "janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    "english", "portuguese", "ingles", "portugues", "jarvis", "vendus", "i",
+  ].map((w) => foldWords(w).join(" ")),
+);
+
+/**
+ * Does the text name someone? A capitalised word that isn't the first word
+ * of a sentence, an acronym, or a known non-name ("Asked about the Silva
+ * family" → true; "Asked about an unpaid KidClub invoice" → false).
+ */
+export const namesSomeone = (text: string, allowed: ReadonlySet<string> = new Set()): boolean =>
+  text
+    .split(/[.!?:;]\s+|\n+/)
+    .some((sentence) =>
+      sentence
+        .split(/\s+/)
+        .slice(1)
+        .map((t) => t.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "").replace(/['’]s$/u, ""))
+        .some((t) => {
+          if (!/^\p{Lu}\p{Ll}/u.test(t)) return false; // lowercase, or an acronym like EC
+          const folded = foldWords(t).join(" ");
+          return !NOT_NAMES.has(folded) && !allowed.has(folded);
+        }),
+    );
+
+/** Words that point at a customer, a family or a debt. "Unpaid" and "overdue" are fine: they don't say who. */
+const CUSTOMER_OR_DEBT_WORDS = [
+  "family", "families", "familia", "familias", "parent", "parents", "pai", "pais", "mae", "maes", "mother", "father",
+  "child", "children", "filho", "filha", "filhos", "crianca", "criancas", "aluno", "alunos", "student", "students",
+  "customer", "customers", "client", "clients", "cliente", "clientes", "mr", "mrs", "ms", "sr", "sra", "dona",
+  "senhor", "senhora", "owe", "owes", "owed", "owing", "debt", "debts", "debtor", "arrears", "divida", "dividas",
+  "devedor", "devedores", "calote",
+].map(phrase);
+
+export const mentionsCustomerOrDebt = (text: string): boolean => {
+  const words = foldWords(text);
+  return CUSTOMER_OR_DEBT_WORDS.some((p) => findPhrase(words, p) !== -1);
+};
+
+/** Words of the contexts' names and aliases ("KidClub", "Noisy Source"), which aren't people. */
+export const contextNameWords = (contexts: readonly Context[]): Set<string> =>
+  new Set(contexts.flatMap((c) => [c.name, c.id, ...(c.aliases ?? [])]).flatMap((n) => [foldWords(n).join(" "), ...foldWords(n)]));
+
 // ---- sensitive categories: only on an explicit request ----
 
 export type SensitiveCategory = "health" | "finance" | "others";

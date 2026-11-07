@@ -222,7 +222,14 @@ exception keeps nothing and makes no model call. An opt-out in the user's
 own words ("não guardes", "não te lembres", "esquece isto", "don't
 remember/keep/save this", "off the record") skips the whole exchange,
 history line included, before any model call: checked in code by the
-memory hooks and again by the extract step.
+memory hooks and again by the extract step. In business contexts (KidClub,
+Noisy Source) no memory may name a customer (a capitalised name that isn't a
+context, weekday, month or language), and history lines stay general
+("asked about an unpaid KidClub invoice"): no customers, families or who
+owes what; otherwise they're dropped. `eval:memory` follows the live flow
+(`handleAsk` with the same precheck, answer router and `ANSWERED_CONTEXT_IDS`
+as the server, so contexts that aren't connected get no wrap-up) on a
+throwaway in-memory store per case, never `data/memory.sqlite`.
 
 **Personality (M0).** The personal answerer is warm, natural and a little
 conversational: it greets back or acknowledges and adds a sentence of context

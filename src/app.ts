@@ -34,6 +34,13 @@ export type AppInputs = {
   readonly memoryStore?: MemoryStore;
 };
 
+/**
+ * The contexts Jarvis can answer today. Every other answerable context gets
+ * "not connected yet" (an unavailable reply, with no wrap-up). Shared with
+ * eval:memory so it follows the same flow.
+ */
+export const ANSWERED_CONTEXT_IDS: readonly string[] = ["personal"];
+
 /** "What Jarvis can do", from contexts.md and which contexts have an answerer. */
 export const capabilitiesText = (contexts: readonly Context[], answered: ReadonlySet<string>): string =>
   [
@@ -99,7 +106,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         llm: answerLlm.value,
         profile,
         timeZone: config.timeZone,
-        capabilities: capabilitiesText(contexts.value, new Set(["personal"])),
+        capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
         log,
       }),
     }),

@@ -1,5 +1,5 @@
 {
-  "about": "What the wrap-up should keep or drop, in English and pt-PT. Run with: npm run eval:memory. 'keep' passes if a kept add/update contains `includes` (case-insensitive); 'delete' if a delete is kept; 'nothing' if no add, update or delete is kept. With \"history\": \"none\", the case also fails if any history line is kept. Opt-out cases (não guardes, off the record, …) must keep nothing at all and make no model call.",
+  "about": "What the memory wrap-up should keep or drop, in English and pt-PT. Run with: npm run eval:memory. Each case goes through the live flow (handleAsk: precheck, answer router, memory hooks, extract step) with a throwaway in-memory store. 'keep' passes if a stored add/update contains `includes` (case-insensitive); 'delete' if a seeded related memory is gone; 'nothing' if no memory is added, changed or deleted. With \"history\": \"none\", the case also fails if a history line is stored. Cases in contexts that aren't connected yet get no wrap-up, as in the live flow; 'keep' cases there are skipped until they are.",
   "cases": [
     {
       "context": "personal",
@@ -49,7 +49,6 @@
       "answer": "Got it, swimming is on Thursdays now.",
       "related": [
         {
-          "id": "m1",
           "kind": "fact",
           "text": "Inês swims on Tuesdays"
         }
@@ -63,7 +62,6 @@
       "answer": "Okay, I'll forget the espresso.",
       "related": [
         {
-          "id": "m2",
           "kind": "fact",
           "text": "Takes espresso with no sugar"
         }

@@ -3,7 +3,7 @@
 // calls and the profile file are stubbed.
 
 import { describe, expect, it } from "vitest";
-import { buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
+import { ANSWERED_CONTEXT_IDS, buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
 import { parseContexts } from "../src/contexts.js";
 import { readFile } from "node:fs/promises";
 import { handleAsk } from "../src/ask.js";
@@ -54,6 +54,12 @@ const stubModels = (classifyAs: string) => {
       );
     });
   return { makeLlm, requests };
+};
+
+const parseContextsFile = async () => {
+  const parsed = parseContexts(await readFile("contexts.md", "utf8"));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value;
 };
 
 const silentLog: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
@@ -214,6 +220,18 @@ describe("unclear questions", () => {
     const { result, requests } = await build({ classifyAs: "unclear" });
     expect((await ask(depsOf(result), { question: "Did it get paid?", context: "personal" as never })).type).toBe("answer");
     expect(requests.map((r) => r.model)).toEqual([ANSWER, CLASSIFIER]);
+  });
+});
+
+describe("answered contexts", () => {
+  it("answers exactly ANSWERED_CONTEXT_IDS (which eval:memory shares) and replies 'not connected yet' for the rest, with no wrap-up", async () => {
+    const answerable = (await parseContextsFile()).filter((c) => c.handling.kind === "answer");
+    for (const c of answerable) {
+      const { result, requests } = await build();
+      const response = await ask(depsOf(result), { question: "How are things?", context: c.id });
+      expect(response.type).toBe(ANSWERED_CONTEXT_IDS.includes(c.id) ? "answer" : "unavailable");
+      if (response.type === "unavailable") expect(requests).toEqual([]); // no answer model, no extract call
+    }
   });
 });
 

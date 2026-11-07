@@ -13,8 +13,11 @@ import {
   asksToForget,
   asksToRemember,
   containsSecret,
+  contextNameWords,
   looksLikeBusinessRecord,
   makeEcMatchers,
+  mentionsCustomerOrDebt,
+  namesSomeone,
   sensitiveCategories,
   type EcMatchers,
 } from "./memory-rules.js";
@@ -49,6 +52,7 @@ export const EXTRACT_SYSTEM_PROMPT = [
   "- Anything about European Commission / HRT work, Kiro, or the EC's people and projects. The only exception: a playbook about how to invoice the EC, in the Noisy Source context.",
   "- Secrets: passwords, PINs, codes, API keys, tokens, card or bank account numbers.",
   "- Business records: invoice or document numbers, amounts, tax numbers (NIF), customer names or lists. Keep how the business works, not its data.",
+  "- In a business context (KidClub, Noisy Source), the history line must be general, like \"Asked about an unpaid KidClub invoice\": never name a customer, family or person, and never say who owes what.",
   "",
   "Only when the user explicitly asks you to remember (remember, take note, lembra, guarda, não te esqueças, anota):",
   "- Health, personal finances, and sensitive details about other people. Label these in \"sensitive\": health, finance or others. Use \"none\" otherwise.",
@@ -138,6 +142,8 @@ export type DropReason =
   | "ec"
   | "ec_invoicing_not_playbook"
   | "business_record"
+  | "names_someone"
+  | "customer_or_debt"
   | "sensitive_not_explicit"
   | "unknown_target"
   | "delete_not_asked"
@@ -153,6 +159,8 @@ export type FilterInput = {
   /** The question matched an EC cue and the routing precheck's invoicing exception sent it to this context. */
   readonly ecInvoicing: boolean;
   readonly ec: EcMatchers;
+  /** Capitalised words that aren't people (context names); see `namesSomeone`. */
+  readonly notNames?: ReadonlySet<string>;
 };
 
 export type FilterResult = ExtractResult & { readonly dropped: Readonly<Partial<Record<DropReason, number>>> };
@@ -177,12 +185,24 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
   const known = new Set(input.related.map((m) => normalise(m.text)));
 
   /** The content rules, shared by suggestions and the history line. */
-  const contentProblem = (text: string, kind: "fact" | "playbook" | "history", explicit: boolean, modelSensitive: boolean): DropReason | null => {
+  const notNames = input.notNames ?? contextNameWords([input.context]);
+  const contentProblem = (
+    text: string,
+    kind: "fact" | "playbook",
+    explicit: boolean,
+    modelSensitive: boolean,
+    isHistory = false,
+  ): DropReason | null => {
     if (containsSecret(text)) return "secret";
     if (input.ec.mentionsForbidden(text)) return "ec";
     if (input.ecInvoicing && kind !== "playbook") return "ec_invoicing_not_playbook";
     if (!input.ecInvoicing && input.ec.mentionsEc(text)) return "ec";
     if (business && looksLikeBusinessRecord(text)) return "business_record";
+    // Business contexts: no customer by name anywhere, and history lines stay
+    // general ("asked about an unpaid KidClub invoice"): no customers,
+    // families or who owes what.
+    if (business && namesSomeone(text, notNames)) return "names_someone";
+    if (business && isHistory && mentionsCustomerOrDebt(text)) return "customer_or_debt";
     if ((modelSensitive || sensitiveCategories(text).length > 0) && !explicit) return "sensitive_not_explicit";
     return null;
   };
@@ -216,7 +236,7 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
   // (secrets, EC/HRT, business records, sensitive), and it's always
   // automatic, so the sensitive rule always applies to it.
   const line = input.historyLine.slice(0, EXTRACT_LIMITS.maxHistoryChars).trim();
-  const lineProblem = line === "" ? null : contentProblem(line, input.ecInvoicing ? "playbook" : "history", false, false);
+  const lineProblem = line === "" ? null : contentProblem(line, input.ecInvoicing ? "playbook" : "fact", false, false, true);
   if (lineProblem) drop(lineProblem);
 
   return { decisions, ...(line !== "" && !lineProblem ? { historyLine: line } : {}), dropped };
@@ -255,6 +275,7 @@ export const makeModelExtract = (deps: {
 }): Extract => {
   const precheck = makePrecheck(deps.contexts);
   const ec = makeEcMatchers(deps.contexts, deps.neverRemember);
+  const notNames = contextNameWords(deps.contexts);
   const nothing: ExtractResult = { decisions: [] };
 
   return async (input) => {
@@ -294,7 +315,16 @@ export const makeModelExtract = (deps: {
     }
 
     const { suggestions, historyLine } = readSuggestions(result.value.value);
-    const filtered = filterSuggestions({ question: input.question, context, related: input.related, suggestions, historyLine, ecInvoicing, ec });
+    const filtered = filterSuggestions({
+      question: input.question,
+      context,
+      related: input.related,
+      suggestions,
+      historyLine,
+      ecInvoicing,
+      ec,
+      notNames,
+    });
     deps.log?.info("memory extract", {
       contextId: context.id,
       suggested: suggestions.length,
