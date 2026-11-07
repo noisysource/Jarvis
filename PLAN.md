@@ -227,7 +227,16 @@ exception keeps nothing and makes no model call. An opt-out in the user's
 own words ("não guardes", "não te lembres", "esquece isto", "don't
 remember/keep/save this", "off the record") skips the whole exchange,
 history line included, before any model call: checked in code by the
-memory hooks and again by the extract step. In business contexts (KidClub,
+memory hooks and again by the extract step. One-off events (#71): the "still
+true in a month" rule only applies to automatic saving. An explicit "remember
+Diniz has football tomorrow" is kept as a fact that expires at the start of
+the day after the event, in Lisbon time; the date is worked out in code from
+the user's words (today/tomorrow/the day after, weekdays, dates; English and
+Portuguese), then from the memory's text, then the model's date, else 30
+days. Automatic one-offs, by the model's flag or words like "tomorrow", are
+dropped. "Forget that…" can delete related history lines too (they can't be
+edited), and an exchange that only asked to forget leaves no history line.
+`src/memory-dates.ts` holds the date logic. In business contexts (KidClub,
 Noisy Source) no memory may name a customer (a capitalised name that isn't a
 context, weekday, month or language), and history lines stay general
 ("asked about an unpaid KidClub invoice"): no customers, families or who

@@ -22,7 +22,8 @@ import {
   type EcMatchers,
 } from "./memory-rules.js";
 import { makePrecheck } from "./precheck.js";
-import { formatDay } from "./time.js";
+import { addDays, dayIn, expiryAfter, formatDayIso, mentionsRelativeDay, parseDayIso, resolveEventDay } from "./memory-dates.js";
+import { formatDay, formatNow } from "./time.js";
 import type { Context, Logger, Memory } from "./types.js";
 
 export const EXTRACT_LIMITS = {
@@ -43,7 +44,7 @@ export const EXTRACT_SYSTEM_PROMPT = [
   "",
   "Keep a memory only if ALL of these hold:",
   "- The user said it. Never keep something Jarvis said, guessed or looked up.",
-  "- It is likely still true in a month.",
+  "- It is likely still true in a month. Exception: when the user explicitly asks you to remember a dated or one-off event (an appointment, a match, a trip), keep it as a fact with \"one_off\": true and \"event_date\" set to the event's date (YYYY-MM-DD, worked out from today's date below). It's forgotten after that day. Never save a one-off event on your own.",
   "- It would help a later answer.",
   "- It isn't already in the related memories. If it changes or contradicts one, use action \"update\" with that memory's id instead of adding a new one.",
   "- It isn't small talk, a one-off question, or today's plans.",
@@ -58,10 +59,10 @@ export const EXTRACT_SYSTEM_PROMPT = [
   "- Health, personal finances, and sensitive details about other people. Label these in \"sensitive\": health, finance or others. Use \"none\" otherwise.",
   "- Set \"explicit\" to true only when the user explicitly asked you to remember that item.",
   "",
-  "If the user asks you to forget something, use action \"delete\" with the id of the matching related memory.",
+  "If the user asks you to forget something, use action \"delete\" with the id of every matching related memory, history lines included (they can only be deleted, never updated). An exchange that only asks to forget something gets an empty history_line.",
   "If the user asks to keep this exchange out of memory (não guardes, não te lembres, esquece isto, don't remember/keep/save this, off the record), return no memories and an empty history_line.",
   "",
-  "Write each memory as one short, plain sentence in the user's language, without dates relative to today (\"tomorrow\").",
+  "Write each memory as one short, plain sentence in the user's language, with dates written out in full (\"on Sunday 8 November\"), never relative to today (\"tomorrow\").",
   "\"confidence\" is how sure you are that it should be kept (0 to 1).",
   "Also write \"history_line\": one short line summarising this conversation so far, building on the previous line if there is one. Leave it empty for small talk.",
   "",
@@ -83,8 +84,10 @@ export const EXTRACT_SCHEMA: JsonObjectSchema = {
           confidence: { type: "number" },
           explicit: { type: "boolean" },
           sensitive: { type: "string", enum: ["none", "health", "finance", "others"] },
+          one_off: { type: "boolean", description: "A dated or one-off event rather than something lasting." },
+          event_date: { type: "string", description: "For a one-off event, its date as YYYY-MM-DD; otherwise empty." },
         },
-        required: ["action", "target_id", "kind", "text", "confidence", "explicit", "sensitive"],
+        required: ["action", "target_id", "kind", "text", "confidence", "explicit", "sensitive", "one_off", "event_date"],
         additionalProperties: false,
       },
     },
@@ -102,6 +105,9 @@ export type Suggestion = {
   readonly confidence: number;
   readonly explicit: boolean;
   readonly sensitive: "none" | "health" | "finance" | "others";
+  readonly oneOff: boolean;
+  /** The model's YYYY-MM-DD for a one-off; only a fallback, since the code works the date out itself. */
+  readonly eventDate: string;
 };
 
 /** Reads the model's JSON. Anything malformed is dropped, item by item. */
@@ -128,6 +134,8 @@ export const readSuggestions = (value: unknown): { suggestions: Suggestion[]; hi
         confidence: i.confidence,
         explicit: i.explicit,
         sensitive,
+        oneOff: i.one_off === true,
+        eventDate: typeof i.event_date === "string" ? i.event_date.trim() : "",
       },
     ];
   });
@@ -148,7 +156,11 @@ export type DropReason =
   | "unknown_target"
   | "delete_not_asked"
   | "duplicate"
-  | "too_many";
+  | "too_many"
+  | "one_off_not_explicit"
+  | "event_in_past"
+  | "history_not_editable"
+  | "forget_only";
 
 export type FilterInput = {
   readonly question: string;
@@ -161,6 +173,9 @@ export type FilterInput = {
   readonly ec: EcMatchers;
   /** Capitalised words that aren't people (context names); see `namesSomeone`. */
   readonly notNames?: ReadonlySet<string>;
+  /** For one-off events: "today" and expiries are worked out in this time zone. */
+  readonly now?: Date;
+  readonly timeZone?: string;
 };
 
 export type FilterResult = ExtractResult & { readonly dropped: Readonly<Partial<Record<DropReason, number>>> };
@@ -181,7 +196,25 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
   const userAskedToRemember = asksToRemember(input.question);
   const userAskedToForget = asksToForget(input.question);
   const business = input.context.id !== "personal";
-  const relatedIds = new Set(input.related.filter((m) => m.kind !== "history").map((m) => m.id));
+  const relatedIds = new Set(input.related.map((m) => m.id));
+  const historyIds = new Set(input.related.filter((m) => m.kind === "history").map((m) => m.id));
+  const now = input.now ?? new Date();
+  const timeZone = input.timeZone ?? "Europe/Lisbon";
+  const today = dayIn(now, timeZone);
+  /**
+   * A one-off event's expiry: the start of the day after it. The date comes
+   * from the user's words first, then the memory's text, then the model.
+   */
+  const oneOffExpiry = (s: Suggestion): Date | "past" => {
+    const fromModel = parseDayIso(s.eventDate);
+    const day =
+      resolveEventDay(input.question, today) ??
+      resolveEventDay(s.text, today) ??
+      (fromModel && formatDayIso(fromModel) >= formatDayIso(today) ? fromModel : undefined) ??
+      addDays(today, 30); // no date found: forget it in a month
+    const expiresAt = expiryAfter(day, timeZone);
+    return expiresAt.getTime() <= now.getTime() ? "past" : expiresAt;
+  };
   const known = new Set(input.related.map((m) => normalise(m.text)));
 
   /** The content rules, shared by suggestions and the history line. */
@@ -221,22 +254,40 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
     if (problem) return drop(problem);
     const origin = explicit ? "explicit" : "auto";
 
+    // One-off events (#71): the "still true in a month" rule applies to
+    // automatic saving; an explicit one becomes a fact that expires the day
+    // after the event. Words like "tomorrow" make it a one-off whatever the
+    // model said.
+    const oneOff = s.oneOff || mentionsRelativeDay(s.text);
+    if (oneOff && !explicit) return drop("one_off_not_explicit");
+    const expiry = oneOff ? oneOffExpiry(s) : undefined;
+    if (expiry === "past") return drop("event_in_past");
+    const expires = expiry ? { expiresAt: expiry } : {};
+
     if (s.action === "update") {
       if (!relatedIds.has(s.targetId)) return drop("unknown_target");
-      return [{ action: "update", id: s.targetId, text: s.text, ...(explicit ? { origin } : {}) }];
+      if (historyIds.has(s.targetId)) return drop("history_not_editable");
+      return [{ action: "update", id: s.targetId, text: s.text, ...(explicit ? { origin } : {}), ...expires }];
     }
     if (known.has(normalise(s.text))) return drop("duplicate");
     if (added >= EXTRACT_LIMITS.maxNewPerExchange) return drop("too_many");
     added += 1;
     known.add(normalise(s.text));
-    return [{ action: "add", kind: s.kind, text: s.text, origin }];
+    return [{ action: "add", kind: oneOff ? "fact" : s.kind, text: s.text, origin, ...expires }];
   });
 
   // The history line gets the same content checks as a fact or playbook
   // (secrets, EC/HRT, business records, sensitive), and it's always
   // automatic, so the sensitive rule always applies to it.
   const line = input.historyLine.slice(0, EXTRACT_LIMITS.maxHistoryChars).trim();
-  const lineProblem = line === "" ? null : contentProblem(line, input.ecInvoicing ? "playbook" : "fact", false, false, true);
+  // An exchange that only asked to forget something leaves no history line (#71).
+  const forgetOnly = userAskedToForget && !decisions.some((d) => d.action !== "delete");
+  const lineProblem =
+    line === ""
+      ? null
+      : forgetOnly
+        ? "forget_only"
+        : contentProblem(line, input.ecInvoicing ? "playbook" : "fact", false, false, true);
   if (lineProblem) drop(lineProblem);
 
   return { decisions, ...(line !== "" && !lineProblem ? { historyLine: line } : {}), dropped };
@@ -249,6 +300,7 @@ const relatedBlock = (related: readonly Memory[], timeZone: string): string =>
 
 export const extractUserMessage = (input: ExtractInput, context: Context, timeZone: string): string =>
   [
+    `<today>${formatNow(input.now, timeZone)}</today>`,
     `<context>${context.id} (${context.name})</context>`,
     "<related_memories>",
     relatedBlock(input.related, timeZone),
@@ -324,6 +376,8 @@ export const makeModelExtract = (deps: {
       ecInvoicing,
       ec,
       notNames,
+      now: input.now,
+      timeZone: deps.timeZone,
     });
     deps.log?.info("memory extract", {
       contextId: context.id,
