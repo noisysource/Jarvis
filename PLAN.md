@@ -114,7 +114,8 @@ question, and after a clarify response it re-sends the question with
 | `src/answer/personal.ts` | Answer model: instructions + profile (cached), then Lisbon date/time and memories (uncached), history, no tools | #13 |
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
 | `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
-| `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store (default until SQLite #60) | #59 |
+| `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store | #59 |
+| `src/memory-sqlite.ts` | SQLite `MemoryStore` on `node:sqlite`: mode-600 file, numbered schema steps, `secure_delete` + `VACUUM` on wipe, daily purge of expired history | #60 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / loadMemories → answer → wrapUp | #14 |
 | `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
 | `src/answer/router.ts` | Answerer per context; contexts without one give an `unavailable` reply ("not connected yet"), not an error | #26 |
@@ -177,9 +178,14 @@ paused for the page and the normal mic button remains, with a note.
 loaded for it. Three kinds: **facts** (lasting things you said, preferences
 included), **playbooks** (how you want recurring things done; never
 permission to act) and **history** (one line per conversation, kept 30 days).
-Everything goes through a `MemoryStore` interface: in-memory now, SQLite
-next (`node:sqlite`, `data/memory.sqlite`, mode 600, gitignored), Firestore
-with deployment. Loading picks ~20 facts and playbooks by word match, then
+Everything goes through a `MemoryStore` interface. `MEMORY_STORE=sqlite`
+(the default outside production): `node:sqlite`, `data/memory.sqlite`
+(`MEMORY_DB`), mode 600, gitignored and checked in CI; deletes overwrite the
+data (`secure_delete`) and a wipe compacts the file; expired history is
+purged at startup and daily. `MEMORY_STORE=memory` keeps them in RAM only
+(the production default until Firestore, #24, since Cloud Run's disk doesn't
+last; the Pi, #53, sets `sqlite`). Ranking is shared code, so every store
+orders memories the same way. Loading picks ~20 facts and playbooks by word match, then
 recency, plus the 3 latest history lines; they go in the uncached prompt,
 dated, as data the profile overrides. Saving is automatic after a real
 answer (not clarify, handoff, unavailable or error); you review it in the

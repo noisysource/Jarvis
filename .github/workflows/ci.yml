@@ -27,6 +27,13 @@ jobs:
             exit 1
           fi
 
+      - name: Memory database is not committed
+        run: |
+          if git ls-files 'data/*.sqlite' 'data/*.sqlite-*' | grep -q .; then
+            echo "::error::A memory database under data/ is committed. It holds personal data; remove it with 'git rm --cached'."
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

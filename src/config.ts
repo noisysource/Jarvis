@@ -13,6 +13,13 @@ export type RuntimeEnv = "production" | "development" | "test";
 /** Where the personal profile comes from. Only files for now; Secret Manager or a bucket later (#25). */
 export type ProfileSourceRef = { readonly kind: "file"; readonly path: string };
 
+/**
+ * Where memories live: "sqlite" (a local file, the default outside
+ * production) or "memory" (RAM only, lost on restart; the production default
+ * until the Firestore store, #24).
+ */
+export type MemoryStoreRef = { readonly kind: "sqlite"; readonly path: string } | { readonly kind: "memory" };
+
 export type Config = {
   readonly env: RuntimeEnv;
   readonly host: string;
@@ -25,6 +32,7 @@ export type Config = {
   readonly profileSource: ProfileSourceRef;
   /** IANA time zone for "now" in prompts, e.g. Europe/Lisbon. */
   readonly timeZone: string;
+  readonly memoryStore: MemoryStoreRef;
   readonly secrets: {
     /** Required in production; optional locally, where the key may come from .env. */
     readonly gcpProject: string | undefined;
@@ -44,6 +52,7 @@ export const DEFAULTS = {
   profileSource: "file:data/profile.md",
   anthropicSecretName: "anthropic-api-key",
   timeZone: "Europe/Lisbon",
+  memoryDb: "data/memory.sqlite",
 } as const;
 
 const PORT_ERROR = "must be a whole number from 1 to 65535";
@@ -74,6 +83,11 @@ const EnvSchema = z.object({
   CONTEXTS_PATH: optionalString,
   PROFILE_SOURCE: optionalString,
   TIMEZONE: optionalString,
+  MEMORY_STORE: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["sqlite", "memory"], { error: 'must be "sqlite" or "memory"' }).optional(),
+  ),
+  MEMORY_DB: optionalString,
   GOOGLE_CLOUD_PROJECT: optionalString,
   ANTHROPIC_SECRET_NAME: optionalString,
   VENDUS_SECRET_NAME: optionalString,
@@ -138,6 +152,11 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     contextsPath: e.CONTEXTS_PATH ?? DEFAULTS.contextsPath,
     profileSource,
     timeZone,
+    // Cloud Run's disk doesn't last, so production keeps memories in RAM until Firestore (#24).
+    memoryStore:
+      (e.MEMORY_STORE ?? (production ? "memory" : "sqlite")) === "sqlite"
+        ? { kind: "sqlite", path: e.MEMORY_DB ?? DEFAULTS.memoryDb }
+        : { kind: "memory" },
     secrets: {
       gcpProject: e.GOOGLE_CLOUD_PROJECT,
       anthropicSecretName: e.ANTHROPIC_SECRET_NAME ?? DEFAULTS.anthropicSecretName,
