@@ -50,6 +50,14 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    npm run eval:classifier
    ```
 
+   And see what the memory wrap-up keeps and drops for the examples in
+   `test/fixtures/memory-extraction.json` (one small classifier-model call
+   per case; English and pt-PT):
+
+   ```bash
+   npm run eval:memory
+   ```
+
    Ask the personal answerer a question directly, using your real profile
    (one answer-model call; skips the classifier). The model and token use,
    including cache reads, are printed dimmed below the answer:
@@ -88,6 +96,14 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    Memories are kept in `data/memory.sqlite` (gitignored, readable only by
    you; set `MEMORY_DB` to move it, or `MEMORY_STORE=memory` to keep them in
    RAM only). Deleting the file forgets everything.
+
+   Jarvis learns automatically after each answer, within rules it enforces
+   in code: nothing about EC/HRT work, no secrets, no invoice data, and
+   health, money or sensitive things about other people only when you say
+   so ("remember", "take note", "lembra", "guarda", "não te esqueças",
+   "anota"). To keep certain names out of memory altogether (EC colleagues,
+   say), copy `data/never-remember.example.txt` to `data/never-remember.txt`
+   (gitignored) and list them, one per line.
 
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or

@@ -12,6 +12,7 @@
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "smoke:llm": "tsx --env-file-if-exists=.env scripts/smoke-llm.ts",
     "eval:classifier": "tsx --env-file-if-exists=.env scripts/eval-classifier.ts",
+    "eval:memory": "tsx --env-file-if-exists=.env scripts/eval-memory.ts",
     "ask": "tsx --env-file-if-exists=.env scripts/ask.ts",
     "start": "node dist/main.js",
     "test": "vitest run",

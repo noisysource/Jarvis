@@ -1,0 +1,5 @@
+# Names and phrases Jarvis must never keep in memory, one per line.
+# Copy to data/never-remember.txt (gitignored) and fill in, e.g. EC colleagues.
+# Matching ignores case and accents and is whole-word. Lines starting with # are ignored.
+Jane Example
+John Sample

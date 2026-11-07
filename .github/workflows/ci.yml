@@ -27,6 +27,13 @@ jobs:
             exit 1
           fi
 
+      - name: Never-remember list is not committed
+        run: |
+          if git ls-files --error-unmatch data/never-remember.txt >/dev/null 2>&1; then
+            echo "::error file=data/never-remember.txt::data/never-remember.txt holds personal names and must not be committed. Remove it with 'git rm --cached data/never-remember.txt'."
+            exit 1
+          fi
+
       - name: Memory database is not committed
         run: |
           if git ls-files 'data/*.sqlite' 'data/*.sqlite-*' | grep -q .; then

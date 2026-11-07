@@ -11,7 +11,9 @@ import { loadContexts } from "./contexts.js";
 import type { ModelRef } from "./llm/model-ref.js";
 import { makeLlm, type ProviderKeys } from "./llm/registry.js";
 import type { LlmCall } from "./llm/types.js";
-import { extractNothing, makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
+import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
+import { makeModelExtract } from "./memory-extract.js";
+import { parseNeverRemember } from "./memory-rules.js";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
@@ -48,8 +50,17 @@ export const capabilitiesText = (contexts: readonly Context[], answered: Readonl
 export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>> => {
   const { config, env, log } = inputs;
 
-  const contexts = await loadContexts(inputs.readTextFile ?? ((p) => readFile(p, "utf8")), config.contextsPath);
+  const readText = inputs.readTextFile ?? ((p: string) => readFile(p, "utf8"));
+  const contexts = await loadContexts(readText, config.contextsPath);
   if (!contexts.ok) return contexts;
+
+  // Optional: names memories must never contain. A missing file means none.
+  const neverRemember = await readText(config.neverRememberPath).then(parseNeverRemember, (e: unknown) =>
+    (e as { code?: string }).code === "ENOENT" ? [] : e,
+  );
+  if (!Array.isArray(neverRemember)) {
+    return err(`${config.neverRememberPath}: can't read it (${neverRemember instanceof Error ? neverRemember.message : "unknown error"})`);
+  }
 
   // Check the profile now, so a missing one stops startup with a clear message.
   const profile = makeProfileSource(config.profileSource, { ...(inputs.profileFs ? { fs: inputs.profileFs } : {}) });
@@ -92,7 +103,22 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         log,
       }),
     }),
-    memory: makeSafeMemoryHooks(makeMemoryHooks({ store: memoryStore, extract: extractNothing, now, log }), { log }),
+    memory: makeSafeMemoryHooks(
+      makeMemoryHooks({
+        store: memoryStore,
+        // The cheap classifier model decides what to keep; the rules are enforced in code too.
+        extract: makeModelExtract({
+          llm: classifierLlm.value,
+          contexts: contexts.value,
+          neverRemember,
+          timeZone: config.timeZone,
+          log,
+        }),
+        now,
+        log,
+      }),
+      { log },
+    ),
     now,
     log,
   });

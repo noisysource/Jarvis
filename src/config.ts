@@ -33,6 +33,8 @@ export type Config = {
   /** IANA time zone for "now" in prompts, e.g. Europe/Lisbon. */
   readonly timeZone: string;
   readonly memoryStore: MemoryStoreRef;
+  /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
+  readonly neverRememberPath: string;
   readonly secrets: {
     /** Required in production; optional locally, where the key may come from .env. */
     readonly gcpProject: string | undefined;
@@ -53,6 +55,7 @@ export const DEFAULTS = {
   anthropicSecretName: "anthropic-api-key",
   timeZone: "Europe/Lisbon",
   memoryDb: "data/memory.sqlite",
+  neverRememberPath: "data/never-remember.txt",
 } as const;
 
 const PORT_ERROR = "must be a whole number from 1 to 65535";
@@ -88,6 +91,7 @@ const EnvSchema = z.object({
     z.enum(["sqlite", "memory"], { error: 'must be "sqlite" or "memory"' }).optional(),
   ),
   MEMORY_DB: optionalString,
+  NEVER_REMEMBER_PATH: optionalString,
   GOOGLE_CLOUD_PROJECT: optionalString,
   ANTHROPIC_SECRET_NAME: optionalString,
   VENDUS_SECRET_NAME: optionalString,
@@ -157,6 +161,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       (e.MEMORY_STORE ?? (production ? "memory" : "sqlite")) === "sqlite"
         ? { kind: "sqlite", path: e.MEMORY_DB ?? DEFAULTS.memoryDb }
         : { kind: "memory" },
+    neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     secrets: {
       gcpProject: e.GOOGLE_CLOUD_PROJECT,
       anthropicSecretName: e.ANTHROPIC_SECRET_NAME ?? DEFAULTS.anthropicSecretName,

@@ -1,0 +1,27 @@
+{
+  "about": "What the wrap-up should keep or drop, in English and pt-PT. Run with: npm run eval:memory. 'keep' passes if a kept add/update contains `includes` (case-insensitive); 'delete' if a delete is kept; 'nothing' if no add, update or delete is kept. The history line isn't scored.",
+  "cases": [
+    { "context": "personal", "question": "My daughter's teacher is Ms Rita, by the way.", "answer": "Thanks, good to know Ms Rita is Inês's teacher.", "expect": "keep", "includes": "Rita" },
+    { "context": "personal", "question": "From now on, answer me in Portuguese please.", "answer": "Claro, a partir de agora respondo em português.", "expect": "keep", "includes": "portug" },
+    { "context": "personal", "question": "Lembra-te que a Inês tem natação às terças.", "answer": "Combinado, a Inês tem natação às terças.", "expect": "keep", "includes": "nata" },
+    { "context": "personal", "question": "Anota: o Sam faz anos a 3 de maio.", "answer": "Anotado: o Sam faz anos a 3 de maio.", "expect": "keep", "includes": "maio" },
+    { "context": "personal", "question": "Remember that I'm allergic to penicillin.", "answer": "Noted: you're allergic to penicillin.", "expect": "keep", "includes": "penicillin" },
+    { "context": "personal", "question": "Guarda isto: a renda da casa sobe em janeiro.", "answer": "Guardado: a renda sobe em janeiro.", "expect": "keep", "includes": "renda" },
+    { "context": "personal", "question": "Inês swims on Thursdays now, not Tuesdays.", "answer": "Got it, swimming is on Thursdays now.", "related": [{ "id": "m1", "kind": "fact", "text": "Inês swims on Tuesdays" }], "expect": "keep", "includes": "Thursday" },
+    { "context": "personal", "question": "Forget that I take espresso, I've switched to tea.", "answer": "Okay, I'll forget the espresso.", "related": [{ "id": "m2", "kind": "fact", "text": "Takes espresso with no sugar" }], "expect": "delete" },
+    { "context": "noisysource", "question": "Always invoice the European Commission on the first working day of the month.", "answer": "Noted: EC invoices go out on the first working day of each month.", "expect": "keep", "includes": "first working day" },
+    { "context": "kidclub", "question": "When I ask about unpaid invoices, list them oldest first.", "answer": "Will do: oldest first.", "expect": "keep", "includes": "oldest" },
+
+    { "context": "personal", "question": "Hello!", "answer": "Hello! How can I help today?", "expect": "nothing" },
+    { "context": "personal", "question": "Thanks, that's all.", "answer": "Anytime!", "expect": "nothing" },
+    { "context": "personal", "question": "What's the capital of Australia?", "answer": "Canberra.", "expect": "nothing" },
+    { "context": "personal", "question": "I'm allergic to penicillin, so the doctor changed my prescription.", "answer": "Thanks for telling me. I hope the new prescription works well.", "expect": "nothing" },
+    { "context": "personal", "question": "O meu ordenado entra no dia 25.", "answer": "Está bem, obrigado por dizeres.", "expect": "nothing" },
+    { "context": "personal", "question": "Sam's sister is getting divorced, it's been rough.", "answer": "I'm sorry to hear that. That sounds hard for everyone.", "expect": "nothing" },
+    { "context": "personal", "question": "Remember my wifi password is hunter2.", "answer": "I'd rather not keep passwords, sorry.", "expect": "nothing" },
+    { "context": "personal", "question": "Remember the UTP standup moved to 10.", "answer": "That's for Kiro, the EC's agent.", "expect": "nothing" },
+    { "context": "personal", "question": "Tenho jantar com a Ana hoje à noite.", "answer": "Bom jantar!", "expect": "nothing" },
+    { "context": "personal", "question": "Não guardes isto, mas estou a pensar mudar de emprego.", "answer": "Fica entre nós. Queres falar sobre isso?", "expect": "nothing" },
+    { "context": "kidclub", "question": "The Silva family still owes €120 on invoice FT 2026/123.", "answer": "KidClub isn't connected yet, so I can't check that.", "expect": "nothing" }
+  ]
+}
