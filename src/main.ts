@@ -6,6 +6,7 @@ import { buildDeps } from "./app.js";
 import { loadConfig } from "./config.js";
 import { formatModelRef } from "./llm/model-ref.js";
 import { makeJsonLogger } from "./log.js";
+import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { localHosts, makeServer } from "./server.js";
 import { loadWebAssets } from "./web.js";
 
@@ -24,7 +25,21 @@ const config = loadConfig(process.env);
 if (!config.ok) refuse(config.error);
 const cfg = config.ok ? config.value : refuse("unreachable");
 
-const deps = await buildDeps({ config: cfg, env: process.env, log });
+// Memories: a local SQLite file by default; refuse to start if it can't be opened.
+const sqlite =
+  cfg.memoryStore.kind === "sqlite" ? await openSqliteMemoryStore({ path: cfg.memoryStore.path }) : undefined;
+if (sqlite && !sqlite.ok) refuse(sqlite.error);
+const memoryStore = sqlite?.ok ? sqlite.value.store : undefined;
+const stopPurge = memoryStore
+  ? startMemoryPurge(memoryStore, {
+      onPurged: (n) => {
+        if (n > 0) log.info("expired memories purged", { count: n });
+      },
+      onError: (e) => log.warn("memory purge failed", { errorName: e instanceof Error ? e.name : typeof e }),
+    })
+  : undefined;
+
+const deps = await buildDeps({ config: cfg, env: process.env, log, ...(memoryStore ? { memoryStore } : {}) });
 if (!deps.ok) refuse(deps.error);
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
@@ -41,6 +56,7 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     env: cfg.env,
     classifier: formatModelRef(cfg.models.classifier),
     answer: formatModelRef(cfg.models.answer),
+    memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
   });
 });
 
@@ -53,6 +69,8 @@ const shutdown = (signal: string): void => {
   force.unref();
   // Stops accepting new connections and waits for in-flight requests.
   server.close(() => {
+    stopPurge?.();
+    if (sqlite?.ok) sqlite.value.close();
     log.info("stopped");
     process.exit(0);
   });

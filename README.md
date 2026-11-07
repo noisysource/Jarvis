@@ -85,6 +85,10 @@ Requires Node 22.12 or later.
    the page: reload or "New conversation" clears it. Chrome's speech recognition sends audio to Google's speech
    service and Safari's to Apple's; Jarvis itself uses no other services.
 
+   Memories are kept in `data/memory.sqlite` (gitignored, readable only by
+   you; set `MEMORY_DB` to move it, or `MEMORY_STORE=memory` to keep them in
+   RAM only). Deleting the file forgets everything.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding

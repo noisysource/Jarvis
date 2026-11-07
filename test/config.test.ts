@@ -27,8 +27,25 @@ describe("loadConfig", () => {
       contextsPath: "contexts.md",
       profileSource: { kind: "file", path: "data/profile.md" },
       timeZone: "Europe/Lisbon",
+      memoryStore: { kind: "sqlite", path: "data/memory.sqlite" },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
+  });
+
+  it("chooses where memories live", () => {
+    expect(loadOk({ MEMORY_DB: "/var/lib/jarvis/memory.sqlite" }).memoryStore).toEqual({
+      kind: "sqlite",
+      path: "/var/lib/jarvis/memory.sqlite",
+    });
+    expect(loadOk({ MEMORY_STORE: "memory" }).memoryStore).toEqual({ kind: "memory" });
+    // Production keeps memories in RAM until Firestore (#24), unless told otherwise (e.g. on the Pi).
+    expect(loadOk({ NODE_ENV: "production", GOOGLE_CLOUD_PROJECT: "p" }).memoryStore).toEqual({ kind: "memory" });
+    expect(loadOk({ NODE_ENV: "production", GOOGLE_CLOUD_PROJECT: "p", MEMORY_STORE: "sqlite" }).memoryStore).toEqual({
+      kind: "sqlite",
+      path: "data/memory.sqlite",
+    });
+    const bad = loadConfig({ MEMORY_STORE: "redis" });
+    expect(!bad.ok && bad.error).toContain('MEMORY_STORE: must be "sqlite" or "memory"');
   });
 
   it("accepts overrides", () => {
