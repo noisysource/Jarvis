@@ -15,7 +15,9 @@ export const formatNow = (now: Date, timeZone: string): string => {
     timeZoneName: "shortOffset",
   }).formatToParts(now);
   const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? "";
-  return `${get("weekday")}, ${get("day")} ${get("month")} ${get("year")}, ${get("hour")}:${get("minute")} (${timeZone}, ${get("timeZoneName")})`;
+  // Older ICU data (Node 22.13) prints a zero offset as "GMT", newer as "GMT+0"; always say "GMT+0".
+  const offset = get("timeZoneName") === "GMT" ? "GMT+0" : get("timeZoneName");
+  return `${get("weekday")}, ${get("day")} ${get("month")} ${get("year")}, ${get("hour")}:${get("minute")} (${timeZone}, ${offset})`;
 };
 
 /** e.g. "6 Nov 2026", in the configured time zone. */
