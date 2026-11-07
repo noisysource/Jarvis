@@ -9,8 +9,10 @@
 //                                    ▼
 //   unclear  → clarify: which context? (answerable contexts only)
 //   handoff  → fixed handoff message; nothing else runs
-//   answer   → loadMemories → answer → wrapUp (unless remember: false) → answer response
-//              (or an `unavailable` reply, e.g. "not connected yet": no wrapUp)
+//   answer   → loadMemories → answer → answer response, then wrapUp after the
+//              reply has gone out (unless remember: false)
+//              (a context with no answerer: "not connected yet", with no
+//              memory load and no wrapUp)
 //
 // Logs carry the context id and outcome only, never the question or answer.
 
@@ -77,7 +79,10 @@ export const handleAsk = async (
       return { type: "handoff", context: context.id, to: context.handling.to, message: handoffMessage(context) };
     }
 
-    const memories = await deps.memory.loadMemories({ question: request.question, contextId: context.id });
+    // No answerer, no memory: "not connected yet" needs nothing loaded.
+    const memories = deps.isAnswered(context.id)
+      ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
+      : [];
     const answer = await deps.answer({ context, question: request.question, history, memories, now: deps.now() });
 
     if (!answer.ok) {
@@ -91,18 +96,21 @@ export const handleAsk = async (
       return { type: "unavailable", context: context.id, message: answer.value.message };
     }
 
-    // "Don't remember this": the answer used memories, but nothing is learned.
-    // Awaited so it finishes before the response (Cloud Run may throttle CPU
-    // afterwards); #56 moves it after the reply.
+    // The wrap-up runs after the reply has gone out, so memory never slows
+    // an answer. "Don't remember this": the answer used memories, but
+    // nothing is learned.
     if (request.remember !== false) {
-      await deps.memory.wrapUp({
-        question: request.question,
-        contextId: context.id,
-        answer: answer.value.text,
-        memoriesUsed: memories,
-        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
-        ...(meta.requestId ? { requestId: meta.requestId } : {}),
-      });
+      const answerText = answer.value.text;
+      deps.afterReply("memory wrap-up", () =>
+        deps.memory.wrapUp({
+          question: request.question,
+          contextId: context.id,
+          answer: answerText,
+          memoriesUsed: memories,
+          ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+          ...(meta.requestId ? { requestId: meta.requestId } : {}),
+        }),
+      );
     }
 
     deps.log.info("ask", { context: context.id, outcome: "answer" });

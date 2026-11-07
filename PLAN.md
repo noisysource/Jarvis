@@ -65,10 +65,12 @@ Chat page (GET /)                         Hono server (npm run dev, localhost)
                                              ├ ec-hrt      → handoff: "This is for Kiro" (backstop; nothing else runs)
                                              ├ kidclub /
                                              │ noisysource → unavailable: "not connected yet" (M0)
+                                             │               (no memory load, no wrap-up)
                                              └ personal    → loadMemories (MemoryStore, this context only)
                                                              → answer model: instructions + profile + history + memories
-                                                             → wrapUp → extract (#61) → MemoryStore
-                                                               (skipped with remember: false)
+ ◄────────────────────────────────────────── reply sent
+                                                             → after the reply (#56): wrapUp → extract (#61) → MemoryStore
+                                                               (skipped with remember: false or an opt-out)
 ```
 
 The server is **stateless**: the page sends the conversation with each
@@ -118,7 +120,8 @@ question, and after a clarify response it re-sends the question with
 | `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
 | `src/memory-rules.ts` | Pure rule checks: explicit "remember" and "forget" in the user's own words, secrets, business records, sensitive categories, EC cues + never-remember names | #61 |
 | `src/memory-sqlite.ts` | SQLite `MemoryStore` on `node:sqlite`: mode-600 file, numbered schema steps, `secure_delete` + `VACUUM` on wipe, daily purge of expired history | #60 |
-| `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / loadMemories → answer → wrapUp | #14 |
+| `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / (answered contexts only) loadMemories → answer → reply; wrapUp handed to `afterReply` | #14, #56 |
+| `src/background.ts` | `makeBackgroundTasks`: runs after-reply work on the next event-loop turn, logs failures by name and error class, `drain()` on shutdown | #56 |
 | `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
 | `src/answer/router.ts` | Answerer per context; contexts without one give an `unavailable` reply ("not connected yet"), not an error | #26 |
 | `src/app.ts` | `buildDeps(config)`: wires the real deps; refuses to start without contexts, profile or key | #26 |
@@ -263,6 +266,9 @@ Non-secret env (`src/config.ts`, all optional locally):
 | `VENDUS_SECRET_NAME` | none | Not needed in M0 |
 
 **Deployment (after M0).** Node 22 (22.13 or later, for `node:sqlite`), multi-stage Dockerfile, non-root (#17).
+The memory wrap-up runs after the reply (#56), so Cloud Run needs CPU
+allocated outside requests (instance-based billing); the deploy guide (#18)
+sets it.
 Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
 (#18). Phone access (Siri Shortcut, messaging bots) is #19.
 
@@ -297,7 +303,7 @@ Backlog after M0 (labels in brackets):
   provider behind `LlmCall`; `eval:classifier` and the profile questions
   run against any model, side by side with Claude. Defaults don't change
   until a local model passes.
-- #56 Memory performance [`memory`, `backlog`; before or with #24]: run the
+- #56 (done) Memory performance [`memory`, `backlog`; before or with #24]: run the
   wrap-up after the reply is sent; skip the memory load for contexts with
   no answerer.
 

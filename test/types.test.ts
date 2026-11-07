@@ -98,6 +98,8 @@ describe("types", () => {
         loadMemories: async () => memories,
         wrapUp: async () => undefined,
       },
+      isAnswered: () => true,
+      afterReply: () => undefined,
       now: () => new Date("2026-11-06T12:00:00Z"),
       log: { info: () => undefined, warn: () => undefined, error: () => undefined },
     };

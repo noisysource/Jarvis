@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { ANSWERED_CONTEXT_IDS, buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
+import { makeBackgroundTasks, type BackgroundTasks } from "../src/background.js";
 import { parseContexts } from "../src/contexts.js";
 import { readFile } from "node:fs/promises";
 import { handleAsk } from "../src/ask.js";
@@ -62,11 +63,19 @@ const parseContextsFile = async () => {
   return parsed.value;
 };
 
+/** Registers the background runner with the built deps, so `ask` drains it. */
+const withBackground = <R extends Awaited<ReturnType<typeof buildDeps>>>(result: R, background: BackgroundTasks): R => {
+  if (result.ok) backgrounds.set(result.value, background);
+  return result;
+};
+
 const silentLog: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
 const build = async (overrides: Partial<AppInputs> & { classifyAs?: string } = {}) => {
   const models = stubModels(overrides.classifyAs ?? "personal");
+  const background = makeBackgroundTasks({ log: silentLog });
   const result = await buildDeps({
+    background,
     config,
     env: { ANTHROPIC_API_KEY: "sk-ant-test" },
     log: silentLog,
@@ -75,13 +84,22 @@ const build = async (overrides: Partial<AppInputs> & { classifyAs?: string } = {
     now: () => NOW,
     ...overrides,
   });
-  return { result, requests: models.requests };
+  return { result: withBackground(result, background), requests: models.requests };
 };
 
-const ask = async (deps: Deps, request: AskRequest) => handleAsk(deps, request);
+/** Background work (the wrap-up) for the deps under test, so `ask` can wait for it like the server would. */
+const backgrounds = new WeakMap<Deps, BackgroundTasks>();
 
-const depsOf = (result: Awaited<ReturnType<typeof buildDeps>>): Deps => {
+/** Asks, then waits for the after-reply work to finish, so model calls can be checked in order. */
+const ask = async (deps: Deps, request: AskRequest) => {
+  const response = await handleAsk(deps, request);
+  await backgrounds.get(deps)?.drain();
+  return response;
+};
+
+const depsOf = (result: Awaited<ReturnType<typeof buildDeps>>, background?: BackgroundTasks): Deps => {
   if (!result.ok) throw new Error(result.error);
+  if (background) backgrounds.set(result.value, background);
   return result.value;
 };
 
@@ -238,6 +256,7 @@ describe("answered contexts", () => {
 describe("memory, end to end", () => {
   it("remembers what the user asked it to, and uses it in the next answer", async () => {
     const store = makeMemoryStoreInMemory({ now: () => NOW });
+    const background = makeBackgroundTasks({ log: silentLog });
     const requests: LlmRequest[] = [];
     const makeLlm = (ref: ModelRef) =>
       ok<LlmCall>(async (request) => {
@@ -270,8 +289,9 @@ describe("memory, end to end", () => {
       makeLlm,
       now: () => NOW,
       memoryStore: store,
+      background,
     });
-    const deps = depsOf(result);
+    const deps = depsOf(result, background);
 
     await ask(deps, { question: "Remember that Inês's teacher is Ms Rita", conversationId: "conv-12345678" });
     expect((await store.list()).map((m) => [m.kind, m.text, m.origin])).toEqual([

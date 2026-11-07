@@ -194,6 +194,9 @@ export type Logger = {
  * tested with stubs. Lower layers (LLM provider, profile, Vendus) have their
  * own deps and are wired into these functions at startup.
  */
+/** Runs a task after the reply has gone out (#56). Failures are logged, never returned. */
+export type AfterReply = (name: string, task: () => Promise<void>) => void;
+
 export type Deps = {
   readonly contexts: readonly Context[];
   /**
@@ -209,6 +212,10 @@ export type Deps = {
   /** Errors are for things that actually failed; "not connected yet" is an `unavailable` outcome. */
   readonly answer: (input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>;
   readonly memory: MemoryHooks;
+  /** Whether a context has an answerer. The rest reply "not connected yet", with no memory load and no wrap-up. */
+  readonly isAnswered: (contextId: ContextId) => boolean;
+  /** Where the wrap-up goes, so it never delays the reply. */
+  readonly afterReply: AfterReply;
   readonly now: () => Date;
   readonly log: Logger;
 };

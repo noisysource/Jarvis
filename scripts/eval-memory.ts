@@ -14,6 +14,7 @@
 
 import { readFile } from "node:fs/promises";
 import { makeAnswerRouter } from "../src/answer/router.js";
+import { makeBackgroundTasks } from "../src/background.js";
 import { ANSWERED_CONTEXT_IDS } from "../src/app.js";
 import { handleAsk } from "../src/ask.js";
 import { loadConfig } from "../src/config.js";
@@ -93,11 +94,15 @@ for (const [i, f] of cases.entries()) {
   const answerers = Object.fromEntries(
     ANSWERED_CONTEXT_IDS.map((id): [string, Deps["answer"]] => [id, async () => ok({ kind: "answer", text: f.answer })]),
   );
+  // The wrap-up runs after the reply, as on the server; the eval waits for it before scoring.
+  const background = makeBackgroundTasks({ log });
   const deps: Deps = {
     contexts,
     precheck: makePrecheck(contexts),
     classify: async () => ({ kind: "unclear" }), // never used: each case names its context
     answer: makeAnswerRouter(answerers),
+    isAnswered: (id) => Object.hasOwn(answerers, id),
+    afterReply: background.run,
     // Not wrapped in the 2 s safety timeout, so a slow model call is scored rather than cut off.
     memory: makeMemoryHooks({ store, extract, now: () => now, log }),
     now: () => now,
@@ -108,6 +113,7 @@ for (const [i, f] of cases.entries()) {
     context: f.context as ContextId,
     conversationId: `eval-case-${i}-${now.getTime()}`,
   });
+  await background.drain();
 
   const after = await store.list();
   const seededText = new Map(seeded.map((m) => [m.id, m.text]));
