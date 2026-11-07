@@ -11,7 +11,8 @@ import { loadContexts } from "./contexts.js";
 import type { ModelRef } from "./llm/model-ref.js";
 import { makeLlm, type ProviderKeys } from "./llm/registry.js";
 import type { LlmCall } from "./llm/types.js";
-import { makeSafeMemoryHooks, stubMemoryHooks } from "./memory.js";
+import { extractNothing, makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
+import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
 import { err, ok, type Result } from "./result.js";
@@ -27,6 +28,8 @@ export type AppInputs = {
   readonly profileFs?: ProfileFileSystem;
   readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys) => Result<LlmCall, string>;
   readonly now?: () => Date;
+  /** Where memories live. Defaults to an in-memory store until the SQLite store (#60). */
+  readonly memoryStore?: MemoryStore;
 };
 
 /** "What Jarvis can do", from contexts.md and which contexts have an answerer. */
@@ -73,6 +76,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     return err(`${config.contextsPath} needs an answered "personal" context`);
   }
 
+  const now = inputs.now ?? (() => new Date());
+  const memoryStore = inputs.memoryStore ?? makeMemoryStoreInMemory({ now });
+
   return ok({
     contexts: contexts.value,
     precheck: makePrecheck(contexts.value),
@@ -86,8 +92,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         log,
       }),
     }),
-    memory: makeSafeMemoryHooks(stubMemoryHooks, { log }),
-    now: inputs.now ?? (() => new Date()),
+    memory: makeSafeMemoryHooks(makeMemoryHooks({ store: memoryStore, extract: extractNothing, now, log }), { log }),
+    now,
     log,
   });
 };

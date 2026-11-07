@@ -17,3 +17,7 @@ export const formatNow = (now: Date, timeZone: string): string => {
   const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("weekday")}, ${get("day")} ${get("month")} ${get("year")}, ${get("hour")}:${get("minute")} (${timeZone}, ${get("timeZoneName")})`;
 };
+
+/** e.g. "6 Nov 2026", in the configured time zone. */
+export const formatDay = (date: Date, timeZone: string): string =>
+  new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", year: "numeric" }).format(date);

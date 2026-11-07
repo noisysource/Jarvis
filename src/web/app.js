@@ -11,6 +11,7 @@ import {
   isStopPhrase,
   keepListening,
   matchContextOption,
+  newConversationId,
   parseLanguage,
   pickVoice,
   shouldReopenMic,
@@ -58,6 +59,9 @@ const save = (key, value) => {
   }
 };
 
+/** @param {number} count */
+const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
+
 /**
  * A clarify waiting for an answer: the question it was about, the offered
  * contexts and their buttons.
@@ -72,6 +76,7 @@ const save = (key, value) => {
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
  *   listening: boolean, pending: PendingClarify | null,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
+ *   conversationId: string,
  * }}
  */
 const state = {
@@ -84,6 +89,7 @@ const state = {
   conversation: load("jarvis.conversation") !== "false",
   voiceSession: false,
   autoBlocked: false,
+  conversationId: newConversationId(randomBytes),
 };
 
 // ---- rendering ----
@@ -247,7 +253,9 @@ const ask = async (question, context) => {
     const res = await fetch("/ask", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(buildAskBody({ question: text, context, history: state.history })),
+      body: JSON.stringify(
+        buildAskBody({ question: text, context, history: state.history, conversationId: state.conversationId }),
+      ),
     });
     const body = await res.json().catch(() => null);
     view = viewFromHttp(res.status, body);
@@ -582,6 +590,7 @@ newButton.addEventListener("click", () => {
   stopSpeaking();
   retirePending();
   state.history = [];
+  state.conversationId = newConversationId(randomBytes);
   transcript.replaceChildren();
   setStatus("New conversation.");
   input.focus();

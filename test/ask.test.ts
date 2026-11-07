@@ -30,7 +30,17 @@ beforeAll(async () => {
   contexts = parsed.value;
 });
 
-const memory: Memory = { id: "m1", contextId: id("personal"), text: "Daughter: Inês", createdAt: NOW, source: "q0" };
+const memory: Memory = {
+  id: "m1",
+  contextId: id("personal"),
+  kind: "fact",
+  text: "Daughter: Inês",
+  origin: "auto",
+  createdAt: NOW,
+  updatedAt: NOW,
+  source: "q0",
+  seen: false,
+};
 
 /** Stub deps that record every call, in order. */
 const makeDeps = (
@@ -95,6 +105,21 @@ describe("answered contexts", () => {
       answer: "2 September.",
       memoriesUsed: [memory],
     });
+  });
+
+  it("passes the conversation id and request id to the wrap-up", async () => {
+    const { deps, wrapUps } = makeDeps();
+    await handleAsk(deps, { question: QUESTION, conversationId: "conv-12345678" }, { requestId: "req-1" });
+    expect(wrapUps[0]).toMatchObject({ conversationId: "conv-12345678", requestId: "req-1" });
+  });
+
+  it("uses memories but learns nothing when remember is false", async () => {
+    const { deps, calls, answerInputs, wrapUps } = makeDeps();
+    const response = await handleAsk(deps, { question: QUESTION, remember: false });
+    expect(response.type).toBe("answer");
+    expect(calls).toEqual(["classify", "loadMemories", "answer"]);
+    expect(answerInputs[0]?.memories).toEqual([memory]);
+    expect(wrapUps).toEqual([]);
   });
 
   it("skips classification when the context is given", async () => {

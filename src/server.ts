@@ -114,6 +114,7 @@ export const makeServer = (
       const response = await handleAsk(
         { ...deps, log: withLogFields(deps.log, { requestId: c.get("requestId") }) },
         request.value,
+        { requestId: c.get("requestId") },
       );
       return c.json(response);
     },

@@ -9,7 +9,7 @@
 //                                    ▼
 //   unclear  → clarify: which context? (answerable contexts only)
 //   handoff  → fixed handoff message; nothing else runs
-//   answer   → loadMemories → answer → wrapUp → answer response
+//   answer   → loadMemories → answer → wrapUp (unless remember: false) → answer response
 //              (or an `unavailable` reply, e.g. "not connected yet": no wrapUp)
 //
 // Logs carry the context id and outcome only, never the question or answer.
@@ -49,7 +49,11 @@ const resolveContext = async (
   return context ? { kind: "context", context } : { kind: "unclear" };
 };
 
-export const handleAsk = async (deps: Deps, request: AskRequest): Promise<AskResponse> => {
+export const handleAsk = async (
+  deps: Deps,
+  request: AskRequest,
+  meta: { readonly requestId?: string } = {},
+): Promise<AskResponse> => {
   const history = request.history ?? [];
   try {
     const resolved = await resolveContext(deps, request, history);
@@ -87,13 +91,19 @@ export const handleAsk = async (deps: Deps, request: AskRequest): Promise<AskRes
       return { type: "unavailable", context: context.id, message: answer.value.message };
     }
 
-    // Awaited so it finishes before the response (Cloud Run may throttle CPU afterwards).
-    await deps.memory.wrapUp({
-      question: request.question,
-      contextId: context.id,
-      answer: answer.value.text,
-      memoriesUsed: memories,
-    });
+    // "Don't remember this": the answer used memories, but nothing is learned.
+    // Awaited so it finishes before the response (Cloud Run may throttle CPU
+    // afterwards); #56 moves it after the reply.
+    if (request.remember !== false) {
+      await deps.memory.wrapUp({
+        question: request.question,
+        contextId: context.id,
+        answer: answer.value.text,
+        memoriesUsed: memories,
+        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+        ...(meta.requestId ? { requestId: meta.requestId } : {}),
+      });
+    }
 
     deps.log.info("ask", { context: context.id, outcome: "answer" });
     return { type: "answer", context: context.id, answer: answer.value.text };

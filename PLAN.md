@@ -65,9 +65,10 @@ Chat page (GET /)                         Hono server (npm run dev, localhost)
                                              ├ ec-hrt      → handoff: "This is for Kiro" (backstop; nothing else runs)
                                              ├ kidclub /
                                              │ noisysource → unavailable: "not connected yet" (M0)
-                                             └ personal    → loadMemories (stub)
-                                                             → answer model: instructions + profile + history
-                                                             → wrapUp (stub)
+                                             └ personal    → loadMemories (MemoryStore, this context only)
+                                                             → answer model: instructions + profile + history + memories
+                                                             → wrapUp → extract (#61) → MemoryStore
+                                                               (skipped with remember: false)
 ```
 
 The server is **stateless**: the page sends the conversation with each
@@ -112,7 +113,8 @@ question, and after a clarify response it re-sends the question with
 | `src/classify.ts` | `makeClassifier`: local precheck, then the classifier model → context id or `unclear` | #11 |
 | `src/answer/personal.ts` | Answer model: instructions + profile (cached), then Lisbon date/time and memories (uncached), history, no tools | #13 |
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
-| `src/memory.ts` | Memory hook stubs; `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23 |
+| `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
+| `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store (default until SQLite #60) | #59 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / loadMemories → answer → wrapUp | #14 |
 | `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
 | `src/answer/router.ts` | Answerer per context; contexts without one give an `unavailable` reply ("not connected yet"), not an error | #26 |
@@ -170,6 +172,25 @@ finishes (never during; right away if muted). It closes after ~8 s of silence
 the server), or on the Stop tap. Typing ends the spoken conversation. If the
 browser refuses an automatic start (`not-allowed`, or `start()` throws), it's
 paused for the page and the normal mic button remains, with a note.
+
+**Memory (#59–#62, #24).** Memories belong to one context and are only
+loaded for it. Three kinds: **facts** (lasting things you said, preferences
+included), **playbooks** (how you want recurring things done; never
+permission to act) and **history** (one line per conversation, kept 30 days).
+Everything goes through a `MemoryStore` interface: in-memory now, SQLite
+next (`node:sqlite`, `data/memory.sqlite`, mode 600, gitignored), Firestore
+with deployment. Loading picks ~20 facts and playbooks by word match, then
+recency, plus the 3 latest history lines; they go in the uncached prompt,
+dated, as data the profile overrides. Saving is automatic after a real
+answer (not clarify, handoff, unavailable or error); you review it in the
+Memories panel (#62), and "don't remember this" (`remember: false`) skips
+it. Rules, in the extraction prompt and again in code (#61): never EC/HRT
+(the only exception mirrors the routing precheck: Noisy Source invoicing
+playbooks when the invoicing exception applied, never mentioning HRT, UTP,
+CASP, Recruiter Portal or colleague names); never secrets; never raw Vendus
+data (the extractor never sees tool results); health, personal finances and
+sensitive details about other people only on an explicit "remember that…".
+Deletion is real.
 
 **Personality (M0).** The personal answerer is warm, natural and a little
 conversational: it greets back or acknowledges and adds a sentence of context
@@ -240,6 +261,11 @@ Backlog after M0 (labels in brackets):
 - #56 Memory performance [`memory`, `backlog`; before or with #24]: run the
   wrap-up after the reply is sent; skip the memory load for contexts with
   no answerer.
+
+Memory (splits the old #24): #59 `MemoryStore` interface and hooks → #60
+SQLite store (`node:sqlite`) → #61 wrap-up extraction and rules → #62 list
+and delete (CLI, page panel, chat); #24 is now the Firestore store, with
+deployment.
 
 ## Decisions
 

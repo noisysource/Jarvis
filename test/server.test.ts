@@ -21,6 +21,7 @@ beforeAll(async () => {
 const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = {}) => {
   const lines: string[] = [];
   const calls: string[] = [];
+  const wrapUps: unknown[] = [];
   const deps: Deps = {
     contexts,
     precheck: makePrecheck(contexts),
@@ -32,7 +33,12 @@ const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = 
       calls.push("answer");
       return ok({ kind: "answer", text: ANSWER });
     },
-    memory: { loadMemories: async () => [], wrapUp: async () => undefined },
+    memory: {
+      loadMemories: async () => [],
+      wrapUp: async (input) => {
+        wrapUps.push(input);
+      },
+    },
     now: () => new Date("2026-11-06T17:20:00Z"),
     log: makeJsonLogger({ write: (l) => lines.push(l), now: () => new Date("2026-11-06T17:20:00Z") }),
   };
@@ -40,7 +46,7 @@ const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = 
   const app = makeServer(deps, { newRequestId: () => `req-${++n}`, ...options });
   const post = (body: string, headers: Record<string, string> = { "content-type": "application/json" }) =>
     app.request("/ask", { method: "POST", body, headers });
-  return { app, post, lines, calls };
+  return { app, post, lines, calls, wrapUps };
 };
 
 describe("GET /healthz", () => {
@@ -61,6 +67,19 @@ describe("POST /ask", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(res.headers.get("x-request-id")).toBe("req-1");
     expect(await res.json()).toEqual({ type: "answer", context: "personal", answer: ANSWER });
+  });
+
+  it("gives the wrap-up the request id and the page's conversation id", async () => {
+    const { post, wrapUps } = setup();
+    await post(JSON.stringify({ question: QUESTION, conversationId: "0f3a9c1e2b4d5e6f" }));
+    expect(wrapUps[0]).toMatchObject({ requestId: "req-1", conversationId: "0f3a9c1e2b4d5e6f" });
+  });
+
+  it("learns nothing when the page says remember: false", async () => {
+    const { post, wrapUps } = setup();
+    const res = await post(JSON.stringify({ question: QUESTION, remember: false }));
+    expect(await res.json()).toMatchObject({ type: "answer" });
+    expect(wrapUps).toEqual([]);
   });
 
   it("passes history and a picked context through", async () => {

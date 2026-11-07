@@ -27,6 +27,22 @@ describe("parseAskRequest", () => {
     });
   });
 
+  it("accepts a conversation id and remember: false", () => {
+    expect(parseAskRequest({ question: "Hi", conversationId: "0f3a9c1e2b4d5e6f", remember: false })).toEqual({
+      ok: true,
+      value: { question: "Hi", conversationId: "0f3a9c1e2b4d5e6f", remember: false },
+    });
+  });
+
+  it.each([
+    [{ conversationId: "short" }, "conversationId: conversationId must be 8 to 64 letters, digits or hyphens"],
+    [{ conversationId: "x".repeat(65) }, "conversationId: conversationId must be 8 to 64 letters, digits or hyphens"],
+    [{ conversationId: "abc def 123" }, "conversationId: conversationId must be 8 to 64 letters, digits or hyphens"],
+    [{ remember: "no" }, "remember: remember must be true or false"],
+  ])("rejects %j", (extra, message) => {
+    expect(parseAskRequest({ question: "Hi", ...extra })).toEqual({ ok: false, error: message });
+  });
+
   it("accepts a bare question", () => {
     expect(parseAskRequest({ question: "Hi" })).toEqual({ ok: true, value: { question: "Hi" } });
   });
