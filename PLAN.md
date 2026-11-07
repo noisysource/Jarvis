@@ -118,6 +118,8 @@ question, and after a clarify response it re-sends the question with
 | `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
 | `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store | #59 |
 | `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
+| `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
+| `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
 | `src/memory-rules.ts` | Pure rule checks: explicit "remember" and "forget" in the user's own words, secrets, business records, sensitive categories, EC cues + never-remember names | #61 |
 | `src/memory-sqlite.ts` | SQLite `MemoryStore` on `node:sqlite`: mode-600 file, numbered schema steps, `secure_delete` + `VACUUM` on wipe, daily purge of expired history | #60 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / (answered contexts only) loadMemories → answer → reply; wrapUp handed to `afterReply` | #14, #56 |

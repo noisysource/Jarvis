@@ -78,6 +78,111 @@ h1 {
   max-width: 14rem;
 }
 
+.badge {
+  display: inline-block;
+  min-width: 1.3em;
+  margin-left: 0.2rem;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.badge[hidden] {
+  display: none;
+}
+
+button#remember[aria-pressed="false"] {
+  background: var(--unavailable);
+}
+
+dialog#memories-panel {
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+dialog#memories-panel::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.memory-group h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 1rem 0 0.3rem;
+  font-size: 1rem;
+}
+
+.memory-group h4 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.memory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.memory-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.memory-item.new {
+  border-color: var(--accent);
+}
+
+.memory-item p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.memory-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.memory-item button,
+.memory-group h3 button {
+  flex-shrink: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
 main {
   flex: 1;
 }
