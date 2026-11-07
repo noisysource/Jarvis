@@ -115,6 +115,8 @@ question, and after a clarify response it re-sends the question with
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
 | `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
 | `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store | #59 |
+| `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
+| `src/memory-rules.ts` | Pure rule checks: explicit "remember" and "forget" in the user's own words, secrets, business records, sensitive categories, EC cues + never-remember names | #61 |
 | `src/memory-sqlite.ts` | SQLite `MemoryStore` on `node:sqlite`: mode-600 file, numbered schema steps, `secure_delete` + `VACUUM` on wipe, daily purge of expired history | #60 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / loadMemories → answer → wrapUp | #14 |
 | `src/request.ts` | `parseAskRequest(body)`: question ≤ 2000 chars, optional context, history ≤ 20 turns × 4000 chars | #26 |
@@ -197,6 +199,37 @@ CASP, Recruiter Portal or colleague names); never secrets; never raw Vendus
 data (the extractor never sees tool results); health, personal finances and
 sensitive details about other people only on an explicit "remember that…".
 Deletion is real.
+
+How the wrap-up decides (#61): the classifier model suggests adds, updates
+and deletes, each with a confidence, an `explicit` flag and a `sensitive`
+label, plus the conversation's history line. Then code keeps a suggestion
+only if: confidence ≥ 0.7; at most 3 new per exchange; not a duplicate;
+updates and deletes only target the related memories it was shown, and
+deletes only when the user asked to forget; no secret (even if asked); no
+EC/HRT cue or never-remember name (`data/never-remember.txt`, gitignored)
+unless it's a Noisy Source invoicing playbook under the precheck's invoicing
+exception, which still may only name the EC itself, never HRT, UTP, CASP,
+Recruiter Portal UTP, Cast-p, EPSO, Kiro or colleagues; no invoice/document
+numbers, amounts, NIFs or customer lists outside `personal`; and health,
+finance or sensitive-about-others content (by the model's label or a word
+list) only when explicit. "Explicit" needs the model's flag and the user's
+own words: remember, take note, lembra/lembre, guarda, não te esqueças,
+anota, don't forget (any case, accents optional, whole words, not negated:
+"don't remember this" and "do you remember…?" don't count). The history
+line goes through the same code checks as facts (secrets, EC/HRT, business
+records, sensitive) and is never explicit. Any EC question outside that
+exception keeps nothing and makes no model call. An opt-out in the user's
+own words ("não guardes", "não te lembres", "esquece isto", "don't
+remember/keep/save this", "off the record") skips the whole exchange,
+history line included, before any model call: checked in code by the
+memory hooks and again by the extract step. In business contexts (KidClub,
+Noisy Source) no memory may name a customer (a capitalised name that isn't a
+context, weekday, month or language), and history lines stay general
+("asked about an unpaid KidClub invoice"): no customers, families or who
+owes what; otherwise they're dropped. `eval:memory` follows the live flow
+(`handleAsk` with the same precheck, answer router and `ANSWERED_CONTEXT_IDS`
+as the server, so contexts that aren't connected get no wrap-up) on a
+throwaway in-memory store per case, never `data/memory.sqlite`.
 
 **Personality (M0).** The personal answerer is warm, natural and a little
 conversational: it greets back or acknowledges and adds a sentence of context

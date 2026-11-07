@@ -293,6 +293,22 @@ describe("makeMemoryHooks", () => {
     expect(ctx.info).toHaveBeenCalledWith("memory wrap-up", { contextId: "personal", added: 1, updated: 0, deleted: 0, ignored: 0, history: true });
   });
 
+  it.each(["Não guardes isto, mas estou a pensar mudar de emprego", "Off the record: I'm thinking of quitting"])(
+    "skips the whole exchange on an opt-out (%j): no extract call, no history line, nothing changed",
+    async (question) => {
+      const extract = vi.fn<Extract>(async () => ({
+        decisions: [{ action: "add", kind: "fact", text: "Thinking of changing jobs", origin: "auto" }],
+        historyLine: "Talked about changing jobs",
+      }));
+      const ctx = setup(extract);
+      const before = await add(ctx.store, "Earlier talk", { kind: "history", conversationId: "conv-1" });
+      await ctx.hooks.wrapUp({ question, contextId: personal, answer: "Fica entre nós.", memoriesUsed: [], conversationId: "conv-1" });
+      expect(extract).not.toHaveBeenCalled();
+      expect(await ctx.store.list()).toEqual([before]);
+      expect(ctx.info).toHaveBeenCalledWith("memory wrap-up skipped", { contextId: "personal", reason: "opt_out" });
+    },
+  );
+
   it("keeps nothing with the placeholder extract", async () => {
     const ctx = setup();
     await ctx.hooks.wrapUp({ question: "q", contextId: personal, answer: "a", memoriesUsed: [], conversationId: "conv-1" });

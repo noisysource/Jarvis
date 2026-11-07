@@ -28,6 +28,7 @@ describe("loadConfig", () => {
       profileSource: { kind: "file", path: "data/profile.md" },
       timeZone: "Europe/Lisbon",
       memoryStore: { kind: "sqlite", path: "data/memory.sqlite" },
+      neverRememberPath: "data/never-remember.txt",
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
   });

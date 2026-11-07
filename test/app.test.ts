@@ -3,7 +3,7 @@
 // calls and the profile file are stubbed.
 
 import { describe, expect, it } from "vitest";
-import { buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
+import { ANSWERED_CONTEXT_IDS, buildDeps, capabilitiesText, type AppInputs } from "../src/app.js";
 import { parseContexts } from "../src/contexts.js";
 import { readFile } from "node:fs/promises";
 import { handleAsk } from "../src/ask.js";
@@ -12,6 +12,8 @@ import { formatModelRef, type ModelRef } from "../src/llm/model-ref.js";
 import type { LlmCall, LlmRequest, LlmResponse } from "../src/llm/types.js";
 import type { ProfileFileSystem } from "../src/profile.js";
 import { ok } from "../src/result.js";
+import { EXTRACT_SCHEMA } from "../src/memory-extract.js";
+import { makeMemoryStoreInMemory } from "../src/memory-store.js";
 import type { AskRequest, Deps, Logger } from "../src/types.js";
 
 const PROFILE = "## Family\n- Daughter: Inês, born 2 September 2017";
@@ -52,6 +54,12 @@ const stubModels = (classifyAs: string) => {
       );
     });
   return { makeLlm, requests };
+};
+
+const parseContextsFile = async () => {
+  const parsed = parseContexts(await readFile("contexts.md", "utf8"));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.value;
 };
 
 const silentLog: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
@@ -111,7 +119,9 @@ describe("personal questions", () => {
       answer: "Her birthday is 2 September.",
     });
 
-    expect(requests.map((r) => r.model)).toEqual([CLASSIFIER, ANSWER]);
+    // Classify, answer, then the wrap-up asks the classifier model what to remember.
+    expect(requests.map((r) => r.model)).toEqual([CLASSIFIER, ANSWER, CLASSIFIER]);
+    expect(requests[2]?.request.outputSchema).toBe(EXTRACT_SCHEMA);
     const answerRequest = requests[1]?.request;
     expect(answerRequest?.system).toContain(PROFILE);
     expect(answerRequest?.cacheSystem).toBe(true);
@@ -209,7 +219,87 @@ describe("unclear questions", () => {
   it("are answered once the user picks a context", async () => {
     const { result, requests } = await build({ classifyAs: "unclear" });
     expect((await ask(depsOf(result), { question: "Did it get paid?", context: "personal" as never })).type).toBe("answer");
-    expect(requests.map((r) => r.model)).toEqual([ANSWER]);
+    expect(requests.map((r) => r.model)).toEqual([ANSWER, CLASSIFIER]);
+  });
+});
+
+describe("answered contexts", () => {
+  it("answers exactly ANSWERED_CONTEXT_IDS (which eval:memory shares) and replies 'not connected yet' for the rest, with no wrap-up", async () => {
+    const answerable = (await parseContextsFile()).filter((c) => c.handling.kind === "answer");
+    for (const c of answerable) {
+      const { result, requests } = await build();
+      const response = await ask(depsOf(result), { question: "How are things?", context: c.id });
+      expect(response.type).toBe(ANSWERED_CONTEXT_IDS.includes(c.id) ? "answer" : "unavailable");
+      if (response.type === "unavailable") expect(requests).toEqual([]); // no answer model, no extract call
+    }
+  });
+});
+
+describe("memory, end to end", () => {
+  it("remembers what the user asked it to, and uses it in the next answer", async () => {
+    const store = makeMemoryStoreInMemory({ now: () => NOW });
+    const requests: LlmRequest[] = [];
+    const makeLlm = (ref: ModelRef) =>
+      ok<LlmCall>(async (request) => {
+        requests.push(request);
+        if (request.outputSchema === EXTRACT_SCHEMA) {
+          return ok(
+            response({
+              kind: "json",
+              value: {
+                memories: [
+                  { action: "add", target_id: "", kind: "fact", text: "Inês's teacher is Ms Rita", confidence: 0.95, explicit: true, sensitive: "none" },
+                  { action: "add", target_id: "", kind: "fact", text: "Their password is hunter2", confidence: 0.99, explicit: true, sensitive: "none" },
+                ],
+                history_line: "Talked about Inês's school",
+              },
+            }),
+          );
+        }
+        return ok(
+          request.outputSchema
+            ? response({ kind: "json", value: { context: "personal" } })
+            : response({ kind: "text", text: `Noted (${formatModelRef(ref)}).` }),
+        );
+      });
+    const result = await buildDeps({
+      config,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      log: silentLog,
+      profileFs: profileFs(PROFILE),
+      makeLlm,
+      now: () => NOW,
+      memoryStore: store,
+    });
+    const deps = depsOf(result);
+
+    await ask(deps, { question: "Remember that Inês's teacher is Ms Rita", conversationId: "conv-12345678" });
+    expect((await store.list()).map((m) => [m.kind, m.text, m.origin])).toEqual([
+      ["fact", "Inês's teacher is Ms Rita", "explicit"],
+      ["history", "Talked about Inês's school", "auto"],
+    ]); // the password never got in
+
+    await ask(deps, { question: "Who is Inês's teacher?" });
+    const answer = requests.filter((r) => !r.outputSchema).at(-1);
+    expect(answer?.systemSuffix).toContain("- (6 Nov 2026) Inês's teacher is Ms Rita");
+  });
+
+  it("reads the never-remember list when there is one, and refuses a list it can't read", async () => {
+    const files: Record<string, string> = { "data/never-remember.txt": "# colleagues\nJane Example\n" };
+    const readTextFile = async (path: string) => {
+      if (path in files) return files[path] ?? "";
+      if (path === "contexts.md") return readFile(path, "utf8");
+      throw Object.assign(new Error("nope"), { code: "EACCES" });
+    };
+    expect((await build({ readTextFile })).result.ok).toBe(true);
+    const broken = await build({
+      readTextFile: async (path) => {
+        if (path === "contexts.md") return readFile(path, "utf8");
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      },
+    });
+    expect(broken.result.ok).toBe(false);
+    expect(!broken.result.ok && broken.result.error).toContain("data/never-remember.txt: can't read it (permission denied)");
   });
 });
 

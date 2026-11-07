@@ -10,3 +10,5 @@ data/profile.md
 # Memories: personal data, never commit
 data/*.sqlite
 data/*.sqlite-*
+# Names memories must never contain (colleagues): personal, never commit
+data/never-remember.txt

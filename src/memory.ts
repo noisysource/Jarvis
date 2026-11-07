@@ -7,6 +7,7 @@
 // failing or slow hook never fails a question: load falls back to no
 // memories, wrap-up is skipped, and each has a timeout.
 
+import { asksNotToRemember } from "./memory-rules.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { ContextId, Logger, Memory, MemoryHooks, MemoryOrigin } from "./types.js";
 
@@ -83,6 +84,12 @@ export const makeMemoryHooks = (deps: {
     },
 
     wrapUp: async ({ question, contextId, answer, memoriesUsed, conversationId, requestId }) => {
+      // "Não guardes isto", "off the record"…: nothing from this exchange is
+      // kept, not even the history line, and the extract step isn't called.
+      if (asksNotToRemember(question)) {
+        deps.log?.info("memory wrap-up skipped", { contextId, reason: "opt_out" });
+        return;
+      }
       const now = deps.now();
       const existingHistory = conversationId
         ? (await deps.store.list({ contextId, kind: "history", conversationId }))[0]
