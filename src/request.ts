@@ -38,6 +38,11 @@ const AskRequestSchema = z
       )
       .max(LIMITS.historyTurns, { error: `history has more than ${LIMITS.historyTurns} turns` })
       .optional(),
+    conversationId: z
+      .string()
+      .regex(/^[A-Za-z0-9-]{8,64}$/, { error: "conversationId must be 8 to 64 letters, digits or hyphens" })
+      .optional(),
+    remember: z.boolean({ error: "remember must be true or false" }).optional(),
   })
   .strict();
 
@@ -51,10 +56,12 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
         .join("; "),
     );
   }
-  const { question, context, history } = parsed.data;
+  const { question, context, history, conversationId, remember } = parsed.data;
   return ok({
     question,
     ...(context !== undefined ? { context: context as ContextId } : {}),
     ...(history !== undefined ? { history } : {}),
+    ...(conversationId !== undefined ? { conversationId } : {}),
+    ...(remember !== undefined ? { remember } : {}),
   });
 };

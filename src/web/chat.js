@@ -42,14 +42,24 @@ export const appendTurn = (history, role, text) =>
   [...history, { role, text: text.slice(0, LIMITS.turnChars) }].slice(-LIMITS.historyTurns);
 
 /**
- * The POST /ask body.
- * @param {{ question: string, context?: string, history: readonly Turn[] }} input
+ * The POST /ask body. `conversationId` groups this conversation's history
+ * memory on the server; `remember: false` is "don't remember this".
+ * @param {{ question: string, context?: string, history: readonly Turn[], conversationId?: string, remember?: boolean }} input
  */
-export const buildAskBody = ({ question, context, history }) => ({
+export const buildAskBody = ({ question, context, history, conversationId, remember }) => ({
   question: question.trim().slice(0, LIMITS.questionChars),
   ...(context ? { context } : {}),
   ...(history.length > 0 ? { history: [...history] } : {}),
+  ...(conversationId ? { conversationId } : {}),
+  ...(remember === false ? { remember: false } : {}),
 });
+
+/**
+ * A fresh id for a conversation: 32 hex characters.
+ * @param {(count: number) => ArrayLike<number>} randomBytes returns `count` random bytes
+ */
+export const newConversationId = (randomBytes) =>
+  Array.from(randomBytes(16), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
  * How a reply is shown and spoken. `remember` says whether the exchange goes

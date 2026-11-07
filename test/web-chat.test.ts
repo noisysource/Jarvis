@@ -9,6 +9,7 @@ import {
   keepListening,
   matchContextOption,
   nameWords,
+  newConversationId,
   parseLanguage,
   pickVoice,
   replyView,
@@ -42,6 +43,23 @@ describe("appendTurn", () => {
     const history = [{ role: "user" as const, text: "a" }];
     appendTurn(history, "assistant", "b");
     expect(history).toHaveLength(1);
+  });
+});
+
+describe("conversation ids", () => {
+  it("sends the conversation id, and remember only when it's false", () => {
+    expect(buildAskBody({ question: "hi", history: [], conversationId: "abcdef12" })).toEqual({
+      question: "hi",
+      conversationId: "abcdef12",
+    });
+    expect(buildAskBody({ question: "hi", history: [], remember: false })).toEqual({ question: "hi", remember: false });
+    expect(buildAskBody({ question: "hi", history: [], remember: true })).toEqual({ question: "hi" });
+  });
+
+  it("makes 32 hex characters from 16 random bytes", () => {
+    const id = newConversationId((n) => Uint8Array.from({ length: n }, (_, i) => i * 17));
+    expect(id).toBe("00112233445566778899aabbccddeeff");
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
   });
 });
 

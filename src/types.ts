@@ -62,6 +62,10 @@ export type AskRequest = {
   /** Set when the user picked a context after a clarify response. Skips classification. */
   readonly context?: ContextId;
   readonly history?: readonly Turn[];
+  /** The page's id for this conversation (a new one after "New conversation"). Groups the history memory. */
+  readonly conversationId?: string;
+  /** false: "don't remember this". The answer still uses memories, but nothing is learned. */
+  readonly remember?: boolean;
 };
 
 export type Classification =
@@ -102,13 +106,38 @@ export type AskResponse =
   | { readonly type: "unavailable"; readonly context: ContextId; readonly message: string }
   | { readonly type: "error"; readonly message: string };
 
+/**
+ * What a memory is:
+ * - fact: something lasting the user said or corrected, preferences included
+ *   ("Inês's teacher is Ms Rita").
+ * - playbook: how they want a recurring thing done ("unpaid invoices oldest
+ *   first"). Shapes answers; never permission to act.
+ * - history: a one-line summary of a conversation. Expires after 30 days.
+ */
+export type MemoryKind = "fact" | "playbook" | "history";
+
+/** auto: kept by the wrap-up on its own. explicit: the user said "remember that…". */
+export type MemoryOrigin = "auto" | "explicit";
+
 export type Memory = {
   readonly id: string;
+  /** Memories belong to one context and are only ever loaded for it. */
   readonly contextId: ContextId;
+  readonly kind: MemoryKind;
   readonly text: string;
+  readonly origin: MemoryOrigin;
   readonly createdAt: Date;
-  /** Where the memory came from, e.g. the id of the question that produced it. */
+  readonly updatedAt: Date;
+  /** Last time it was loaded into an answer. */
+  readonly lastUsedAt?: Date;
+  /** History only: after this it's no longer loaded, and it's purged. */
+  readonly expiresAt?: Date;
+  /** The page's conversation it came from, if any. */
+  readonly conversationId?: string;
+  /** Where the memory came from: the id of the request that produced it. */
   readonly source: string;
+  /** Whether the user has seen it in the Memories panel (for the "new" badge). */
+  readonly seen: boolean;
 };
 
 export type MemoryHooks = {
@@ -121,6 +150,8 @@ export type MemoryHooks = {
     readonly contextId: ContextId;
     readonly answer: string;
     readonly memoriesUsed: readonly Memory[];
+    readonly conversationId?: string;
+    readonly requestId?: string;
   }) => Promise<void>;
 };
 
