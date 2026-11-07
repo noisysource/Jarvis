@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_MEMORY_TIMEOUT_MS,
+  DEFAULT_WRAP_UP_TIMEOUT_MS,
   type Extract,
   type ExtractInput,
   extractNothing,
@@ -114,7 +115,9 @@ describe("makeSafeMemoryHooks", () => {
     });
   });
 
-  it("times out slow hooks after 2 seconds by default", async () => {
+  it("times out a slow load after 2 seconds, and a stuck wrap-up (which runs after the reply) after 30", async () => {
+    expect(DEFAULT_MEMORY_TIMEOUT_MS).toBe(2_000);
+    expect(DEFAULT_WRAP_UP_TIMEOUT_MS).toBe(30_000);
     vi.useFakeTimers();
     const { log, warn } = recordingLog();
     const never = () => new Promise<never>(() => undefined);
@@ -125,8 +128,10 @@ describe("makeSafeMemoryHooks", () => {
     await vi.advanceTimersByTimeAsync(DEFAULT_MEMORY_TIMEOUT_MS - 1);
     expect(warn).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-
     expect(await loading).toEqual([]);
+    expect(warn.mock.calls.map(([, fields]) => fields)).toEqual([{ hook: "loadMemories", reason: "timeout" }]);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_WRAP_UP_TIMEOUT_MS - DEFAULT_MEMORY_TIMEOUT_MS);
     await expect(wrapping).resolves.toBeUndefined();
     expect(warn.mock.calls.map(([, fields]) => fields)).toEqual([
       { hook: "loadMemories", reason: "timeout" },

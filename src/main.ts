@@ -3,6 +3,7 @@
 
 import { serve } from "@hono/node-server";
 import { buildDeps } from "./app.js";
+import { makeBackgroundTasks } from "./background.js";
 import { loadConfig } from "./config.js";
 import { formatModelRef } from "./llm/model-ref.js";
 import { makeJsonLogger } from "./log.js";
@@ -39,7 +40,10 @@ const stopPurge = memoryStore
     })
   : undefined;
 
-const deps = await buildDeps({ config: cfg, env: process.env, log, ...(memoryStore ? { memoryStore } : {}) });
+// The memory wrap-up runs here, after each reply.
+const background = makeBackgroundTasks({ log });
+
+const deps = await buildDeps({ config: cfg, env: process.env, log, background, ...(memoryStore ? { memoryStore } : {}) });
 if (!deps.ok) refuse(deps.error);
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
@@ -69,10 +73,15 @@ const shutdown = (signal: string): void => {
   force.unref();
   // Stops accepting new connections and waits for in-flight requests.
   server.close(() => {
-    stopPurge?.();
-    if (sqlite?.ok) sqlite.value.close();
-    log.info("stopped");
-    process.exit(0);
+    // Let wrap-ups still running after their replies finish, then close the database.
+    const waiting = background.pending();
+    if (waiting > 0) log.info("waiting for background work", { tasks: waiting });
+    void background.drain().then(() => {
+      stopPurge?.();
+      if (sqlite?.ok) sqlite.value.close();
+      log.info("stopped");
+      process.exit(0);
+    });
   });
 };
 

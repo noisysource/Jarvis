@@ -49,12 +49,19 @@ const makeDeps = (
     answer?: Result<AnswerOutcome, AppError>;
     memory?: MemoryHooks;
     throwInClassify?: boolean;
+    /** Contexts with an answerer; all of them by default. */
+    answered?: readonly string[];
   } = {},
 ) => {
   const calls: string[] = [];
   const answerInputs: AnswerInput[] = [];
   const wrapUps: unknown[] = [];
   const logs: unknown[] = [];
+  const deferred: (() => Promise<void>)[] = [];
+  /** Runs the work handed to afterReply, as the server does once the reply is out. */
+  const flush = async () => {
+    for (const task of deferred.splice(0)) await task();
+  };
   const record = (level: string) => (message: string, fields?: unknown) => logs.push({ level, message, fields });
 
   const hooks: MemoryHooks = options.memory ?? {
@@ -82,21 +89,30 @@ const makeDeps = (
       return options.answer ?? ok({ kind: "answer", text: "2 September." });
     },
     memory: hooks,
+    isAnswered: (contextId) => options.answered?.includes(contextId) ?? true,
+    afterReply: (name, task) => {
+      calls.push(`after reply: ${name}`);
+      deferred.push(task);
+    },
     now: () => NOW,
     log: { info: record("info"), warn: record("warn"), error: record("error") },
   };
-  return { deps, calls, answerInputs, wrapUps, logs };
+  return { deps, calls, answerInputs, wrapUps, logs, flush };
 };
 
 describe("answered contexts", () => {
-  it("loads memories, answers, then wraps up, in that order", async () => {
-    const { deps, calls, answerInputs, wrapUps } = makeDeps();
+  it("loads memories and answers; the wrap-up only runs after the reply", async () => {
+    const { deps, calls, answerInputs, wrapUps, flush } = makeDeps();
     const history: Turn[] = [{ role: "user", text: "Hi" }, { role: "assistant", text: "Hello!" }];
 
     const response = await handleAsk(deps, { question: QUESTION, history });
 
     expect(response).toEqual({ type: "answer", context: "personal", answer: "2 September." });
-    expect(calls).toEqual(["classify", "loadMemories", "answer", "wrapUp"]);
+    // The reply is ready and the wrap-up hasn't run: it was handed to afterReply.
+    expect(calls).toEqual(["classify", "loadMemories", "answer", "after reply: memory wrap-up"]);
+    expect(wrapUps).toEqual([]);
+    await flush();
+    expect(calls.at(-1)).toBe("wrapUp");
     expect(answerInputs[0]).toMatchObject({ question: QUESTION, history, memories: [memory], now: NOW });
     expect(answerInputs[0]?.context.id).toBe("personal");
     expect(wrapUps[0]).toEqual({
@@ -108,8 +124,9 @@ describe("answered contexts", () => {
   });
 
   it("passes the conversation id and request id to the wrap-up", async () => {
-    const { deps, wrapUps } = makeDeps();
+    const { deps, wrapUps, flush } = makeDeps();
     await handleAsk(deps, { question: QUESTION, conversationId: "conv-12345678" }, { requestId: "req-1" });
+    await flush();
     expect(wrapUps[0]).toMatchObject({ conversationId: "conv-12345678", requestId: "req-1" });
   });
 
@@ -146,10 +163,11 @@ describe("answered contexts", () => {
 });
 
 describe("unavailable contexts", () => {
-  it("reply with an unavailable message, not an error, and skip the wrap-up", async () => {
-    const { deps, calls, logs } = makeDeps({
+  it("reply with an unavailable message, not an error, without loading memories or wrapping up", async () => {
+    const { deps, calls, logs, answerInputs } = makeDeps({
       classification: { kind: "context", contextId: id("kidclub") },
       answer: ok({ kind: "unavailable", message: "KidClub isn't connected yet, so I can't answer that one." }),
+      answered: ["personal"],
     });
 
     expect(await handleAsk(deps, { question: "Which invoices are unpaid?" })).toEqual({
@@ -157,7 +175,8 @@ describe("unavailable contexts", () => {
       context: "kidclub",
       message: "KidClub isn't connected yet, so I can't answer that one.",
     });
-    expect(calls).toEqual(["classify", "loadMemories", "answer"]);
+    expect(calls).toEqual(["classify", "answer"]); // no loadMemories, no after-reply work
+    expect(answerInputs[0]?.memories).toEqual([]);
     expect(logs).toContainEqual({ level: "info", message: "ask", fields: { context: "kidclub", outcome: "unavailable" } });
   });
 });
@@ -231,7 +250,7 @@ describe("local precheck always runs first", () => {
 
     expect(response).toMatchObject({ type: "answer", context: "noisysource" });
     expect(answerInputs[0]?.context.id).toBe("noisysource");
-    expect(calls).toEqual(["loadMemories", "answer", "wrapUp"]);
+    expect(calls).toEqual(["loadMemories", "answer", "after reply: memory wrap-up"]);
   });
 
   it("hands off without classifying when no context is given", async () => {
@@ -266,7 +285,7 @@ describe("failures", () => {
         throw new Error("write failed");
       },
     };
-    const { deps, answerInputs } = makeDeps({ memory: makeSafeMemoryHooks(failing) });
+    const { deps, answerInputs, flush } = makeDeps({ memory: makeSafeMemoryHooks(failing) });
 
     expect(await handleAsk(deps, { question: QUESTION })).toEqual({
       type: "answer",
@@ -274,6 +293,7 @@ describe("failures", () => {
       answer: "2 September.",
     });
     expect(answerInputs[0]?.memories).toEqual([]);
+    await expect(flush()).resolves.toBeUndefined(); // the failing wrap-up, after the reply, doesn't throw
   });
 
   it("turns an unexpected exception into a generic error, logging only its class", async () => {

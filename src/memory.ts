@@ -12,6 +12,8 @@ import type { MemoryStore } from "./memory-store.js";
 import type { ContextId, Logger, Memory, MemoryHooks, MemoryOrigin } from "./types.js";
 
 export const DEFAULT_MEMORY_TIMEOUT_MS = 2_000;
+/** The wrap-up runs after the reply (#56), so it can take longer; this only stops a stuck one. */
+export const DEFAULT_WRAP_UP_TIMEOUT_MS = 30_000;
 
 export type MemoryLimits = {
   readonly factsAndPlaybooks: number;
@@ -184,9 +186,10 @@ export const withTimeout = async <T>(task: () => Promise<T>, timeoutMs: number):
  */
 export const makeSafeMemoryHooks = (
   hooks: MemoryHooks,
-  options: { readonly timeoutMs?: number; readonly log?: Logger } = {},
+  options: { readonly timeoutMs?: number; readonly wrapUpTimeoutMs?: number; readonly log?: Logger } = {},
 ): MemoryHooks => {
   const timeoutMs = options.timeoutMs ?? DEFAULT_MEMORY_TIMEOUT_MS;
+  const wrapUpTimeoutMs = options.wrapUpTimeoutMs ?? DEFAULT_WRAP_UP_TIMEOUT_MS;
   const report = (hook: string, outcome: Outcome<unknown>): void => {
     if (!outcome.ok) {
       options.log?.warn("memory hook failed, continuing without it", {
@@ -204,7 +207,7 @@ export const makeSafeMemoryHooks = (
       return outcome.ok ? outcome.value : ([] as readonly Memory[]);
     },
     wrapUp: async (input) => {
-      report("wrapUp", await withTimeout(() => hooks.wrapUp(input), timeoutMs));
+      report("wrapUp", await withTimeout(() => hooks.wrapUp(input), wrapUpTimeoutMs));
     },
   };
 };

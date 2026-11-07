@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseContexts } from "../src/contexts.js";
+import { makeBackgroundTasks } from "../src/background.js";
 import { makeJsonLogger } from "../src/log.js";
 import { makePrecheck } from "../src/precheck.js";
 import { ok } from "../src/result.js";
 import { localHosts, MAX_BODY_BYTES, makeServer } from "../src/server.js";
 import { loadWebAssets, WEB_SECURITY_HEADERS, type WebAssets } from "../src/web.js";
-import type { Context, ContextId, Deps } from "../src/types.js";
+import type { Context, ContextId, Deps, MemoryHooks } from "../src/types.js";
 
 const QUESTION = "When is my daughter's birthday?";
 const ANSWER = "2 September.";
@@ -18,10 +19,14 @@ beforeAll(async () => {
   contexts = parsed.value;
 });
 
-const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = {}) => {
+const setup = (
+  options: { allowedHosts?: readonly string[]; web?: WebAssets; wrapUp?: MemoryHooks["wrapUp"] } = {},
+) => {
   const lines: string[] = [];
   const calls: string[] = [];
   const wrapUps: unknown[] = [];
+  const log = makeJsonLogger({ write: (l) => lines.push(l), now: () => new Date("2026-11-06T17:20:00Z") });
+  const background = makeBackgroundTasks({ log });
   const deps: Deps = {
     contexts,
     precheck: makePrecheck(contexts),
@@ -35,18 +40,22 @@ const setup = (options: { allowedHosts?: readonly string[]; web?: WebAssets } = 
     },
     memory: {
       loadMemories: async () => [],
-      wrapUp: async (input) => {
-        wrapUps.push(input);
-      },
+      wrapUp:
+        options.wrapUp ??
+        (async (input) => {
+          wrapUps.push(input);
+        }),
     },
+    isAnswered: () => true,
+    afterReply: background.run,
     now: () => new Date("2026-11-06T17:20:00Z"),
-    log: makeJsonLogger({ write: (l) => lines.push(l), now: () => new Date("2026-11-06T17:20:00Z") }),
+    log,
   };
   let n = 0;
   const app = makeServer(deps, { newRequestId: () => `req-${++n}`, ...options });
   const post = (body: string, headers: Record<string, string> = { "content-type": "application/json" }) =>
     app.request("/ask", { method: "POST", body, headers });
-  return { app, post, lines, calls, wrapUps };
+  return { app, post, lines, calls, wrapUps, background };
 };
 
 describe("GET /healthz", () => {
@@ -70,14 +79,43 @@ describe("POST /ask", () => {
   });
 
   it("gives the wrap-up the request id and the page's conversation id", async () => {
-    const { post, wrapUps } = setup();
+    const { post, wrapUps, background } = setup();
     await post(JSON.stringify({ question: QUESTION, conversationId: "0f3a9c1e2b4d5e6f" }));
+    await background.drain();
     expect(wrapUps[0]).toMatchObject({ requestId: "req-1", conversationId: "0f3a9c1e2b4d5e6f" });
   });
 
+  it("sends the reply before the wrap-up runs, and a slow or failing wrap-up changes nothing", async () => {
+    let release: () => void = () => undefined;
+    const started: string[] = [];
+    const { post, background, lines } = setup({
+      wrapUp: async () => {
+        started.push("wrapUp");
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        throw new Error(`write failed for ${QUESTION}`);
+      },
+    });
+
+    const res = await post(JSON.stringify({ question: QUESTION }));
+    expect(await res.json()).toEqual({ type: "answer", context: "personal", answer: ANSWER });
+    expect(background.pending()).toBe(1); // the reply is out; the wrap-up is still to finish
+
+    await new Promise((r) => setImmediate(r));
+    expect(started).toEqual(["wrapUp"]);
+    release();
+    await background.drain();
+    expect(background.pending()).toBe(0);
+    const failure = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.message === "background task failed");
+    expect(failure).toMatchObject({ task: "memory wrap-up", errorName: "Error" });
+    expect(lines.join("\n")).not.toContain(QUESTION);
+  });
+
   it("learns nothing when the page says remember: false", async () => {
-    const { post, wrapUps } = setup();
+    const { post, wrapUps, background } = setup();
     const res = await post(JSON.stringify({ question: QUESTION, remember: false }));
+    await background.drain();
     expect(await res.json()).toMatchObject({ type: "answer" });
     expect(wrapUps).toEqual([]);
   });

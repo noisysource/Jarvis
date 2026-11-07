@@ -11,6 +11,7 @@ import { loadContexts } from "./contexts.js";
 import type { ModelRef } from "./llm/model-ref.js";
 import { makeLlm, type ProviderKeys } from "./llm/registry.js";
 import type { LlmCall } from "./llm/types.js";
+import { makeBackgroundTasks, type BackgroundTasks } from "./background.js";
 import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
 import { makeModelExtract } from "./memory-extract.js";
 import { parseNeverRemember } from "./memory-rules.js";
@@ -32,6 +33,8 @@ export type AppInputs = {
   readonly now?: () => Date;
   /** Where memories live. Defaults to an in-memory store until the SQLite store (#60). */
   readonly memoryStore?: MemoryStore;
+  /** Runs work after the reply (the memory wrap-up). main.ts passes one so shutdown can drain it. */
+  readonly background?: BackgroundTasks;
 };
 
 /**
@@ -97,19 +100,24 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const now = inputs.now ?? (() => new Date());
   const memoryStore = inputs.memoryStore ?? makeMemoryStoreInMemory({ now });
 
+  const answerers: Record<string, Deps["answer"]> = {
+    personal: makePersonalAnswerer({
+      llm: answerLlm.value,
+      profile,
+      timeZone: config.timeZone,
+      capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
+      log,
+    }),
+  };
+  const background = inputs.background ?? makeBackgroundTasks({ log });
+
   return ok({
     contexts: contexts.value,
     precheck: makePrecheck(contexts.value),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log }),
-    answer: makeAnswerRouter({
-      personal: makePersonalAnswerer({
-        llm: answerLlm.value,
-        profile,
-        timeZone: config.timeZone,
-        capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
-        log,
-      }),
-    }),
+    answer: makeAnswerRouter(answerers),
+    isAnswered: (id) => Object.hasOwn(answerers, id),
+    afterReply: background.run,
     memory: makeSafeMemoryHooks(
       makeMemoryHooks({
         store: memoryStore,
