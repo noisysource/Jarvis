@@ -7,7 +7,10 @@ import {
   CONVERSATION,
   LANGUAGES,
   appendTurn,
+  badgeText,
   buildAskBody,
+  formatMemoryDay,
+  groupMemories,
   isStopPhrase,
   keepListening,
   matchContextOption,
@@ -15,6 +18,7 @@ import {
   parseLanguage,
   pickVoice,
   shouldReopenMic,
+  unseenIds,
   viewFromHttp,
   voiceKey,
   voicesFor,
@@ -39,6 +43,13 @@ const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
 const conversationButton = /** @type {HTMLButtonElement} */ (byId("conversation"));
 const listeningBanner = byId("listening");
 const autoNote = byId("auto-note");
+const rememberButton = /** @type {HTMLButtonElement} */ (byId("remember"));
+const memoriesButton = /** @type {HTMLButtonElement} */ (byId("memories"));
+const memoriesBadge = byId("memories-badge");
+const memoriesPanel = /** @type {HTMLDialogElement} */ (byId("memories-panel"));
+const memoriesClose = /** @type {HTMLButtonElement} */ (byId("memories-close"));
+const memoriesList = byId("memories-list");
+const memoriesStatus = byId("memories-status");
 const status = byId("status");
 
 // localStorage can be unavailable (private mode); preferences then just don't persist.
@@ -76,7 +87,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
  *   listening: boolean, pending: PendingClarify | null,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
- *   conversationId: string,
+ *   conversationId: string, remember: boolean,
  * }}
  */
 const state = {
@@ -90,6 +101,8 @@ const state = {
   voiceSession: false,
   autoBlocked: false,
   conversationId: newConversationId(randomBytes),
+  // "Don't remember this", for the current conversation only.
+  remember: true,
 };
 
 // ---- rendering ----
@@ -132,6 +145,8 @@ const renderControls = () => {
   conversationButton.setAttribute("aria-pressed", String(state.conversation));
   conversationButton.textContent = state.conversation ? "💬 Conversation on" : "💬 Conversation off";
   autoNote.hidden = !(state.conversation && state.autoBlocked);
+  rememberButton.setAttribute("aria-pressed", String(state.remember));
+  rememberButton.textContent = state.remember ? "🧠 Remembering" : "🙈 Not remembering this conversation";
   muteButton.setAttribute("aria-pressed", String(state.muted));
   muteButton.textContent = state.muted ? "🔇 Muted" : "🔊 Sound on";
   languageSelect.value = state.language;
@@ -254,7 +269,13 @@ const ask = async (question, context) => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(
-        buildAskBody({ question: text, context, history: state.history, conversationId: state.conversationId }),
+        buildAskBody({
+          question: text,
+          context,
+          history: state.history,
+          conversationId: state.conversationId,
+          remember: state.remember,
+        }),
       ),
     });
     const body = await res.json().catch(() => null);
@@ -288,6 +309,8 @@ const ask = async (question, context) => {
   state.busy = false;
   setStatus("");
   renderControls();
+  // The wrap-up runs after the reply; check for new memories a little later.
+  if (view.remember && state.remember) setTimeout(() => void refreshBadge(), 5000);
 
   const reopen = shouldReopenMic({
     conversation: state.conversation,
@@ -556,6 +579,167 @@ conversationButton.addEventListener("click", () => {
   renderControls();
 });
 
+// ---- memories panel ----
+
+/** @type {import("./chat.js").MemoryView[]} */
+let memories = [];
+/** @type {{ id: string, name: string }[]} */
+let memoryContexts = [];
+
+/** @param {string} path @param {RequestInit} [init] */
+const memoryRequest = async (path, init) => {
+  const res = await fetch(path, init);
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body && typeof body.message === "string" ? body.message : `status ${res.status}`);
+  return body;
+};
+
+/** @param {number} unseen */
+const renderBadge = (unseen) => {
+  const text = badgeText(unseen);
+  memoriesBadge.textContent = text;
+  memoriesBadge.hidden = text === "";
+  memoriesButton.setAttribute("aria-label", text ? `Memories, ${unseen} new` : "Memories");
+};
+
+const loadMemories = async () => {
+  const body = await memoryRequest("/memories");
+  memories = body.memories;
+  memoryContexts = body.contexts;
+  return body;
+};
+
+const refreshBadge = async () => {
+  try {
+    renderBadge((await loadMemories()).unseen);
+  } catch {
+    // The badge is a nicety; the panel shows errors when opened.
+  }
+};
+
+/** @param {string} text */
+const setMemoriesStatus = (text) => {
+  memoriesStatus.textContent = text;
+};
+
+const renderMemories = () => {
+  const groups = groupMemories(memories, memoryContexts);
+  if (groups.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "Nothing remembered yet.";
+    memoriesList.replaceChildren(empty);
+    return;
+  }
+  memoriesList.replaceChildren(
+    ...groups.map((group) => {
+      const section = document.createElement("section");
+      section.className = "memory-group";
+      const heading = document.createElement("h3");
+      const title = document.createElement("span");
+      title.textContent = `${group.contextName} (${group.count})`;
+      const wipe = document.createElement("button");
+      wipe.type = "button";
+      wipe.textContent = "Wipe all";
+      wipe.setAttribute("aria-label", `Wipe all ${group.contextName} memories`);
+      wipe.addEventListener("click", () => void wipeContext(group.contextId, group.contextName, group.count));
+      heading.append(title, wipe);
+      section.append(heading);
+      for (const kindGroup of group.kinds) {
+        const kindHeading = document.createElement("h4");
+        kindHeading.textContent = kindGroup.label;
+        const list = document.createElement("ul");
+        list.className = "memory-list";
+        for (const m of kindGroup.items) {
+          const item = document.createElement("li");
+          item.className = m.seen ? "memory-item" : "memory-item new";
+          const body = document.createElement("div");
+          const text = document.createElement("p");
+          text.textContent = m.text;
+          const meta = document.createElement("span");
+          meta.className = "memory-meta";
+          meta.textContent = [
+            formatMemoryDay(m.updatedAt, state.language),
+            ...(m.origin === "explicit" ? ["you asked"] : []),
+            ...(m.seen ? [] : ["new"]),
+          ].join(" · ");
+          body.append(text, meta);
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.textContent = "Delete";
+          remove.setAttribute("aria-label", `Delete memory: ${m.text}`);
+          remove.addEventListener("click", () => void deleteMemory(m.id));
+          item.append(body, remove);
+          list.append(item);
+        }
+        section.append(kindHeading, list);
+      }
+      return section;
+    }),
+  );
+};
+
+/** @param {string} id */
+const deleteMemory = async (id) => {
+  try {
+    await memoryRequest(`/memories/${encodeURIComponent(id)}`, { method: "DELETE" });
+    memories = memories.filter((m) => m.id !== id);
+    renderMemories();
+    setMemoriesStatus("Deleted.");
+  } catch (e) {
+    setMemoriesStatus(`Couldn't delete it: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
+};
+
+/** @param {string} contextId @param {string} name @param {number} count */
+const wipeContext = async (contextId, name, count) => {
+  if (!window.confirm(`Delete all ${count} ${name} memories? This can't be undone.`)) return;
+  try {
+    const body = await memoryRequest("/memories/wipe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contextId }),
+    });
+    memories = memories.filter((m) => m.contextId !== contextId);
+    renderMemories();
+    setMemoriesStatus(`Deleted ${body.wiped} ${name} memories.`);
+  } catch (e) {
+    setMemoriesStatus(`Couldn't wipe them: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
+};
+
+const openMemories = async () => {
+  setMemoriesStatus("Loading…");
+  memoriesList.replaceChildren();
+  memoriesPanel.showModal();
+  try {
+    await loadMemories();
+    setMemoriesStatus("");
+    renderMemories(); // new ones are highlighted this time…
+    const unseen = unseenIds(memories);
+    if (unseen.length > 0) {
+      await memoryRequest("/memories/seen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: unseen }),
+      });
+      memories = memories.map((m) => ({ ...m, seen: true })); // …and seen from now on
+    }
+    renderBadge(0);
+  } catch (e) {
+    setMemoriesStatus(`Couldn't load memories: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
+};
+
+memoriesButton.addEventListener("click", () => void openMemories());
+memoriesClose.addEventListener("click", () => memoriesPanel.close());
+memoriesPanel.addEventListener("close", () => input.focus());
+
+rememberButton.addEventListener("click", () => {
+  state.remember = !state.remember;
+  setStatus(state.remember ? "Remembering again." : "Nothing from this conversation will be remembered.");
+  renderControls();
+});
+
 // ---- settings ----
 
 muteButton.addEventListener("click", () => {
@@ -591,8 +775,10 @@ newButton.addEventListener("click", () => {
   retirePending();
   state.history = [];
   state.conversationId = newConversationId(randomBytes);
+  state.remember = true;
   transcript.replaceChildren();
   setStatus("New conversation.");
+  renderControls();
   input.focus();
 });
 
@@ -601,4 +787,5 @@ synth?.addEventListener?.("voiceschanged", renderVoices);
 
 renderControls();
 renderVoices();
+void refreshBadge();
 input.focus();

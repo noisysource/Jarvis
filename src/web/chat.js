@@ -251,3 +251,51 @@ export const shouldReopenMic = ({ conversation, voiceSession, blocked, available
  */
 export const keepListening = ({ elapsedMs, heard, stopped }) =>
   !stopped && !heard && elapsedMs < CONVERSATION.silenceMs;
+
+/**
+ * A memory as GET /memories returns it.
+ * @typedef {{ id: string, contextId: string, contextName: string, kind: "fact" | "playbook" | "history", text: string,
+ *   origin: "auto" | "explicit", createdAt: string, updatedAt: string, expiresAt?: string, seen: boolean }} MemoryView
+ * @typedef {{ kind: MemoryView["kind"], label: string, items: MemoryView[] }} MemoryKindGroup
+ * @typedef {{ contextId: string, contextName: string, count: number, kinds: MemoryKindGroup[] }} MemoryContextGroup
+ */
+
+export const MEMORY_KIND_LABELS = {
+  fact: "Facts",
+  playbook: "How you like things done",
+  history: "Recent conversations",
+};
+
+/**
+ * Groups memories for the panel: by context (in the order given, then any
+ * others), then by kind (facts, playbooks, history). Empty groups are left out.
+ * @param {readonly MemoryView[]} memories @param {readonly { id: string, name: string }[]} contexts
+ * @returns {MemoryContextGroup[]}
+ */
+export const groupMemories = (memories, contexts) => {
+  const order = [...contexts.map((c) => c.id), ...memories.map((m) => m.contextId)].filter(
+    (id, i, all) => all.indexOf(id) === i,
+  );
+  return order
+    .map((contextId) => {
+      const mine = memories.filter((m) => m.contextId === contextId);
+      const contextName = contexts.find((c) => c.id === contextId)?.name ?? mine[0]?.contextName ?? contextId;
+      const kinds = /** @type {const} */ (["fact", "playbook", "history"])
+        .map((kind) => ({ kind, label: MEMORY_KIND_LABELS[kind], items: mine.filter((m) => m.kind === kind) }))
+        .filter((g) => g.items.length > 0);
+      return { contextId, contextName, count: mine.length, kinds };
+    })
+    .filter((g) => g.count > 0);
+};
+
+/** "7 Nov 2026", or "7 de novembro de 2026" in Portuguese. @param {string} iso @param {"en" | "pt"} language */
+export const formatMemoryDay = (iso, language) =>
+  language === "pt"
+    ? new Intl.DateTimeFormat("pt-PT", { day: "numeric", month: "long", year: "numeric" }).format(new Date(iso))
+    : new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso));
+
+/** Ids the user hasn't seen yet. @param {readonly MemoryView[]} memories */
+export const unseenIds = (memories) => memories.filter((m) => !m.seen).map((m) => m.id);
+
+/** The badge text: "" when there's nothing new, "9+" past nine. @param {number} unseen */
+export const badgeText = (unseen) => (unseen <= 0 ? "" : unseen > 9 ? "9+" : String(unseen));

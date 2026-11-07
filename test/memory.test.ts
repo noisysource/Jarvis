@@ -4,6 +4,7 @@ import {
   DEFAULT_WRAP_UP_TIMEOUT_MS,
   type Extract,
   type ExtractInput,
+  type ExtractResult,
   extractNothing,
   MEMORY_LIMITS,
   makeMemoryHooks,
@@ -236,7 +237,8 @@ describe("makeMemoryHooks", () => {
       requestId: "req-9",
     });
 
-    expect(seen[0]?.related.map((m) => m.id)).toEqual([swim.id, coffee.id]); // history isn't "related"
+    // History lines are related too, so "forget that…" can delete them (#71).
+    expect(seen[0]?.related.map((m) => m.id)).toEqual([swim.id, coffee.id, history.id]);
     expect(seen[0]?.now).toEqual(ctx.clock.now());
     expect((await store.get(swim.id))?.text).toBe("Inês swims on Thursdays");
     expect(await store.get(coffee.id)).toBeUndefined();
@@ -277,6 +279,33 @@ describe("makeMemoryHooks", () => {
     expect(history[0]?.text).toBe(line);
     expect(history[0]?.expiresAt).toEqual(new Date(ctx.clock.now().getTime() + 30 * DAY));
     expect(lines).toEqual([undefined, "Asked about Inês's teacher"]);
+  });
+
+  it("stores a one-off's expiry, so it stops loading after the event", async () => {
+    const ctx = setup(async () => ({
+      decisions: [{ action: "add", kind: "fact", text: "Diniz has football on Sunday 8 November", origin: "explicit", expiresAt: new Date("2026-11-09T00:00:00Z") }],
+    }));
+    await ctx.hooks.wrapUp({ question: "Remember Diniz has football tomorrow", contextId: personal, answer: "Noted.", memoriesUsed: [] });
+    const [kept] = await ctx.store.list();
+    expect(kept?.expiresAt).toEqual(new Date("2026-11-09T00:00:00Z"));
+    expect((await ctx.hooks.loadMemories({ question: "football?", contextId: personal })).map((m) => m.text)).toEqual([kept?.text]);
+    ctx.clock.advance(2 * DAY); // now past the 9th
+    expect(await ctx.hooks.loadMemories({ question: "football?", contextId: personal })).toEqual([]);
+  });
+
+  it("starts a fresh history line if this conversation's line was just forgotten", async () => {
+    let line: string | undefined = "Talked about football";
+    let decisions: ExtractResult["decisions"] = [];
+    const ctx = setup(async () => ({ decisions, ...(line ? { historyLine: line } : {}) }));
+    const wrap = () => ctx.hooks.wrapUp({ question: "q", contextId: personal, answer: "a", memoriesUsed: [], conversationId: "conv-1" });
+    await wrap();
+    const [first] = await ctx.store.list({ kind: "history" });
+    decisions = [{ action: "delete", id: first?.id ?? "" }];
+    line = "Talked about the weather";
+    await wrap();
+    const history = await ctx.store.list({ kind: "history" });
+    expect(history.map((h) => h.text)).toEqual(["Talked about the weather"]);
+    expect(history[0]?.id).not.toBe(first?.id);
   });
 
   it("keeps no history line without a conversation id", async () => {

@@ -22,6 +22,7 @@ import { loadContexts } from "../src/contexts.js";
 import { formatModelRef } from "../src/llm/model-ref.js";
 import { makeLlm } from "../src/llm/registry.js";
 import { makeMemoryHooks } from "../src/memory.js";
+import { dayIn, formatDayIso } from "../src/memory-dates.js";
 import { makeModelExtract } from "../src/memory-extract.js";
 import { makeMemoryStoreInMemory } from "../src/memory-store.js";
 import { makePrecheck } from "../src/precheck.js";
@@ -38,6 +39,11 @@ type Fixture = {
   includes?: string;
   /** "none": no history line may be kept for this exchange. */
   history?: "none";
+  /** Checks on the kept memory that matches `includes`. */
+  kind?: "fact" | "playbook";
+  explicit?: boolean;
+  /** Its expiry's date in the configured time zone, YYYY-MM-DD. */
+  expires?: string;
 };
 
 const fail = (message: string): never => {
@@ -77,8 +83,10 @@ const extract = makeModelExtract({
   log,
 });
 
-const { cases } = JSON.parse(await readFile("test/fixtures/memory-extraction.json", "utf8")) as { cases: Fixture[] };
-const now = new Date();
+const fixture = JSON.parse(await readFile("test/fixtures/memory-extraction.json", "utf8")) as { now?: string; cases: Fixture[] };
+const { cases } = fixture;
+// A fixed "now", so "tomorrow" and weekdays always mean the same dates.
+const now = fixture.now ? new Date(fixture.now) : new Date();
 
 console.log(`Extractor: ${formatModelRef(config.models.classifier)}; answered contexts: ${ANSWERED_CONTEXT_IDS.join(", ")}\n`);
 let passed = 0;
@@ -126,7 +134,13 @@ for (const [i, f] of cases.entries()) {
       ? changed.length === 0 && deleted.length === 0
       : f.expect === "delete"
         ? deleted.length > 0
-        : changed.some((m) => m.text.toLowerCase().includes((f.includes ?? "").toLowerCase()));
+        : changed.some(
+            (m) =>
+              m.text.toLowerCase().includes((f.includes ?? "").toLowerCase()) &&
+              (f.kind === undefined || m.kind === f.kind) &&
+              (f.explicit === undefined || (m.origin === "explicit") === f.explicit) &&
+              (f.expires === undefined || (m.expiresAt !== undefined && formatDayIso(dayIn(m.expiresAt, config.timeZone)) === f.expires)),
+          );
   const historyOkay = f.history !== "none" || history.length === 0;
   const okay = decisionsOkay && historyOkay;
   // Keeping something in a context that isn't connected can't happen in the
@@ -136,12 +150,15 @@ for (const [i, f] of cases.entries()) {
   else if (okay) passed += 1;
 
   const kept = [
-    ...changed.map((m) => `${seededText.has(m.id) ? "update" : "add"}: ${m.text}`),
+    ...changed.map(
+      (m) =>
+        `${seededText.has(m.id) ? "update" : "add"} ${m.kind}${m.origin === "explicit" ? " (explicit)" : ""}${m.expiresAt ? ` expires ${formatDayIso(dayIn(m.expiresAt, config.timeZone))}` : ""}: ${m.text}`,
+    ),
     ...deleted.map((m) => `delete: ${m.text}`),
   ];
   const mark = notConnected ? "–" : okay ? "✓" : "✗";
   console.log(
-    `${mark} [${f.context} → ${response.type}] ${f.question}\n    expected ${f.expect}${f.includes ? ` "${f.includes}"` : ""}${f.history === "none" ? ", no history" : ""}; kept ${kept.length ? kept.join(" | ") : "nothing"}` +
+    `${mark} [${f.context} → ${response.type}] ${f.question}\n    expected ${f.expect}${f.includes ? ` "${f.includes}"` : ""}${f.kind ? ` ${f.kind}` : ""}${f.explicit ? " explicit" : ""}${f.expires ? ` expiring ${f.expires}` : ""}${f.history === "none" ? ", no history" : ""}; kept ${kept.length ? kept.join(" | ") : "nothing"}` +
       history.map((h) => `\n    history: ${h.text}${historyOkay ? "" : "  ← should be none"}`).join("") +
       (notConnected ? `\n    (skipped: ${f.context} isn't connected yet, so the live flow doesn't wrap up; runs once it is)` : "") +
       (notes.length ? `\n    (${notes.join("; ")})` : ""),

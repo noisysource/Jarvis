@@ -34,15 +34,26 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** One thing the extract step decided. Updates and deletes only ever touch memories of the same context. */
 export type MemoryDecision =
-  | { readonly action: "add"; readonly kind: "fact" | "playbook"; readonly text: string; readonly origin: MemoryOrigin }
-  | { readonly action: "update"; readonly id: string; readonly text: string; readonly origin?: MemoryOrigin }
+  | {
+      readonly action: "add";
+      readonly kind: "fact" | "playbook";
+      readonly text: string;
+      readonly origin: MemoryOrigin;
+      /** One-off events (#71): the memory stops being loaded, and is purged, from this instant. */
+      readonly expiresAt?: Date;
+    }
+  | { readonly action: "update"; readonly id: string; readonly text: string; readonly origin?: MemoryOrigin; readonly expiresAt?: Date }
   | { readonly action: "delete"; readonly id: string };
 
 export type ExtractInput = {
   readonly question: string;
   readonly answer: string;
   readonly contextId: ContextId;
-  /** The facts and playbooks used for this answer, so the extract step can update instead of duplicating. */
+  /**
+   * The memories used for this answer, so the extract step can update
+   * instead of duplicating, and delete what the user asks to forget
+   * (history lines included; those can't be updated, only deleted).
+   */
   readonly related: readonly Memory[];
   /** This conversation's history line so far, if there is one. */
   readonly historyLine?: string;
@@ -100,7 +111,7 @@ export const makeMemoryHooks = (deps: {
         question,
         answer,
         contextId,
-        related: memoriesUsed.filter((m) => m.kind !== "history"),
+        related: memoriesUsed,
         ...(existingHistory ? { historyLine: existingHistory.text } : {}),
         now,
       });
@@ -118,6 +129,7 @@ export const makeMemoryHooks = (deps: {
             text: decision.text,
             origin: decision.origin,
             source,
+            ...(decision.expiresAt ? { expiresAt: decision.expiresAt } : {}),
             ...(conversationId ? { conversationId } : {}),
           });
           counts.added += 1;
@@ -126,6 +138,7 @@ export const makeMemoryHooks = (deps: {
         } else if (decision.action === "update") {
           await deps.store.update(decision.id, {
             text: decision.text,
+            ...(decision.expiresAt ? { expiresAt: decision.expiresAt } : {}),
             ...(decision.origin ? { origin: decision.origin } : {}),
           });
           counts.updated += 1;
@@ -140,7 +153,7 @@ export const makeMemoryHooks = (deps: {
       const line = result.historyLine?.trim();
       if (conversationId && line) {
         const expiresAt = new Date(now.getTime() + limits.historyDays * DAY_MS);
-        if (existingHistory) {
+        if (existingHistory && (await deps.store.get(existingHistory.id))) {
           await deps.store.update(existingHistory.id, { text: line, expiresAt });
         } else {
           await deps.store.add({ contextId, kind: "history", text: line, origin: "auto", source, conversationId, expiresAt });

@@ -24,9 +24,26 @@
         </label>
         <button id="conversation" type="button" aria-pressed="true" title="After Jarvis speaks, listen for the next question">💬 Conversation on</button>
         <button id="mute" type="button" aria-pressed="false">🔊 Sound on</button>
+        <button id="remember" type="button" aria-pressed="true" title="Turn off to keep this conversation out of memory">🧠 Remembering</button>
+        <button id="memories" type="button" aria-haspopup="dialog">
+          Memories <span id="memories-badge" class="badge" hidden></span>
+        </button>
         <button id="new-conversation" type="button">New conversation</button>
       </div>
     </header>
+
+    <dialog id="memories-panel" aria-labelledby="memories-title">
+      <div class="panel-head">
+        <h2 id="memories-title">What Jarvis remembers</h2>
+        <button id="memories-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <p class="note">
+        Saved automatically after answers, within the memory rules. Delete anything you don't want kept, or turn
+        off 🧠 Remembering for a conversation. Deleting is permanent.
+      </p>
+      <p id="memories-status" class="note" role="status"></p>
+      <div id="memories-list"></div>
+    </dialog>
 
     <main>
       <ol id="transcript" aria-live="polite"></ol>

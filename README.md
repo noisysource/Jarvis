@@ -100,6 +100,20 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    you; set `MEMORY_DB` to move it, or `MEMORY_STORE=memory` to keep them in
    RAM only). Deleting the file forgets everything.
 
+   To see what Jarvis remembers, open **Memories** on the chat page (a badge
+   counts new ones): delete any memory, or wipe a whole context. Turn off
+   **🧠 Remembering** to keep the current conversation out of memory; it
+   comes back on with New conversation. You can also ask "what do you
+   remember about me?" or "forget that…", or use the terminal:
+
+   ```bash
+   npm run memory -- list
+   ```
+
+   (also `list --context kidclub --kind playbook`, `delete <id>`,
+   `wipe --context <id>` which asks you to confirm, and `export`, which
+   prints JSON and writes no file).
+
    Jarvis learns automatically after each answer, within rules it enforces
    in code: nothing about EC/HRT work, no secrets, no invoice data, and
    health, money or sensitive things about other people only when you say

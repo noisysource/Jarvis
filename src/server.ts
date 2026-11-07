@@ -1,4 +1,5 @@
-// HTTP routes: POST /ask and GET /healthz. The app is built from ready-made
+// HTTP routes: POST /ask, GET /healthz, the chat page, and (when given a
+// store) the Memories panel's /memories routes (memory-routes.ts). The app is built from ready-made
 // deps (see app.ts), so tests can run it with stubs and no network.
 //
 // The local server has no login, so two guards keep other websites out:
@@ -15,6 +16,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { handleAsk } from "./ask.js";
 import { withLogFields } from "./log.js";
+import { registerMemoryRoutes } from "./memory-routes.js";
+import type { MemoryStore } from "./memory-store.js";
 import { parseAskRequest } from "./request.js";
 import type { Deps } from "./types.js";
 import { WEB_SECURITY_HEADERS, type WebAssets } from "./web.js";
@@ -40,6 +43,8 @@ export const makeServer = (
     readonly allowedHosts?: readonly string[];
     /** The chat page's files, served at their paths (e.g. "/", "/app.js"). */
     readonly web?: WebAssets;
+    /** The memory store behind the Memories panel's routes. Unset = no /memories routes. */
+    readonly memories?: MemoryStore;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -119,6 +124,8 @@ export const makeServer = (
       return c.json(response);
     },
   );
+
+  if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });
 
   app.notFound((c) => c.json(errorBody("Not found."), 404));
 

@@ -1,5 +1,5 @@
 {
-  "about": "What the memory wrap-up should keep or drop, in English and pt-PT. Run with: npm run eval:memory. Each case goes through the live flow (handleAsk: precheck, answer router, memory hooks, extract step) with a throwaway in-memory store. 'keep' passes if a stored add/update contains `includes` (case-insensitive); 'delete' if a seeded related memory is gone; 'nothing' if no memory is added, changed or deleted. With \"history\": \"none\", the case also fails if a history line is stored. Cases in contexts that aren't connected yet get no wrap-up, as in the live flow; 'keep' cases there are skipped until they are.",
+  "about": "What the memory wrap-up should keep or drop, in English and pt-PT. Run with: npm run eval:memory. Each case goes through the live flow (handleAsk: precheck, answer router, memory hooks, extract step) with a throwaway in-memory store. 'keep' passes if a stored add/update contains `includes` (case-insensitive); 'delete' if a seeded related memory is gone; 'nothing' if no memory is added, changed or deleted. With \"history\": \"none\", the case also fails if a history line is stored. Cases in contexts that aren't connected yet get no wrap-up, as in the live flow; 'keep' cases there are skipped until they are. Every case runs on the fixed `now` (Saturday 7 November 2026, Lisbon), so 'tomorrow' is the 8th. Optional checks on the kept memory: `kind`, `explicit` (asked for explicitly) and `expires` (its expiry's Lisbon date).",
   "cases": [
     {
       "context": "personal",
@@ -184,6 +184,91 @@
       "answer": "Está bem. Espero que já estejam bem.",
       "expect": "nothing",
       "history": "none"
+    },
+    {
+      "context": "personal",
+      "question": "Remember Diniz has football tomorrow.",
+      "answer": "Noted: Diniz has football tomorrow, Sunday.",
+      "expect": "keep",
+      "includes": "football",
+      "kind": "fact",
+      "explicit": true,
+      "expires": "2026-11-09"
+    },
+    {
+      "context": "personal",
+      "question": "Lembra-te que tenho dentista na sexta.",
+      "answer": "Combinado: dentista na sexta-feira.",
+      "expect": "keep",
+      "includes": "dentista",
+      "kind": "fact",
+      "explicit": true,
+      "expires": "2026-11-14"
+    },
+    {
+      "context": "personal",
+      "question": "Diniz has football tomorrow.",
+      "answer": "Have fun at the match!",
+      "expect": "nothing"
+    },
+    {
+      "context": "personal",
+      "question": "O Diniz tem futebol amanhã.",
+      "answer": "Bom jogo para o Diniz!",
+      "expect": "nothing"
+    },
+    {
+      "context": "personal",
+      "question": "Forget that Diniz has football tomorrow.",
+      "answer": "Okay, I'll forget Diniz's football.",
+      "related": [
+        {
+          "kind": "history",
+          "text": "Talked about Diniz's football match tomorrow"
+        }
+      ],
+      "expect": "delete",
+      "history": "none"
+    },
+    {
+      "context": "personal",
+      "question": "Esquece o dentista de sexta.",
+      "answer": "Está bem, esqueço o dentista de sexta.",
+      "related": [
+        {
+          "kind": "history",
+          "text": "Falou do dentista na sexta-feira"
+        }
+      ],
+      "expect": "delete",
+      "history": "none"
+    },
+    {
+      "context": "personal",
+      "question": "Forget that I take espresso.",
+      "answer": "Okay, I'll forget that.",
+      "related": [
+        {
+          "kind": "fact",
+          "text": "Takes espresso with no sugar"
+        }
+      ],
+      "expect": "delete",
+      "history": "none"
+    },
+    {
+      "context": "personal",
+      "question": "Esquece que prefiro respostas curtas.",
+      "answer": "Está bem, esqueço isso.",
+      "related": [
+        {
+          "kind": "playbook",
+          "text": "Prefere respostas curtas"
+        }
+      ],
+      "expect": "delete",
+      "history": "none"
     }
-  ]
+  ],
+  "now": "2026-11-07T10:00:00Z"
 }

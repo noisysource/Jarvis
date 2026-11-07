@@ -118,6 +118,8 @@ question, and after a clarify response it re-sends the question with
 | `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
 | `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store | #59 |
 | `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
+| `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
+| `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
 | `src/memory-rules.ts` | Pure rule checks: explicit "remember" and "forget" in the user's own words, secrets, business records, sensitive categories, EC cues + never-remember names | #61 |
 | `src/memory-sqlite.ts` | SQLite `MemoryStore` on `node:sqlite`: mode-600 file, numbered schema steps, `secure_delete` + `VACUUM` on wipe, daily purge of expired history | #60 |
 | `src/ask.ts` | `handleAsk(deps, req)`: context → clarify / handoff / (answered contexts only) loadMemories → answer → reply; wrapUp handed to `afterReply` | #14, #56 |
@@ -225,7 +227,16 @@ exception keeps nothing and makes no model call. An opt-out in the user's
 own words ("não guardes", "não te lembres", "esquece isto", "don't
 remember/keep/save this", "off the record") skips the whole exchange,
 history line included, before any model call: checked in code by the
-memory hooks and again by the extract step. In business contexts (KidClub,
+memory hooks and again by the extract step. One-off events (#71): the "still
+true in a month" rule only applies to automatic saving. An explicit "remember
+Diniz has football tomorrow" is kept as a fact that expires at the start of
+the day after the event, in Lisbon time; the date is worked out in code from
+the user's words (today/tomorrow/the day after, weekdays, dates; English and
+Portuguese), then from the memory's text, then the model's date, else 30
+days. Automatic one-offs, by the model's flag or words like "tomorrow", are
+dropped. "Forget that…" can delete related history lines too (they can't be
+edited), and an exchange that only asked to forget leaves no history line.
+`src/memory-dates.ts` holds the date logic. In business contexts (KidClub,
 Noisy Source) no memory may name a customer (a capitalised name that isn't a
 context, weekday, month or language), and history lines stay general
 ("asked about an unpaid KidClub invoice"): no customers, families or who
