@@ -107,6 +107,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       timeZone: config.timeZone,
       capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
       log,
+      spokenThinking: config.turn.spokenThinking,
     }),
   };
   const background = inputs.background ?? makeBackgroundTasks({ log });
@@ -114,7 +115,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   return ok({
     contexts: contexts.value,
     precheck: makePrecheck(contexts.value),
-    classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log }),
+    classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
+    stickyContext: config.turn.stickyContext,
     answer: makeAnswerRouter(answerers),
     isAnswered: (id) => Object.hasOwn(answerers, id),
     afterReply: background.run,

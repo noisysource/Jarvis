@@ -36,7 +36,14 @@ describe("loadConfig", () => {
         piperUrl: new URL("http://127.0.0.1:5001"),
       },
       stt: { provider: "whisper", whisperUrl: new URL("http://127.0.0.1:8178"), hintsPath: "data/whisper-hints.txt" },
-      turn: { endOfTurnMs: 500, bargeIn: { chrome: "vad", safari: "strict", other: "vad" } },
+      turn: {
+        endOfTurnMs: 500,
+        bargeIn: { chrome: "vad", safari: "strict", other: "vad" },
+        spokenThinking: "off",
+        classifierThinking: "off",
+        stickyContext: false,
+        firstChunkChars: 60,
+      },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
   });
@@ -60,14 +67,19 @@ describe("loadConfig", () => {
   });
 
   it("sets the end of turn and barge-in per browser (#75)", () => {
-    expect(loadOk({ VOICE_END_OF_TURN_MS: "700", BARGE_IN_SAFARI: "push" }).turn).toEqual({
+    expect(loadOk({ VOICE_END_OF_TURN_MS: "700", BARGE_IN_SAFARI: "push" }).turn).toMatchObject({
       endOfTurnMs: 700,
       bargeIn: { chrome: "vad", safari: "push", other: "vad" },
     });
+    expect(
+      loadOk({ VOICE_THINKING: "on", CLASSIFIER_THINKING: "on", STICKY_CONTEXT: "on", VOICE_FIRST_CHUNK_CHARS: "90" }).turn,
+    ).toMatchObject({ spokenThinking: "on", classifierThinking: "on", stickyContext: true, firstChunkChars: 90 });
     for (const [name, value] of [
       ["VOICE_END_OF_TURN_MS", "100"],
       ["VOICE_END_OF_TURN_MS", "half a second"],
       ["BARGE_IN_CHROME", "always"],
+      ["STICKY_CONTEXT", "yes"],
+      ["VOICE_FIRST_CHUNK_CHARS", "10"],
     ] as const) {
       const bad = loadConfig({ [name]: value });
       expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);

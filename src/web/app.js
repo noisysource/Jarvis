@@ -24,7 +24,18 @@ import {
 } from "./chat.js";
 import { playSpeech } from "./audio.js";
 import { makeSpeaker } from "./speaker.js";
-import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, TURN } from "./turn-lib.js";
+import {
+  browserFamily,
+  browserLabel,
+  chooseVoice,
+  formatTiming,
+  makeTurnDetector,
+  medianOf,
+  parseSse,
+  phaseLabel,
+  timingStages,
+  TURN,
+} from "./turn-lib.js";
 import { canRecord, openMic } from "./mic.js";
 import { encodeWav, makeFrameStore } from "./mic-lib.js";
 import { loadVad } from "./vad.js";
@@ -94,7 +105,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  * @type {{
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
  *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
- *   phase: import("./turn-lib.js").Phase,
+ *   phase: import("./turn-lib.js").Phase, lastContext: string | undefined,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
  *   conversationId: string, remember: boolean,
  * }}
@@ -107,6 +118,7 @@ const state = {
   listening: false,
   transcribing: false,
   phase: "idle",
+  lastContext: undefined,
   pending: null,
   conversation: load("jarvis.conversation") !== "false",
   voiceSession: false,
@@ -220,7 +232,9 @@ const renderVoiceNote = () => {
   voiceNote.textContent = voiceChoice.note;
   voiceNote.hidden = voiceChoice.note === "" || state.muted;
 };
+let voiceChecked = false;
 const refreshVoice = async () => {
+  voiceChecked = true;
   try {
     const res = await fetch("/tts");
     voiceChoice = chooseVoice(res.ok ? await res.json() : null);
@@ -321,28 +335,44 @@ const speakBrowser = (text, signal, tracker) =>
 
 /**
  * Starts speaking a reply; add sentences with say(), then finish().
+ * `timing` gets when the first sentence was asked for and first heard (#76).
  * @param {(result: import("./speaker.js").PlaybackResult) => void} onDone
+ * @param {import("./turn-lib.js").TurnTiming} timing @param {() => void} onFirstSound
  */
-const startSpeaker = (onDone) => {
+const startSpeaker = (onDone, timing, onFirstSound) => {
   stopSpeaking();
   const server = state.language === "en" ? voiceChoice.server : null;
   const ctx = server ? audio() : undefined;
+  timing.voice = server ? server.provider : "browser";
+  const firstSound = (/** @type {number} */ at) => {
+    if (timing.firstSoundAt !== undefined) return;
+    timing.firstSoundAt = at;
+    onFirstSound();
+  };
   const sp = makeSpeaker({
     fetchSpeech:
       server && ctx
-        ? (text, signal) =>
-            fetch("/speak", {
+        ? (text, signal) => {
+            timing.speakAt ??= performance.now();
+            return fetch("/speak", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
               signal,
-            })
+            });
+          }
         : null,
     play: (response, signal, tracker) => {
       if (!ctx) throw new Error("no audio");
-      return playSpeech({ ctx, response, signal, tracker });
+      return playSpeech({ ctx, response, signal, tracker, onFirstAudio: firstSound });
     },
-    speakBrowser,
+    speakBrowser: (text, signal, tracker) => {
+      timing.speakAt ??= performance.now();
+      const done = speakBrowser(text, signal, tracker);
+      // The browser voice has no first-audio callback here; its start is close enough.
+      void Promise.resolve().then(() => firstSound(performance.now()));
+      return done;
+    },
     muted: state.muted || (!server && !synth),
     onFallback: (why) => {
       voiceChoice = { server: null, note: `${why}, so Jarvis is using the browser voice.` };
@@ -369,6 +399,45 @@ const retirePending = () => {
 /** The answer being streamed now, so barge-in can cancel it. @type {AbortController | undefined} */
 let answering;
 
+// ---- latency (#76) ----
+
+/** Development only (GET /voice-settings): a timing line under each answer. */
+let devTimings = false;
+/** A spoken turn's timings so far, handed from the mic to ask(). @type {import("./turn-lib.js").TurnTiming | undefined} */
+let nextTiming;
+/** Recent totals, for the median. @type {number[]} */
+const recentTotals = [];
+
+/**
+ * Shows (development) and reports a turn's timings: once when the first
+ * sound plays, and again when the answer has finished streaming, which adds
+ * the server's numbers. Numbers only, never what was said.
+ * @param {HTMLElement | undefined} item @param {import("./turn-lib.js").TurnTiming} timing @param {boolean} streamDone
+ */
+const showTiming = (item, timing, streamDone) => {
+  const stages = timingStages(timing);
+  if (streamDone && (timing.firstSoundAt !== undefined || state.muted) && !timing.reported) {
+    timing.reported = true;
+    if (stages.totalMs !== undefined) {
+      recentTotals.push(stages.totalMs);
+      if (recentTotals.length > 20) recentTotals.shift();
+    }
+    void fetch("/latency", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ browser: browserLabel(navigator.userAgent), spoken: timing.spoken, voice: timing.voice ?? "none", ...stages }),
+    }).catch(() => undefined);
+  }
+  if (!devTimings || !item) return;
+  let line = /** @type {HTMLElement | null} */ (item.querySelector(".timing"));
+  if (!line) {
+    line = document.createElement("p");
+    line.className = "timing";
+    item.append(line);
+  }
+  line.textContent = formatTiming(stages, timing.voice, { median: medianOf(recentTotals), count: recentTotals.length });
+};
+
 /**
  * Tells the server how a streamed answer's playback ended (#72), so it can
  * decide the memory wrap-up: what Jarvis actually said, if he was cut off.
@@ -390,13 +459,18 @@ const reportPlayback = (turnId, interrupted, spoken) =>
 const ask = async (question, context) => {
   const text = question.trim();
   if (text === "" || state.busy) return;
+  // Latency (#76): this turn's timings; spoken turns bring theirs from the mic.
+  /** @type {import("./turn-lib.js").TurnTiming} */
+  const timing = nextTiming ?? { spoken: false };
+  nextTiming = undefined;
   stopSpeaking();
   state.busy = true;
   setPhase("thinking");
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
-  const voiceReady = refreshVoice();
+  // The voice is checked again only when it isn't the configured one (it may be back up).
+  const voiceReady = voiceChecked && voiceChoice.server ? Promise.resolve() : refreshVoice();
 
   /** @type {unknown} */
   let final = null;
@@ -442,11 +516,13 @@ const ask = async (question, context) => {
     if (!sp) {
       await voiceReady;
       if (controller.signal.aborted) return;
-      sp = startSpeaker(onPlayback);
+      sp = startSpeaker(onPlayback, timing, () => showTiming(item, timing, false));
     }
     sp.say(sentence);
   };
 
+  const askStarted = performance.now();
+  timing.askAt = askStarted;
   try {
     const res = await fetch("/ask", {
       method: "POST",
@@ -458,6 +534,8 @@ const ask = async (question, context) => {
           history: state.history,
           conversationId: state.conversationId,
           remember: state.remember,
+          spoken: timing.spoken,
+          stickyContext: state.lastContext,
         }),
       ),
       signal: controller.signal,
@@ -479,10 +557,12 @@ const ask = async (question, context) => {
           if (ev.event === "start") turnId = String(data.turnId ?? "");
           else if (ev.event === "sentence") {
             const sentence = String(data.text ?? "");
+            timing.firstSentenceAt ??= performance.now();
             if (!item) item = addMessage("answer", sentence);
             else appendToMessage(item, sentence);
             await say(sentence);
-          } else if (ev.event === "done" || ev.event === "reply") final = data;
+          } else if (ev.event === "timing") timing.server = data;
+          else if (ev.event === "done" || ev.event === "reply") final = data;
         }
       }
     }
@@ -506,6 +586,9 @@ const ask = async (question, context) => {
   } else {
     item = addMessage(view.kind, view.text);
   }
+  // A spoken conversation remembers where it was answered, for sticky context (#76).
+  if (view.kind === "answer" && final && typeof final === "object" && "context" in final) state.lastContext = String(final.context);
+  showTiming(item, timing, true);
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";
@@ -724,9 +807,14 @@ const voiceSettings = async () => {
 
 /**
  * Sends an utterance to Whisper, then its text as a spoken question.
- * @param {Float32Array} samples 16 kHz @param {{ final?: boolean }} [how] final: the conversation ended with it (Stop)
+ * @param {Float32Array} samples 16 kHz
+ * @param {{ final?: boolean, speechEndedAt?: number, endOfTurnMs?: number }} [how]
+ *   final: the conversation ended with it (Stop); the rest are for the timing line (#76)
  */
 const transcribeAndSend = async (samples, how = {}) => {
+  /** @type {import("./turn-lib.js").TurnTiming} */
+  const timing = { spoken: true, speechEndedAt: how.speechEndedAt ?? performance.now(), ...(how.endOfTurnMs !== undefined ? { endOfTurnMs: how.endOfTurnMs } : {}) };
+  const whisperStarted = performance.now();
   const controller = new AbortController();
   transcribing = controller;
   state.transcribing = true;
@@ -742,6 +830,9 @@ const transcribeAndSend = async (samples, how = {}) => {
       signal: controller.signal,
     });
     const body = await res.json().catch(() => null);
+    timing.whisperMs = Math.round(performance.now() - whisperStarted);
+    const serverMs = Number(/whisper;dur=(\d+)/.exec(res.headers.get("server-timing") ?? "")?.[1]);
+    if (Number.isFinite(serverMs)) timing.whisperServerMs = serverMs;
     if (res.ok && typeof body?.text === "string") text = body.text;
     else problem = typeof body?.message === "string" ? body.message : `Listening failed (status ${res.status}).`;
   } catch {
@@ -764,7 +855,9 @@ const transcribeAndSend = async (samples, how = {}) => {
     return;
   }
   input.value = text;
+  nextTiming = timing;
   submit(text, { spoken: true, keepVoice: how.final !== true });
+  nextTiming = undefined; // used by ask(), or not needed (a stop phrase)
 };
 
 /**
@@ -806,7 +899,8 @@ const onProbability = (p) => {
     const { from, to } = open.detector.span();
     open.lastTurn = { from, endedAt: performance.now() };
     open.heard = false;
-    void transcribeAndSend(open.store.slice(from, to));
+    const quiet = open.detector.quietMs();
+    void transcribeAndSend(open.store.slice(from, to), { speechEndedAt: performance.now() - quiet, endOfTurnMs: quiet });
   } else if (event === "no-speech") {
     endVoice(state.conversation ? "silence" : "done");
     if (!state.conversation) setStatus("I didn't hear anything.");
@@ -1117,6 +1211,7 @@ newButton.addEventListener("click", () => {
   retirePending();
   state.history = [];
   state.conversationId = newConversationId(randomBytes);
+  state.lastContext = undefined;
   state.remember = true;
   transcript.replaceChildren();
   setStatus("New conversation.");
@@ -1131,4 +1226,10 @@ renderControls();
 renderVoices();
 void refreshVoice();
 void refreshBadge();
+void fetch("/voice-settings")
+  .then((res) => (res.ok ? res.json() : null))
+  .then((body) => {
+    devTimings = body?.dev === true;
+  })
+  .catch(() => undefined);
 input.focus();

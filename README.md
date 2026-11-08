@@ -194,6 +194,31 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      profile, and the hints are never logged.
    - English only for now; in Portuguese, type (the browser voice answers).
 
+   **Speed (#76).** In development, each answer has a small timing line:
+   end of turn · Whisper · classifier · Claude's first sentence · first audio ·
+   **total** (from when you stopped talking to Jarvis's first sound), with a
+   running median. The same numbers, and your browser, go to the server log
+   as one `latency` line; never any of the text. The settings that matter:
+   - `VOICE_THINKING=off` (default): spoken answers start without Claude
+     thinking first. The thinking is hidden, so with it on there's a long
+     silent pause before the first word, which feels like waiting for the
+     whole answer. `on` makes spoken answers like typed ones.
+   - `CLASSIFIER_THINKING=off` (default): choosing the context without
+     thinking, which is a few hundred ms faster.
+   - `VOICE_FIRST_CHUNK_CHARS=60`: a long first sentence is spoken from its
+     first clause, so the first audio comes sooner.
+   - `STICKY_CONTEXT=on` (off by default): spoken follow-ups stay in the
+     context the conversation was answered in and skip the classifier. The
+     local precheck still runs first, so obvious EC questions still go to
+     Kiro. But an EC question the precheck misses, or a change of subject,
+     would be answered in the previous context instead of being routed.
+     That's why it's opt-in.
+   - `KOKORO_DEVICE=cpu npm run voice:up` to compare Kokoro on the CPU
+     with the GPU (`mps`, default), and `WHISPER_MODEL=base.en` (after
+     `WHISPER_MODEL=base.en npm run voice:setup`) to compare with
+     `small.en`. `npm run voice:bench` times the running Kokoro and Whisper.
+     `voice:up` warms both up, so the first turn isn't the slow one.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding

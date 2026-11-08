@@ -297,6 +297,47 @@ describe("local precheck always runs first", () => {
   });
 });
 
+describe("sticky context (#76, opt-in)", () => {
+  it("keeps a spoken follow-up in the last answered context, skipping the classifier, only when on", async () => {
+    const on = makeDeps();
+    const stages: unknown[] = [];
+    await handleAsk({ ...on.deps, stickyContext: true }, { question: "And when is it?", spoken: true, stickyContext: id("personal") }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(on.calls).not.toContain("classify");
+    expect(on.answerInputs[0]?.context.id).toBe("personal");
+    expect(on.answerInputs[0]?.spoken).toBe(true);
+    expect(stages[0]).toMatchObject({ s: "route", how: "sticky" });
+
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: "And when is it?", spoken: true, stickyContext: id("personal") });
+    expect(off.calls).toContain("classify");
+  });
+
+  it("never overrides the precheck: an EC question is still handed to Kiro, with no model", async () => {
+    const { deps, calls } = makeDeps();
+    const response = await handleAsk({ ...deps, stickyContext: true }, { question: "Summarise the UTP standup", spoken: true, stickyContext: id("personal") });
+    expect(response).toMatchObject({ type: "handoff", context: "ec-hrt" });
+    expect(calls).toEqual([]);
+  });
+
+  it("sticks only to an answered, non-handoff context", async () => {
+    const notAnswered = makeDeps({ answered: ["personal"] });
+    await handleAsk({ ...notAnswered.deps, stickyContext: true }, { question: "And when is it?", stickyContext: id("kidclub") });
+    expect(notAnswered.calls).toContain("classify");
+    const ec = makeDeps();
+    await handleAsk({ ...ec.deps, stickyContext: true }, { question: "And when is it?", stickyContext: id("ec-hrt") });
+    expect(ec.calls).toContain("classify");
+  });
+
+  it("reports how the context was decided, and how long that took", async () => {
+    const { deps } = makeDeps();
+    const stages: { s: string; how?: string; ms: number }[] = [];
+    await handleAsk(deps, { question: "When is my daughter's birthday?" }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(stages.map((x) => [x.s, x.how])).toEqual([["route", "classifier"], ["memories", undefined]]);
+    await handleAsk(deps, { question: "When is it?", context: id("personal") }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(stages.at(-2)).toMatchObject({ s: "route", how: "picked" });
+  });
+});
+
 describe("failures", () => {
   it("rejects an unknown explicit context", async () => {
     const { deps, calls } = makeDeps();

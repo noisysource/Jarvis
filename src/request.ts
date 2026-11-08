@@ -43,6 +43,12 @@ const AskRequestSchema = z
       .regex(/^[A-Za-z0-9-]{8,64}$/, { error: "conversationId must be 8 to 64 letters, digits or hyphens" })
       .optional(),
     remember: z.boolean({ error: "remember must be true or false" }).optional(),
+    // Voice (#76): a spoken turn (tuned for speed), and the context the spoken conversation was last answered in.
+    spoken: z.boolean({ error: "spoken must be true or false" }).optional(),
+    stickyContext: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/, { error: "stickyContext must be a context id" })
+      .optional(),
   })
   .strict();
 
@@ -56,12 +62,14 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
         .join("; "),
     );
   }
-  const { question, context, history, conversationId, remember } = parsed.data;
+  const { question, context, history, conversationId, remember, spoken, stickyContext } = parsed.data;
   return ok({
     question,
     ...(context !== undefined ? { context: context as ContextId } : {}),
     ...(history !== undefined ? { history } : {}),
     ...(conversationId !== undefined ? { conversationId } : {}),
     ...(remember !== undefined ? { remember } : {}),
+    ...(spoken !== undefined ? { spoken } : {}),
+    ...(stickyContext !== undefined ? { stickyContext: stickyContext as ContextId } : {}),
   });
 };

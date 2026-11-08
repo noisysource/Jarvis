@@ -16,6 +16,7 @@
     "memory": "tsx --env-file-if-exists=.env scripts/memory.ts",
     "voice:setup": "bash scripts/voice-setup.sh",
     "voice:up": "bash scripts/voice-up.sh",
+    "voice:bench": "tsx --env-file-if-exists=.env scripts/voice-bench.ts",
     "ask": "tsx --env-file-if-exists=.env scripts/ask.ts",
     "start": "node dist/main.js",
     "test": "vitest run",

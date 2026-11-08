@@ -87,6 +87,7 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   tts,
   stt,
   turn: cfg.turn,
+  dev: cfg.env !== "production",
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok && vendor.ok ? { ...web.value, ...vendor.value } : refuse("unreachable"),
   memories: memoryStore,

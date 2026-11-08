@@ -44,14 +44,19 @@ export const appendTurn = (history, role, text) =>
 /**
  * The POST /ask body. `conversationId` groups this conversation's history
  * memory on the server; `remember: false` is "don't remember this".
- * @param {{ question: string, context?: string, history: readonly Turn[], conversationId?: string, remember?: boolean }} input
+ * `spoken`: a spoken turn (answered for speed, #76); `stickyContext`: the
+ * context the spoken conversation was last answered in (used only when the
+ * server has STICKY_CONTEXT=on).
+ * @param {{ question: string, context?: string, history: readonly Turn[], conversationId?: string, remember?: boolean, spoken?: boolean, stickyContext?: string }} input
  */
-export const buildAskBody = ({ question, context, history, conversationId, remember }) => ({
+export const buildAskBody = ({ question, context, history, conversationId, remember, spoken, stickyContext }) => ({
   question: question.trim().slice(0, LIMITS.questionChars),
   ...(context ? { context } : {}),
   ...(history.length > 0 ? { history: [...history] } : {}),
   ...(conversationId ? { conversationId } : {}),
   ...(remember === false ? { remember: false } : {}),
+  ...(spoken ? { spoken: true } : {}),
+  ...(spoken && stickyContext && !context ? { stickyContext } : {}),
 });
 
 /**

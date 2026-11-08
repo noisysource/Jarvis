@@ -37,6 +37,14 @@ export type BargeInMode = "vad" | "strict" | "push";
 export type TurnConfig = {
   /** Silence after speech that ends your turn. */
   readonly endOfTurnMs: number;
+  /** Latency (#76): spoken answers without thinking first (VOICE_THINKING=off, the default). */
+  readonly spokenThinking: "on" | "off";
+  /** Latency (#76): the classifier without thinking (CLASSIFIER_THINKING=off, the default). */
+  readonly classifierThinking: "on" | "off";
+  /** Latency (#76, opt-in): spoken follow-ups stay in the last answered context, skipping the classifier. */
+  readonly stickyContext: boolean;
+  /** Latency (#76): a long first sentence is cut at a clause once it's this long (characters). */
+  readonly firstChunkChars: number;
   /** Interrupting Jarvis, per browser: "vad" (just talk), "strict" (talk clearly, for weaker echo cancellation) or "push" (tap Interrupt). */
   readonly bargeIn: { readonly chrome: BargeInMode; readonly safari: BargeInMode; readonly other: BargeInMode };
 };
@@ -102,6 +110,11 @@ export const DEFAULTS = {
 } as const;
 
 const END_OF_TURN_ERROR = "must be a whole number of milliseconds from 200 to 3000";
+const FIRST_CHUNK_ERROR = "must be a whole number of characters from 30 to 300";
+const onOff = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
+);
 const bargeInMode = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
   z.enum(["vad", "strict", "push"], { error: 'must be "vad", "strict" or "push"' }).optional(),
@@ -162,6 +175,18 @@ const EnvSchema = z.object({
       .min(200, { error: END_OF_TURN_ERROR })
       .max(3000, { error: END_OF_TURN_ERROR })
       .default(DEFAULTS.endOfTurnMs),
+  ),
+  VOICE_THINKING: onOff,
+  CLASSIFIER_THINKING: onOff,
+  STICKY_CONTEXT: onOff,
+  VOICE_FIRST_CHUNK_CHARS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: FIRST_CHUNK_ERROR })
+      .int({ error: FIRST_CHUNK_ERROR })
+      .min(30, { error: FIRST_CHUNK_ERROR })
+      .max(300, { error: FIRST_CHUNK_ERROR })
+      .default(60),
   ),
   BARGE_IN_CHROME: bargeInMode,
   BARGE_IN_SAFARI: bargeInMode,
@@ -243,6 +268,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl, hintsPath: e.WHISPER_HINTS_PATH ?? DEFAULTS.whisperHintsPath },
     turn: {
       endOfTurnMs: e.VOICE_END_OF_TURN_MS,
+      spokenThinking: e.VOICE_THINKING ?? "off",
+      classifierThinking: e.CLASSIFIER_THINKING ?? "off",
+      stickyContext: e.STICKY_CONTEXT === "on",
+      firstChunkChars: e.VOICE_FIRST_CHUNK_CHARS,
       bargeIn: {
         chrome: e.BARGE_IN_CHROME ?? DEFAULTS.bargeInChrome,
         safari: e.BARGE_IN_SAFARI ?? DEFAULTS.bargeInSafari,

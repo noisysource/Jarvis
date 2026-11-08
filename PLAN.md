@@ -132,6 +132,7 @@ question, and after a clarify response it re-sends the question with
 | `src/stt/hints.ts` | Whisper name hints from the profile and `data/whisper-hints.txt`; never logged | #83 |
 | `src/web/speaker.js`, `src/web/turn-lib.js` | Speaking a reply sentence by sentence (prefetch, fallback, what was said); SSE parser, turn detector, phase labels | #82, #75 |
 | `src/web/silero.js`, `src/web/vad.js` | Silero VAD v5 on onnxruntime-web, served from `/vendor/…` | #75 |
+| `scripts/voice-bench.ts` | `npm run voice:bench`: times the running Kokoro and Whisper | #76 |
 | `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
@@ -260,6 +261,34 @@ and no conversation content is logged.
   The browser voice speaks when `TTS_PROVIDER=browser`, in Portuguese, and
   as a fallback when the service is down or `/speak` fails, with a note.
   Every streamed answer sends its playback report to `/ask/spoken`.
+
+- **Latency (#76).** Every turn is timed:
+  - end of turn (the silence waited)
+  - Whisper (round trip, plus the server's time in a `Server-Timing` header)
+  - routing (precheck, picked, sticky or classifier), and memories
+  - Claude's first token and first sentence (the SSE `timing` event)
+  - the voice's first audio
+  - the total, from the end of your speech to the first sound
+
+  The page shows them under each answer in development and posts them,
+  numbers only, with the browser and its version, to `POST /latency` (a
+  strict schema that accepts no text). They're logged as one `latency`
+  line. **The bottleneck was thinking:** Claude Sonnet 5.5 and Claude
+  Haiku 5.5 think by default, and the thinking is hidden, so the first
+  sentence came only after it. Spoken answers (`spoken: true` from the
+  page) now go without thinking (`VOICE_THINKING=off`; Sonnet 5.5's
+  `between_tools`, `disabled` on models that allow it, low effort on Opus
+  5.5 and Fable, which can't turn it off), and so does the classifier
+  (`CLASSIFIER_THINKING=off`). Typed answers keep thinking. The first chunk
+  is cut at a clause after 60 characters (`VOICE_FIRST_CHUNK_CHARS`).
+  `voice:up` takes `KOKORO_DEVICE=mps|cpu` and warms Kokoro and Whisper up;
+  `npm run voice:bench` times them. **Sticky context is opt-in**
+  (`STICKY_CONTEXT=on`): a spoken follow-up stays in the last answered
+  context, which the page sends as `stickyContext`, skipping the
+  classifier. The precheck still runs first and handoff contexts never
+  stick, but an EC question the precheck misses would reach the answer
+  model, which the EC rule forbids, so it stays off unless you decide
+  otherwise.
 
 - **Turn manager (#75).** One mic for the conversation (`mic.js`: echo
   cancellation, noise suppression, auto gain; resampled to 16 kHz and cut

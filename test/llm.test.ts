@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { buildParams, makeAnthropicLlm, mapError, mapResponse, type StreamMessage } from "../src/llm/anthropic.js";
+import { buildParams, makeAnthropicLlm, mapError, mapResponse, type StreamMessage, thinkingOff } from "../src/llm/anthropic.js";
 import { streamOrCall } from "../src/llm/stream.js";
 import { makeLlm } from "../src/llm/registry.js";
 import type { LlmRequest } from "../src/llm/types.js";
@@ -36,6 +36,23 @@ const classifySchema = {
   required: ["context"],
   additionalProperties: false,
 } as const;
+
+describe("thinking off for latency (#76)", () => {
+  it("maps to what each model allows", () => {
+    expect(buildParams("claude-sonnet-5-5", { ...base, effort: "medium", thinking: "off" })).toMatchObject({
+      thinking: { type: "between_tools" },
+      output_config: { effort: "medium" },
+    });
+    expect(buildParams("claude-haiku-5-5", { ...base, effort: "low", thinking: "off" })).toMatchObject({ thinking: { type: "disabled" } });
+    // Claude Opus 5.5 can't turn thinking off: the effort is lowered instead.
+    const opus = buildParams("claude-opus-5-5", { ...base, effort: "medium", thinking: "off" });
+    expect(opus).not.toHaveProperty("thinking");
+    expect(opus).toMatchObject({ output_config: { effort: "low" } });
+    expect(thinkingOff("claude-fable-5-1")).toEqual({ effort: "low" });
+    // Without it, nothing changes.
+    expect(buildParams("claude-sonnet-5-5", { ...base, effort: "medium" })).not.toHaveProperty("thinking");
+  });
+});
 
 describe("buildParams", () => {
   it("builds a plain Haiku request with no fallback parameter", () => {

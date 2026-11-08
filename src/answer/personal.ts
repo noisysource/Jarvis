@@ -110,8 +110,10 @@ export const makePersonalAnswerer = (deps: {
   /** "What Jarvis can do", for questions about Jarvis itself. Stable text, so it's cached with the profile. */
   readonly capabilities?: string;
   readonly log?: Logger;
+  /** Latency (#76): "off" answers spoken turns without thinking first, so the first words come sooner. */
+  readonly spokenThinking?: "on" | "off";
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
-  return async ({ question, history, memories, now, onText, signal }) => {
+  return async ({ question, history, memories, now, onText, signal, spoken }) => {
     const profile = await deps.profile();
     if (!profile.ok) {
       // The error names the path, never the profile's content.
@@ -125,6 +127,7 @@ export const makePersonalAnswerer = (deps: {
       systemSuffix: personalSystemSuffix({ now, timeZone: deps.timeZone, memories }),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "medium",
+      ...(spoken === true && deps.spokenThinking === "off" ? { thinking: "off" as const } : {}),
       maxTokens: ANSWER_MAX_TOKENS,
     };
     // Streaming (#72): pass each piece of text on as it arrives; the full

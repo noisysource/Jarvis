@@ -59,6 +59,20 @@ describe("conversation ids", () => {
     expect(buildAskBody({ question: "hi", history: [], remember: true })).toEqual({ question: "hi" });
   });
 
+  it("marks spoken turns, with the sticky context only for spoken turns without a picked context (#76)", () => {
+    expect(buildAskBody({ question: "hi", history: [], spoken: true, stickyContext: "personal" })).toEqual({
+      question: "hi",
+      spoken: true,
+      stickyContext: "personal",
+    });
+    expect(buildAskBody({ question: "hi", history: [], spoken: false, stickyContext: "personal" })).toEqual({ question: "hi" });
+    expect(buildAskBody({ question: "hi", history: [], spoken: true, context: "kidclub", stickyContext: "personal" })).toEqual({
+      question: "hi",
+      context: "kidclub",
+      spoken: true,
+    });
+  });
+
   it("makes 32 hex characters from 16 random bytes", () => {
     const id = newConversationId((n) => Uint8Array.from({ length: n }, (_, i) => i * 17));
     expect(id).toBe("00112233445566778899aabbccddeeff");

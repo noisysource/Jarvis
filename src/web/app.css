@@ -417,3 +417,11 @@ textarea:focus-visible {
     max-width: 95%;
   }
 }
+
+/* Development: per-turn timings under an answer (#76). */
+.message .timing {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}

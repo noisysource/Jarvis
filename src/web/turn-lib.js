@@ -232,5 +232,83 @@ export const makeTurnDetector = (options = {}) => {
     listen,
     frame: () => frame,
     heard: () => speechFrom !== undefined,
+    /** How long it's been quiet since the last speech (#76: the end-of-turn wait). */
+    quietMs: () => ms(quiet),
   };
+};
+
+/**
+ * One turn's timings (#76), in ms. Times ending in "At" are performance.now()
+ * values in the page; the rest are durations. Numbers only, never text.
+ * @typedef {{
+ *   spoken: boolean,
+ *   speechEndedAt?: number, endOfTurnMs?: number,
+ *   whisperMs?: number, whisperServerMs?: number,
+ *   askAt?: number, firstSentenceAt?: number,
+ *   server?: { route?: string, routeMs?: number, memoriesMs?: number, firstTokenMs?: number, firstSentenceMs?: number, totalMs?: number },
+ *   speakAt?: number, firstSoundAt?: number, voice?: string, reported?: boolean,
+ * }} TurnTiming
+ */
+
+/**
+ * The numbers worth showing and logging, derived from a turn's timings.
+ * total: from the end of your speech (or pressing Send) to Jarvis's first sound.
+ * @param {TurnTiming} t
+ */
+export const timingStages = (t) => {
+  const start = t.spoken ? t.speechEndedAt : t.askAt;
+  /** @param {number | undefined} a @param {number | undefined} b */
+  const span = (a, b) => (a !== undefined && b !== undefined ? Math.max(0, Math.round(b - a)) : undefined);
+  return {
+    endOfTurnMs: t.spoken ? t.endOfTurnMs : undefined,
+    whisperMs: t.whisperMs,
+    whisperServerMs: t.whisperServerMs,
+    route: t.server?.route,
+    routeMs: t.server?.routeMs,
+    memoriesMs: t.server?.memoriesMs,
+    firstTokenMs: t.server?.firstTokenMs,
+    firstSentenceMs: span(t.askAt, t.firstSentenceAt),
+    voiceFirstAudioMs: span(t.speakAt, t.firstSoundAt),
+    totalMs: span(start, t.firstSoundAt),
+  };
+};
+
+/** @param {number | undefined} ms */
+const showMs = (ms) => (ms === undefined ? "–" : ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${ms} ms`);
+
+/**
+ * The dev timing line under an answer, e.g.
+ * "end of turn 512 ms · Whisper 380 ms · classifier 640 ms · Claude first sentence 1.21 s
+ *  (first token 1.10 s) · kokoro first audio 260 ms · total 3.10 s · median 2.80 s (5)"
+ * @param {ReturnType<typeof timingStages>} s @param {string} [voice] @param {{ median: number, count: number }} [median]
+ */
+export const formatTiming = (s, voice, median) => {
+  /** @type {string[]} */
+  const parts = [];
+  if (s.endOfTurnMs !== undefined) parts.push(`end of turn ${showMs(s.endOfTurnMs)}`);
+  if (s.whisperMs !== undefined) parts.push(`Whisper ${showMs(s.whisperMs)}`);
+  if (s.route !== undefined) parts.push(s.route === "classifier" ? `classifier ${showMs(s.routeMs)}` : `${s.route} (no classifier)`);
+  if (s.memoriesMs !== undefined && s.memoriesMs >= 20) parts.push(`memories ${showMs(s.memoriesMs)}`);
+  if (s.firstSentenceMs !== undefined) {
+    parts.push(`Claude first sentence ${showMs(s.firstSentenceMs)}${s.firstTokenMs !== undefined ? ` (first token ${showMs(s.firstTokenMs)})` : ""}`);
+  }
+  if (s.voiceFirstAudioMs !== undefined) parts.push(`${voice ?? "voice"} first audio ${showMs(s.voiceFirstAudioMs)}`);
+  parts.push(`total ${showMs(s.totalMs)}`);
+  if (median && median.count > 1) parts.push(`median ${showMs(median.median)} (${median.count})`);
+  return parts.join(" · ");
+};
+
+/** "chrome 131", "safari 18", for comparing browsers in the latency log. @param {string} userAgent */
+export const browserLabel = (userAgent) => {
+  const family = browserFamily(userAgent);
+  const pattern = { chrome: /(?:Chrome|Chromium|CriOS|Edg)\/(\d+)/, safari: /Version\/(\d+)/, firefox: /Firefox\/(\d+)/, other: /$^/ }[family];
+  const version = pattern.exec(userAgent)?.[1];
+  return version ? `${family} ${version}` : family;
+};
+
+/** @param {readonly number[]} values */
+export const medianOf = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length === 0 ? 0 : sorted.length % 2 ? (sorted[mid] ?? 0) : Math.round(((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2);
 };

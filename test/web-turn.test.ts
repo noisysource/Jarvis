@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeSpeaker, type PlaybackResult } from "../src/web/speaker.js";
-import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, spokenText, TURN } from "../src/web/turn-lib.js";
+import { browserFamily, browserLabel, chooseVoice, formatTiming, makeTurnDetector, medianOf, parseSse, phaseLabel, spokenText, timingStages, TURN } from "../src/web/turn-lib.js";
 
 describe("parseSse (#82)", () => {
   it("reads complete events and keeps the unfinished rest, across chunk splits", () => {
@@ -265,5 +265,55 @@ describe("makeTurnDetector (#75)", () => {
     expect(feed(d, frames(0.9, 320))).not.toContain("start"); // ended: waits for listen()
     d.listen();
     expect(feed(d, frames(0.9, 320))).toContain("start");
+  });
+});
+
+describe("turn timings (#76)", () => {
+  const spoken = {
+    spoken: true,
+    speechEndedAt: 1000,
+    endOfTurnMs: 512,
+    whisperMs: 310,
+    whisperServerMs: 290,
+    askAt: 1830,
+    firstSentenceAt: 2500,
+    server: { route: "classifier", routeMs: 280, memoriesMs: 3, firstTokenMs: 640, firstSentenceMs: 650, totalMs: 2100 },
+    speakAt: 2505,
+    firstSoundAt: 2760,
+    voice: "kokoro",
+  };
+
+  it("derives each stage, the total running from the end of your speech to the first sound", () => {
+    expect(timingStages(spoken)).toEqual({
+      endOfTurnMs: 512,
+      whisperMs: 310,
+      whisperServerMs: 290,
+      route: "classifier",
+      routeMs: 280,
+      memoriesMs: 3,
+      firstTokenMs: 640,
+      firstSentenceMs: 670,
+      voiceFirstAudioMs: 255,
+      totalMs: 1760,
+    });
+    // Typed: from pressing Send.
+    expect(timingStages({ spoken: false, askAt: 100, firstSoundAt: 1400 }).totalMs).toBe(1300);
+    expect(timingStages({ spoken: true, speechEndedAt: 5 }).totalMs).toBeUndefined(); // no sound yet
+  });
+
+  it("formats the dev line: stages, total and median, and no text", () => {
+    expect(formatTiming(timingStages(spoken), "kokoro", { median: 1900, count: 4 })).toBe(
+      "end of turn 512 ms · Whisper 310 ms · classifier 280 ms · Claude first sentence 670 ms (first token 640 ms) · kokoro first audio 255 ms · total 1.76 s · median 1.90 s (4)",
+    );
+    expect(formatTiming(timingStages({ ...spoken, server: { route: "precheck", routeMs: 0 } }), "kokoro")).toContain("precheck (no classifier)");
+  });
+
+  it("labels the browser with its major version, and takes medians", () => {
+    expect(browserLabel("Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15")).toBe("safari 18");
+    expect(browserLabel("Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")).toBe("chrome 131");
+    expect(browserLabel("curl/8")).toBe("other");
+    expect(medianOf([3, 1, 2])).toBe(2);
+    expect(medianOf([4, 1, 2, 3])).toBe(3); // 2.5 rounded
+    expect(medianOf([])).toBe(0);
   });
 });

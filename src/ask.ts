@@ -28,27 +28,37 @@ export const clarifyMessage = (options: readonly ContextOption[]): string => {
 
 const GENERIC_ERROR = "Sorry, something went wrong. Please try again.";
 
+/** How the context was decided, for latency timings (#76). */
+export type RouteHow = "precheck" | "picked" | "sticky" | "classifier";
+
 const resolveContext = async (
   deps: Deps,
   request: AskRequest,
   history: readonly Turn[],
-): Promise<{ kind: "context"; context: Context } | { kind: "unclear" } | { kind: "unknown" }> => {
+): Promise<{ how: RouteHow } & ({ kind: "context"; context: Context } | { kind: "unclear" } | { kind: "unknown" })> => {
   // The local precheck wins over a picked context, so EC/HRT requests always reach Kiro.
   const local = deps.precheck(request.question);
-  if (local.kind === "handoff") return { kind: "context", context: local.context };
+  if (local.kind === "handoff") return { how: "precheck", kind: "context", context: local.context };
   if (local.kind === "route") {
     const routed = deps.contexts.find((c) => c.id === local.contextId);
-    return routed ? { kind: "context", context: routed } : { kind: "unclear" };
+    return routed ? { how: "precheck", kind: "context", context: routed } : { how: "precheck", kind: "unclear" };
   }
 
   if (request.context !== undefined) {
     const chosen = deps.contexts.find((c) => c.id === request.context);
-    return chosen ? { kind: "context", context: chosen } : { kind: "unknown" };
+    return chosen ? { how: "picked", kind: "context", context: chosen } : { how: "picked", kind: "unknown" };
+  }
+  // Sticky context (#76, opt-in): a spoken follow-up stays in the context
+  // the conversation was answered in, so the classifier is skipped. Only an
+  // answered context sticks, and the precheck above has already run.
+  if (deps.stickyContext === true && request.stickyContext !== undefined && deps.isAnswered(request.stickyContext)) {
+    const sticky = deps.contexts.find((c) => c.id === request.stickyContext);
+    if (sticky && sticky.handling.kind !== "handoff") return { how: "sticky", kind: "context", context: sticky };
   }
   const classification = await deps.classify({ question: request.question, history });
-  if (classification.kind === "unclear") return { kind: "unclear" };
+  if (classification.kind === "unclear") return { how: "classifier", kind: "unclear" };
   const context = deps.contexts.find((c) => c.id === classification.contextId);
-  return context ? { kind: "context", context } : { kind: "unclear" };
+  return context ? { how: "classifier", kind: "context", context } : { how: "classifier", kind: "unclear" };
 };
 
 /** A streamed (spoken) turn's wrap-up, handed to the caller to run once playback is known (see turns.ts). */
@@ -70,12 +80,16 @@ export type AskMeta = {
    * the wrap-up over, to run once it's known what was actually spoken.
    */
   readonly deferWrapUp?: (turn: DeferredWrapUp) => void;
+  /** Latency timings (#76): how the context was decided and how long that and the memories took. Numbers only. */
+  readonly onStage?: (stage: "route" | "memories", fields: { readonly ms: number; readonly how?: RouteHow }) => void;
 };
 
 export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
   const history = request.history ?? [];
   try {
+    const routeStarted = performance.now();
     const resolved = await resolveContext(deps, request, history);
+    meta.onStage?.("route", { ms: Math.round(performance.now() - routeStarted), how: resolved.how });
 
     if (resolved.kind === "unknown") {
       deps.log.warn("ask", { outcome: "unknown_context" });
@@ -97,9 +111,11 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     }
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
+    const memoriesStarted = performance.now();
     const memories = deps.isAnswered(context.id)
       ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
       : [];
+    meta.onStage?.("memories", { ms: Math.round(performance.now() - memoriesStarted) });
     const answer = await deps.answer({
       context,
       question: request.question,
@@ -108,6 +124,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       now: deps.now(),
       ...(meta.onText ? { onText: meta.onText } : {}),
       ...(meta.signal ? { signal: meta.signal } : {}),
+      ...(request.spoken === true ? { spoken: true } : {}),
     });
 
     /** The wrap-up, with the given text as the answer. Runs after the reply, in the background. */
