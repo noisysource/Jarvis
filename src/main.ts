@@ -1,6 +1,7 @@
 // Entry point: load config, build deps (refusing to start if anything is
 // missing), serve HTTP, and shut down gracefully on SIGTERM / SIGINT.
 
+import { readFile } from "node:fs/promises";
 import { serve } from "@hono/node-server";
 import { buildDeps } from "./app.js";
 import { makeBackgroundTasks } from "./background.js";
@@ -12,6 +13,8 @@ import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
 import { makeTurnRegistry } from "./turns.js";
 import { DEFAULT_RUN_DIR, makeIsStarting } from "./service-starting.js";
+import { makeProfileSource } from "./profile.js";
+import { makeWhisperHints } from "./stt/hints.js";
 import { makeSttProvider } from "./stt/registry.js";
 import { makeTtsProviders } from "./tts/registry.js";
 import { loadVendorAssets, loadWebAssets } from "./web.js";
@@ -66,8 +69,18 @@ const turns = makeTurnRegistry({ log });
 // voice:up is still waiting for shows as "starting" (#80).
 const isStarting = makeIsStarting({ runDir: DEFAULT_RUN_DIR });
 const tts = { providers: makeTtsProviders({ kokoroUrl: cfg.tts.kokoroUrl, piperUrl: cfg.tts.piperUrl, isStarting }), config: cfg.tts };
-// Jarvis's ears (#74): whisper.cpp on this machine (checked in config).
-const stt = makeSttProvider(cfg.stt, { isStarting });
+// Jarvis's ears (#74): whisper.cpp on this machine (checked in config), with
+// the names it should expect from the profile and data/whisper-hints.txt (#83).
+const profileForHints = makeProfileSource(cfg.profileSource);
+const hints = makeWhisperHints({
+  readProfile: async () => {
+    const p = await profileForHints();
+    return p.ok ? p.value.text : undefined;
+  },
+  readHintsFile: () => readFile(cfg.stt.hintsPath, "utf8").catch(() => undefined),
+});
+log.info("whisper hints", { count: (await hints()).count }); // how many, never which
+const stt = makeSttProvider(cfg.stt, { isStarting, hints });
 
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   turns,

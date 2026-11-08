@@ -127,8 +127,11 @@ question, and after a clarify response it re-sends the question with
 | `src/web/audio.js`, `src/web/voices.*` | PCM player for /speak; the dev-only /voices audition page | #73 |
 | `src/stt/*` | `SttProvider` (16 kHz mono WAV, language → text): whisper.cpp's server | #74 |
 | `src/stt-routes.ts` | `GET /stt` (ready?), `POST /transcribe` (audio/wav only, 2 MB, Host guard; audio never stored, transcripts never logged) | #74 |
-| `src/web/mic*.js` | Records one utterance (AudioWorklet), finds its end (level-based endpointer), encodes 16 kHz WAV | #74 |
+| `src/web/mic*.js` | The conversation's mic (AudioWorklet), resampled to 16 kHz in 512-sample frames, kept a minute; WAV encoding | #74, #75 |
 | `src/service-starting.ts` | "Starting" rather than "not running" while `voice:up` waits for a service | #80 |
+| `src/stt/hints.ts` | Whisper name hints from the profile and `data/whisper-hints.txt`; never logged | #83 |
+| `src/web/speaker.js`, `src/web/turn-lib.js` | Speaking a reply sentence by sentence (prefetch, fallback, what was said); SSE parser, turn detector, phase labels | #82, #75 |
+| `src/web/silero.js`, `src/web/vad.js` | Silero VAD v5 on onnxruntime-web, served from `/vendor/…` | #75 |
 | `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
@@ -178,20 +181,20 @@ Secret Manager or a private bucket in the cloud later). The server refuses to
 start without a profile. Only the `personal` answerer sees it.
 
 **Chat page (M0).** One HTML page and one JS file served by Hono, no build
-step, no external scripts. Browser speech recognition and synthesis; English
-by default with a `pt-PT` toggle. The voice is picked automatically (exact
+step, no external scripts. English by default with a `pt-PT` toggle.
+Listening and Jarvis's voice are local since the Voice milestone (below); the
+browser voice is the fallback. The browser voice is picked automatically (exact
 region first, then Premium > Enhanced > Natural/Neural/Online, then the system
 default), with a voice menu whose choice is remembered per language in
 localStorage. Conversation history lives only in the page.
 
-**Conversation mode (M0, #51).** A toggle, on by default and remembered. In a
-spoken conversation the mic reopens about 0.4 s after speech synthesis
-finishes (never during; right away if muted). It closes after ~8 s of silence
-(resuming if the browser gives up sooner), on a whole-utterance stop phrase
-("that's all", "stop", "obrigado", "é tudo" and small variants; not sent to
-the server), or on the Stop tap. Typing ends the spoken conversation. If the
-browser refuses an automatic start (`not-allowed`, or `start()` throws), it's
-paused for the page and the normal mic button remains, with a note.
+**Conversation mode (M0, #51; turn manager #75).** A toggle, on by default
+and remembered. With it on, one press of the mic opens a spoken
+conversation that stays open; with it off, the mic closes after one
+question's answer. Listening resumes 0.4 s after Jarvis finishes speaking.
+The conversation ends after ~8 s of silence, on a whole-utterance stop
+phrase ("that's all", "stop", "obrigado", "é tudo" and small variants; not
+sent to the server), on Stop or Escape, or when you type.
 
 **Voice (#72–#76).** A pipeline coordinated by a turn manager in the page:
 ears (local Whisper, `/transcribe`) → brain (`/ask`, streamed) → mouth
@@ -236,11 +239,7 @@ and no conversation content is logged.
   `whisper-cpp`, Metal) on 127.0.0.1:8178 with **`small.en`**
   (`WHISPER_MODEL=base.en` for speed; settled by timing in #76), started
   without `--convert` (audio decoded in memory, no temp files) and without
-  `--print-realtime` (it doesn't print what it heard). The page records one
-  utterance through an AudioWorklet, finds where speech starts and ends with
-  a level-based endpointer (noise floor learnt before speech, 900 ms pause
-  ends it, 8 s of nothing gives up, ~55 s at most; replaced by Silero VAD in
-  #75), keeps 300 ms before speech, downsamples to 16 kHz and sends a WAV to
+  `--print-realtime` (it doesn't print what it heard). The page (see the turn manager, #75) sends a WAV to
   `POST /transcribe` (`audio/wav` only, so a cross-site form needs a
   preflight this server never answers; 2 MB). The text comes back to the
   page, which sends it to `/ask` like typed text, so the **local EC precheck
@@ -248,7 +247,43 @@ and no conversation content is logged.
   browser's Web Speech recognition (audio to Google/Apple) is no longer
   used, with no fallback: if Whisper isn't running the page says so.
   **English only for now**: in Portuguese the mic is disabled with a note
-  (a multilingual model is a later decision).
+  (a multilingual model is a later decision). **Name hints (#83):** the
+  names in the profile (`Name:` and the `## Family` section) plus the
+  gitignored `data/whisper-hints.txt` (`WHISPER_HINTS_PATH`; CI refuses it
+  if committed) go to Whisper as its per-request `prompt` (deduplicated,
+  ≤ 40 hints, ≤ 400 characters), read fresh each time; only their count is
+  logged.
+
+- **The chat speaks with the configured voice (#82).** The page asks `/ask`
+  streamed and plays each sentence through `/speak` as it arrives
+  (`speaker.js`: the next sentence is fetched while the current one plays).
+  The browser voice speaks when `TTS_PROVIDER=browser`, in Portuguese, and
+  as a fallback when the service is down or `/speak` fails, with a note.
+  Every streamed answer sends its playback report to `/ask/spoken`.
+
+- **Turn manager (#75).** One mic for the conversation (`mic.js`: echo
+  cancellation, noise suppression, auto gain; resampled to 16 kHz and cut
+  into 512-sample frames; the last minute kept). Each frame goes through
+  **Silero VAD v5** (`silero.js`, `vad.js`), run with onnxruntime-web on one
+  thread. Both are served by this server from the pinned npm packages
+  (`/vendor/…`); the CSP gains `'wasm-unsafe-eval'` only. A pure turn
+  detector (`turn-lib.js`) turns probabilities into events. Speech above 0.5
+  for ~100 ms starts an utterance. Below 0.35 for `VOICE_END_OF_TURN_MS`
+  (default 500) ends it, which sends the WAV from 320 ms before speech to
+  ~200 ms after. 8 s of nothing ends the conversation; ~55 s is the most.
+  **Barge-in:** while Jarvis thinks or speaks only an interruption is looked
+  for. `vad`: ≥ 0.5 for 200 ms. `strict`: ≥ 0.85 for 450 ms, the Safari
+  default, since its echo cancellation is weaker. `push`: the mic is
+  ignored; ✋ Interrupt or Space. Set per browser with `BARGE_IN_CHROME`,
+  `BARGE_IN_SAFARI` and `BARGE_IN_OTHER`, read from `GET /voice-settings`.
+  An interruption stops the audio at once, aborts the `/ask` stream and
+  `/speak` requests in flight, and records what was actually said: whole
+  sentences, then the cut one up to the share played, ending in "—". That
+  goes into history and the playback report, and the interruption is the
+  start of the next utterance. Talking again within 4 s of your turn ending,
+  before Jarvis has started speaking, cancels that question and sends the
+  whole utterance instead. The phase line (Listening / Thinking / Speaking,
+  text plus colour, read out) says how to interrupt.
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences

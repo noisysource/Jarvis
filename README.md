@@ -165,10 +165,34 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    audio in memory. Jarvis refuses to start if `KOKORO_URL`, `PIPER_URL` or
    `WHISPER_URL` points anywhere but this machine.
 
-   **Listening** (🎤 Speak) uses that local Whisper: the page records what
-   you say and sends it to Jarvis on this machine, never to Google or Apple
-   (the browser's own speech recognition isn't used). If Whisper isn't
-   running, the page says so. English only for now; in Portuguese, type.
+   **Talking to Jarvis.** Press 🎤 Speak once and talk back and forth: the
+   line above the box says **Listening**, **Thinking** or **Speaking**.
+   - Your turn ends after half a second of silence (`VOICE_END_OF_TURN_MS`,
+     200–3000, default 500). Say "that's all" or press Escape / ■ Stop to end
+     the conversation; 8 s of silence ends it too.
+   - Jarvis answers in the configured voice (`TTS_PROVIDER` / `TTS_VOICE`,
+     e.g. `kokoro` / `bm_daniel`), sentence by sentence while the answer is
+     still being written. If that service is down, the browser's voice
+     speaks instead and a note says why.
+   - **Interrupt him by just talking.** He stops at once, the rest of the
+     answer is cancelled, and what you say is the next question. Only what he
+     actually said is kept in the conversation. How interrupting works is set
+     per browser: `BARGE_IN_CHROME` (default `vad`: just talk),
+     `BARGE_IN_SAFARI` (default `strict`: it takes clearer, longer speech,
+     because Safari's echo cancellation is weaker and he could otherwise
+     interrupt himself through the speakers) and `BARGE_IN_OTHER`. `push`
+     ignores the mic while he talks; tap ✋ Interrupt or press Space.
+     With headphones, `vad` works everywhere.
+   - Speech is detected by **Silero VAD**, running in the page from files this
+     server hosts (no CDN), and transcribed by the local Whisper. Nothing
+     goes to Google or Apple (the browser's own speech recognition isn't
+     used). If Whisper isn't running, the page says so.
+   - **Names:** Whisper is told which names to expect, so it spells them
+     right: your name and the names in your profile's `## Family` section,
+     plus anything in `data/whisper-hints.txt` (one per line; copy
+     `data/whisper-hints.example.txt`). That file is gitignored, like the
+     profile, and the hints are never logged.
+   - English only for now; in Portuguese, type (the browser voice answers).
 
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or

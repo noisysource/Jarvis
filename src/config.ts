@@ -45,6 +45,8 @@ export type TurnConfig = {
 export type SttConfig = {
   readonly provider: SttProviderId;
   readonly whisperUrl: URL;
+  /** Expected names for Whisper, one per line (#83). Gitignored; missing is fine. */
+  readonly hintsPath: string;
 };
 
 export type Config = {
@@ -91,6 +93,7 @@ export const DEFAULTS = {
   piperUrl: "http://127.0.0.1:5001",
   sttProvider: "whisper",
   whisperUrl: "http://127.0.0.1:8178",
+  whisperHintsPath: "data/whisper-hints.txt",
   endOfTurnMs: 500,
   // Safari's echo cancellation is weaker than Chrome's (#75): it takes clearer speech to interrupt there.
   bargeInChrome: "vad",
@@ -150,6 +153,7 @@ const EnvSchema = z.object({
     z.enum(["whisper"], { error: 'must be "whisper"' }).optional(),
   ),
   WHISPER_URL: optionalString,
+  WHISPER_HINTS_PATH: optionalString,
   VOICE_END_OF_TURN_MS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.coerce
@@ -236,7 +240,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
         : { kind: "memory" },
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
-    stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl },
+    stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl, hintsPath: e.WHISPER_HINTS_PATH ?? DEFAULTS.whisperHintsPath },
     turn: {
       endOfTurnMs: e.VOICE_END_OF_TURN_MS,
       bargeIn: {

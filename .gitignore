@@ -14,3 +14,5 @@ data/*.sqlite-*
 data/never-remember.txt
 # Local voice services, models and their logs (npm run voice:setup)
 .voice/
+# Names Whisper should expect (family, places, businesses): personal, never commit
+data/whisper-hints.txt
