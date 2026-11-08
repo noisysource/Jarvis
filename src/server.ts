@@ -61,6 +61,7 @@ const LatencyReport = z
     spoken: z.boolean(),
     voice: z.enum(["kokoro", "piper", "browser", "none"]),
     route: z.enum(["precheck", "picked", "sticky", "classifier"]).optional(),
+    speculative: z.enum(["used", "discarded"]).optional(),
     endOfTurnMs: ms,
     whisperMs: ms,
     whisperServerMs: ms,
@@ -70,6 +71,9 @@ const LatencyReport = z
     firstSentenceMs: ms,
     voiceFirstAudioMs: ms,
     fillerMs: ms,
+    firstChunkChars: z.number().int().min(0).max(5000).optional(),
+    echoPeak: z.number().int().min(0).max(100).optional(),
+    echoRunMs: ms,
     totalMs: ms,
   })
   .strict();
@@ -98,6 +102,8 @@ export const makeServer = (
     readonly turn?: TurnConfig;
     /** Development: the page shows a timing line under each answer (#76). */
     readonly dev?: boolean;
+    /** Warms the model connection (#76): POST /warm, when a spoken conversation starts. */
+    readonly warm?: () => void;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -192,7 +198,7 @@ export const makeServer = (
         let firstSentenceMs: number | undefined;
         // Latency (#76): numbers only, never content.
         let firstTokenMs: number | undefined;
-        const stages: { routeMs?: number; route?: string; memoriesMs?: number } = {};
+        const stages: { routeMs?: number; route?: string; memoriesMs?: number; speculative?: string } = {};
         let writes = Promise.resolve();
         const send = (event: string, data: unknown): void => {
           writes = writes.then(() => stream.writeSSE({ event, data: JSON.stringify(data) })).catch(() => undefined);
@@ -218,6 +224,7 @@ export const makeServer = (
             if (stage === "route") {
               stages.routeMs = fields.ms;
               if (fields.how) stages.route = fields.how;
+              if (fields.speculative) stages.speculative = fields.speculative;
             } else {
               stages.memoriesMs = fields.ms;
             }
@@ -256,6 +263,15 @@ export const makeServer = (
       return known ? c.json({ ok: true }) : c.json(errorBody("No answer is waiting for that turn."), 404);
     },
   );
+
+  // A spoken conversation is starting: warm the model connection (#76). No body, nothing returned.
+  const warm = options.warm;
+  if (warm) {
+    app.post("/warm", (c) => {
+      warm();
+      return c.json({ ok: true });
+    });
+  }
 
   // Latency per turn (#76): logged as numbers only, with the browser, to compare stages and browsers.
   app.post(

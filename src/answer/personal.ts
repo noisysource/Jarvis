@@ -34,6 +34,7 @@ export const PERSONAL_INSTRUCTIONS = [
   "",
   "Also:",
   "- Questions that aren't about them (general knowledge, how-to, maths, time zones) answer normally.",
+  "- A reply of yours in the conversation that ends with \"—\" was cut off because they interrupted you, on purpose: they want to move on. Don't apologise for it, mention it or go back to it; answer what they say now. Only return to it if they ask.",
   "- Use the current date and time given below for anything relative: ages, \"next Tuesday\", how long until something.",
   "- If they ask what you can do, answer from the \"What Jarvis can do\" section, if there is one.",
   "- If they ask what you remember about them, answer from the memories below (there may be none), and tell them they can see and delete everything in the Memories panel.",

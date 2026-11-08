@@ -338,6 +338,85 @@ describe("sticky context (#76, opt-in)", () => {
   });
 });
 
+describe("speculative answer (#76, opt-in)", () => {
+  const streamed = (deps: Deps, question: string) => {
+    const text: string[] = [];
+    const stages: unknown[] = [];
+    return {
+      text,
+      stages,
+      run: () => handleAsk(deps, { question }, { onText: (d) => text.push(d), onStage: (s, f) => stages.push({ s, ...f }) }),
+    };
+  };
+
+  it("starts the personal answer with the classifier, and sends it once the classifier agrees", async () => {
+    const order: string[] = [];
+    const { deps } = makeDeps();
+    const spec: Deps = {
+      ...deps,
+      speculativeAnswer: true,
+      classify: async () => {
+        order.push("classify start");
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("classify end");
+        return { kind: "context", contextId: id("personal") };
+      },
+      answer: async (input) => {
+        order.push("answer start");
+        input.onText?.("2 September.");
+        order.push("answer text");
+        return ok({ kind: "answer", text: "2 September." });
+      },
+    };
+    const s = streamed(spec, "When is my daughter's birthday?");
+    expect(await s.run()).toMatchObject({ type: "answer", answer: "2 September." });
+    expect(order.indexOf("answer start")).toBeLessThan(order.indexOf("classify end")); // in parallel
+    expect(s.text).toEqual(["2 September."]); // held, then sent once
+    expect(s.stages[0]).toMatchObject({ s: "route", how: "classifier", speculative: "used" });
+  });
+
+  it("throws the speculative answer away when the classifier picks another context: nothing is sent", async () => {
+    let cancelled = false;
+    const { deps, wrapUps, flush } = makeDeps({ classification: { kind: "context", contextId: id("kidclub") }, answered: ["personal"] });
+    const spec: Deps = {
+      ...deps,
+      speculativeAnswer: true,
+      answer: async (input) => {
+        if (input.context.id !== "personal") return ok({ kind: "unavailable", message: "KidClub isn't connected yet." });
+        input.onText?.("Something personal.");
+        await new Promise((r) => setTimeout(r, 30));
+        cancelled = input.signal?.aborted ?? false;
+        return ok({ kind: "answer", text: "Something personal." });
+      },
+    };
+    const s = streamed(spec, "Which invoices are unpaid?");
+    const response = await s.run();
+    await flush();
+    await new Promise((r) => setTimeout(r, 50)); // the discarded answer notices it was cancelled
+    expect(response.type).toBe("unavailable"); // kidclub isn't connected yet
+    expect(s.text).toEqual([]);
+    expect(cancelled).toBe(true);
+    expect(wrapUps).toEqual([]);
+    expect(s.stages[0]).toMatchObject({ speculative: "discarded" });
+  });
+
+  it("never runs before the precheck: an EC question is handed off with no model at all", async () => {
+    const { deps, calls } = makeDeps();
+    const response = await handleAsk({ ...deps, speculativeAnswer: true }, { question: "Summarise the UTP standup" });
+    expect(response).toMatchObject({ type: "handoff" });
+    expect(calls).toEqual([]);
+  });
+
+  it("is off by default, and never for a picked context", async () => {
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: "When is my daughter's birthday?" });
+    expect(off.calls).toEqual(["classify", "loadMemories", "answer", "after reply: memory wrap-up"]);
+    const picked = makeDeps();
+    await handleAsk({ ...picked.deps, speculativeAnswer: true }, { question: "When is it?", context: id("personal") });
+    expect(picked.calls.filter((c) => c === "answer")).toHaveLength(1);
+  });
+});
+
 describe("failures", () => {
   it("rejects an unknown explicit context", async () => {
     const { deps, calls } = makeDeps();

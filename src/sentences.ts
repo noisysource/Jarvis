@@ -100,12 +100,22 @@ export const makeSentenceSplitter = (options: SentenceSplitterOptions): Sentence
     return out.concat(cutLongFirst());
   };
 
-  /** The first sentence only: if it's long and still going, cut at the last clause mark. */
+  /**
+   * The first sentence only: if it's long and still going, cut at the last
+   * clause mark; with no clause mark, cut at a word once it's twice as long,
+   * so the first audio never waits for a long sentence to finish (#76).
+   */
   const cutLongFirst = (): string[] => {
     if (emitted > 0 || buffer.length < firstClauseAfter) return [];
     const match = [...buffer.matchAll(/[,;:—–](\s)/g)].filter((m) => (m.index ?? 0) >= firstClauseAfter / 2).at(-1);
-    if (!match || match.index === undefined) return [];
-    const s = take(match.index + 1);
+    if (match && match.index !== undefined) {
+      const s = take(match.index + 1);
+      return s ? [s] : [];
+    }
+    if (buffer.length < firstClauseAfter * 2) return [];
+    const space = buffer.lastIndexOf(" ", buffer.length - 1);
+    if (space < firstClauseAfter) return [];
+    const s = take(space);
     return s ? [s] : [];
   };
 

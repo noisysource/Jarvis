@@ -334,6 +334,24 @@ describe("turn timings (#76)", () => {
   });
 });
 
+describe("timing line additions (#76)", () => {
+  it("shows the parallel answer, the first chunk's length and the echo while he spoke", () => {
+    const stages = timingStages({
+      spoken: true,
+      speechEndedAt: 0,
+      firstChunkChars: 58,
+      echo: { peak: 62, longestMs: 96 },
+      server: { route: "classifier", routeMs: 900, speculative: "used" },
+      speakAt: 1000,
+      firstSoundAt: 1300,
+    });
+    const line = formatTiming(stages, "kokoro");
+    expect(line).toContain("classifier 900 ms (answer started in parallel)");
+    expect(line).toContain("kokoro first audio 300 ms (58 chars)");
+    expect(line).toContain("echo peak 0.62, 96 ms ≥ 0.5");
+  });
+});
+
 describe("fillers (#86)", () => {
   it("never picks the same one twice in a row", () => {
     let previous = "";

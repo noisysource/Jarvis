@@ -14,6 +14,8 @@ import Anthropic, {
   RateLimitError,
 } from "@anthropic-ai/sdk";
 import { err, ok, type Result } from "../result.js";
+import type { Logger } from "../types.js";
+import { keepAliveFetch, makeSdkLogger } from "./http.js";
 import type {
   LlmCall,
   LlmStream,
@@ -219,9 +221,18 @@ export const makeAnthropicLlm = (deps: {
   /** For tests; defaults to the real SDK client. */
   readonly create?: CreateMessage;
   readonly streamMessage?: StreamMessage;
+  /** Each HTTP attempt's status and time (numbers only, #76). */
+  readonly log?: Logger;
 }): LlmCall => {
   let client: Anthropic | undefined;
-  const sdk = (): Anthropic => (client ??= new Anthropic({ apiKey: deps.apiKey, timeout: 60_000, maxRetries: 2 }));
+  const sdk = (): Anthropic =>
+    (client ??= new Anthropic({
+      apiKey: deps.apiKey,
+      timeout: 60_000,
+      maxRetries: 2,
+      fetch: keepAliveFetch,
+      ...(deps.log ? { logger: makeSdkLogger(deps.log, deps.model), logLevel: "info" as const } : {}),
+    }));
   const create: CreateMessage = deps.create ?? ((params) => sdk().beta.messages.create(params));
   const streamMessage: StreamMessage =
     deps.streamMessage ??

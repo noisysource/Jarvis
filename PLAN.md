@@ -282,7 +282,36 @@ and no conversation content is logged.
   (`CLASSIFIER_THINKING=off`). Typed answers keep thinking. The first chunk
   is cut at a clause after 60 characters (`VOICE_FIRST_CHUNK_CHARS`).
   `voice:up` takes `KOKORO_DEVICE=mps|cpu` and warms Kokoro and Whisper up;
-  `npm run voice:bench` times them. **Sticky context is opt-in**
+  `npm run voice:bench` times them. **Your first Mac run** (3–4 s typical;
+  one 12 s first turn):
+  - **Self-interruption:** Chrome's `vad` heard "Sure" through the
+    speakers, so Chrome now defaults to `strict` too. Barge-in is ignored
+    for 600 ms after his voice starts. The timing line shows the echo peak
+    and run, for tuning. The prompt tells Claude that a reply ending in "—"
+    was a deliberate interruption: no apologising, no going back to it.
+  - **Cold start:** the first classifier call takes the new connection, and
+    the first use of its JSON schema, which is compiled once on Anthropic's
+    side. Both are now paid by a warm-up (at startup and on `POST /warm`
+    when a conversation starts). Connections are kept open for 30 s
+    (`undici` with keep-alive; Node's own fetch closes them after about
+    4 s). Each HTTP attempt is logged (status, ms, retrying) to tell a retry
+    from slowness.
+  - **Speculative answer, opt-in:** `SPECULATIVE_ANSWER=on` starts the
+    personal answer while the classifier runs. Its text is held back until
+    the classifier agrees, and it's cancelled otherwise. It's off by
+    default for the same EC reason as sticky context.
+  - **First chunk:** a first sentence with no comma-like mark is cut at a
+    word once it's 2× `VOICE_FIRST_CHUNK_CHARS`. The timing line shows the
+    first chunk's length next to the voice's first audio.
+  - **Fillers:** one only starts if the first sentence hasn't arrived yet
+    (once it has, its audio is moments away, and a filler would only delay
+    it). Starting the answer no longer stops a filler that's playing; the
+    answer waits for it to end.
+  - **Median:** each turn is reported once the stream and the playback are
+    both over, in either order. It used to be lost when the first sound
+    came after the stream ended.
+
+  **Sticky context is opt-in**
   (`STICKY_CONTEXT=on`): a spoken follow-up stays in the last answered
   context, which the page sends as `stickyContext`, skipping the
   classifier. The precheck still runs first and handoff contexts never

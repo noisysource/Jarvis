@@ -82,7 +82,23 @@ const hints = makeWhisperHints({
 log.info("whisper hints", { count: (await hints()).count }); // how many, never which
 const stt = makeSttProvider(cfg.stt, { isStarting, hints });
 
+// Warm-up (#76): one fixed classifier question opens the API connection and
+// warms the model's first-call path, at startup and when a spoken
+// conversation starts (at most every 20 s). It carries nothing of yours.
+const WARM_UP_QUESTION = "Warm-up check: which context is a question about the weather?";
+let lastWarm = 0;
+const warm = (): void => {
+  if (!deps.ok || Date.now() - lastWarm < 20_000) return;
+  lastWarm = Date.now();
+  const started = performance.now();
+  void deps.value
+    .classify({ question: WARM_UP_QUESTION, history: [] })
+    .then((r) => log.info("llm warm-up", { ms: Math.round(performance.now() - started), outcome: r.kind }))
+    .catch(() => log.warn("llm warm-up failed", {}));
+};
+
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
+  warm,
   turns,
   tts,
   stt,
@@ -102,6 +118,7 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     voice: cfg.tts.voice ? `${cfg.tts.provider}:${cfg.tts.voice}` : cfg.tts.provider,
     memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
   });
+  warm(); // listening now: warm the model connection before the first question
 });
 
 const shutdown = (signal: string): void => {

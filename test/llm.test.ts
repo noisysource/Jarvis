@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
+import { makeSdkLogger, parseAttempt } from "../src/llm/http.js";
 import { buildParams, makeAnthropicLlm, mapError, mapResponse, type StreamMessage, thinkingOff } from "../src/llm/anthropic.js";
 import { streamOrCall } from "../src/llm/stream.js";
 import { makeLlm } from "../src/llm/registry.js";
@@ -51,6 +52,31 @@ describe("thinking off for latency (#76)", () => {
     expect(thinkingOff("claude-fable-5-1")).toEqual({ effort: "low" });
     // Without it, nothing changes.
     expect(buildParams("claude-sonnet-5-5", { ...base, effort: "medium" })).not.toHaveProperty("thinking");
+  });
+});
+
+describe("SDK attempt log (#76)", () => {
+  it("takes only the status, time and retry from the SDK's info lines", () => {
+    expect(parseAttempt("[log_ab12] POST https://api.anthropic.com/v1/messages succeeded with status 200 in 812ms")).toEqual({ status: 200, ms: 812, retrying: false });
+    expect(parseAttempt("[log_ab12] POST https://api.anthropic.com/v1/messages failed with status 529 in 4100ms - retrying, 2 attempts remaining")).toEqual({
+      status: 529,
+      ms: 4100,
+      retrying: true,
+    });
+    expect(parseAttempt("connection failed - retrying, 1 attempts remaining")).toEqual({ retrying: true });
+    expect(parseAttempt("something else entirely")).toBeNull();
+  });
+
+  it("logs numbers only, never the SDK's text", () => {
+    const lines: unknown[] = [];
+    const logger = makeSdkLogger({ info: (m, f) => lines.push([m, f]), warn: (m, f) => lines.push([m, f]), error: (m, f) => lines.push([m, f]) }, "claude-haiku-5-5");
+    logger.info("[log_1] POST https://api.anthropic.com/v1/messages succeeded with status 200 in 640ms");
+    logger.warn("Some warning quoting a prompt: When does my passport expire?");
+    logger.debug("request body: When does my passport expire?");
+    expect(lines).toEqual([
+      ["anthropic http", { model: "claude-haiku-5-5", status: 200, ms: 640, retrying: false }],
+      ["anthropic sdk warning", { model: "claude-haiku-5-5" }],
+    ]);
   });
 });
 

@@ -29,7 +29,7 @@ export type AppInputs = {
   /** Overrides for tests. */
   readonly readTextFile?: (path: string) => Promise<string>;
   readonly profileFs?: ProfileFileSystem;
-  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys) => Result<LlmCall, string>;
+  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys, options?: { readonly log?: Logger }) => Result<LlmCall, string>;
   readonly now?: () => Date;
   /** Where memories live. Defaults to an in-memory store until the SQLite store (#60). */
   readonly memoryStore?: MemoryStore;
@@ -88,9 +88,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
 
   const buildLlm = inputs.makeLlm ?? makeLlm;
   const keys: ProviderKeys = { anthropic: key.value.key };
-  const classifierLlm = buildLlm(config.models.classifier, keys);
+  const classifierLlm = buildLlm(config.models.classifier, keys, { log });
   if (!classifierLlm.ok) return err(`CLASSIFIER_MODEL: ${classifierLlm.error}`);
-  const answerLlm = buildLlm(config.models.answer, keys);
+  const answerLlm = buildLlm(config.models.answer, keys, { log });
   if (!answerLlm.ok) return err(`ANSWER_MODEL: ${answerLlm.error}`);
 
   if (!contexts.value.some((c) => c.id === "personal" && c.handling.kind === "answer")) {
@@ -117,6 +117,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     precheck: makePrecheck(contexts.value),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
+    speculativeAnswer: config.turn.speculativeAnswer,
     answer: makeAnswerRouter(answerers),
     isAnswered: (id) => Object.hasOwn(answerers, id),
     afterReply: background.run,

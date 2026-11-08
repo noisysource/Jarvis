@@ -81,15 +81,80 @@ export type AskMeta = {
    */
   readonly deferWrapUp?: (turn: DeferredWrapUp) => void;
   /** Latency timings (#76): how the context was decided and how long that and the memories took. Numbers only. */
-  readonly onStage?: (stage: "route" | "memories", fields: { readonly ms: number; readonly how?: RouteHow }) => void;
+  readonly onStage?: (
+    stage: "route" | "memories",
+    fields: { readonly ms: number; readonly how?: RouteHow; readonly speculative?: "used" | "discarded" },
+  ) => void;
+};
+
+/** The context answered speculatively while the classifier runs (#76, SPECULATIVE_ANSWER=on). */
+const SPECULATIVE_CONTEXT = "personal";
+
+/**
+ * Speculative answer (#76, opt-in): when the classifier will run (no picked
+ * or sticky context, and the local precheck found nothing), the personal
+ * answer starts at the same time. Its text is held back until the classifier
+ * agrees, then sent on; if it picks anything else, the speculative answer is
+ * cancelled and thrown away (no wrap-up, nothing sent).
+ */
+const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Turn[], meta: AskMeta) => {
+  if (deps.speculativeAnswer !== true || request.context !== undefined || !deps.isAnswered(SPECULATIVE_CONTEXT as Context["id"])) return undefined;
+  if (deps.precheck(request.question).kind !== "none") return undefined;
+  const stickyWouldApply = deps.stickyContext === true && request.stickyContext !== undefined && deps.isAnswered(request.stickyContext);
+  if (stickyWouldApply) return undefined;
+  const context = deps.contexts.find((c) => c.id === SPECULATIVE_CONTEXT && c.handling.kind === "answer");
+  if (!context) return undefined;
+
+  const controller = new AbortController();
+  meta.signal?.addEventListener("abort", () => controller.abort());
+  const held: string[] = [];
+  let live = false;
+  const onText = (delta: string): void => {
+    if (live) meta.onText?.(delta);
+    else held.push(delta);
+  };
+  const run = (async () => {
+    const memories = await deps.memory.loadMemories({ question: request.question, contextId: context.id });
+    const answer = await deps.answer({
+      context,
+      question: request.question,
+      history,
+      memories,
+      now: deps.now(),
+      onText,
+      signal: controller.signal,
+      ...(request.spoken === true ? { spoken: true } : {}),
+    });
+    return { memories, answer };
+  })();
+  return {
+    context,
+    /** The classifier agreed: send what's held, then the rest as it comes. */
+    use: () => {
+      live = true;
+      for (const d of held.splice(0)) meta.onText?.(d);
+      return run;
+    },
+    discard: () => {
+      controller.abort();
+      void run.catch(() => undefined);
+    },
+  };
 };
 
 export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
   const history = request.history ?? [];
   try {
     const routeStarted = performance.now();
+    const speculation = startSpeculation(deps, request, history, meta);
     const resolved = await resolveContext(deps, request, history);
-    meta.onStage?.("route", { ms: Math.round(performance.now() - routeStarted), how: resolved.how });
+    const useSpeculation = speculation !== undefined && resolved.kind === "context" && resolved.context.id === speculation.context.id;
+    if (speculation && !useSpeculation) speculation.discard();
+    meta.onStage?.("route", {
+      ms: Math.round(performance.now() - routeStarted),
+      how: resolved.how,
+      ...(speculation ? { speculative: useSpeculation ? "used" : "discarded" } : {}),
+    });
 
     if (resolved.kind === "unknown") {
       deps.log.warn("ask", { outcome: "unknown_context" });
@@ -112,20 +177,27 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
     const memoriesStarted = performance.now();
-    const memories = deps.isAnswered(context.id)
-      ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
-      : [];
-    meta.onStage?.("memories", { ms: Math.round(performance.now() - memoriesStarted) });
-    const answer = await deps.answer({
-      context,
-      question: request.question,
-      history,
-      memories,
-      now: deps.now(),
-      ...(meta.onText ? { onText: meta.onText } : {}),
-      ...(meta.signal ? { signal: meta.signal } : {}),
-      ...(request.spoken === true ? { spoken: true } : {}),
-    });
+    const { memories, answer } = useSpeculation
+      ? await speculation.use()
+      : await (async () => {
+          const loaded = deps.isAnswered(context.id)
+            ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
+            : [];
+          meta.onStage?.("memories", { ms: Math.round(performance.now() - memoriesStarted) });
+          return {
+            memories: loaded,
+            answer: await deps.answer({
+              context,
+              question: request.question,
+              history,
+              memories: loaded,
+              now: deps.now(),
+              ...(meta.onText ? { onText: meta.onText } : {}),
+              ...(meta.signal ? { signal: meta.signal } : {}),
+              ...(request.spoken === true ? { spoken: true } : {}),
+            }),
+          };
+        })();
 
     /** The wrap-up, with the given text as the answer. Runs after the reply, in the background. */
     const runWrapUp = (answerText: string): void =>

@@ -323,6 +323,10 @@ describe("POST /latency (#76)", () => {
     firstSentenceMs: 670,
     voiceFirstAudioMs: 250,
     fillerMs: 810,
+    firstChunkChars: 58,
+    echoPeak: 62,
+    echoRunMs: 96,
+    speculative: "used",
     totalMs: 1760,
   };
   it("logs a turn's numbers with the browser", async () => {
@@ -350,6 +354,19 @@ describe("POST /latency (#76)", () => {
   });
 });
 
+describe("POST /warm (#76)", () => {
+  it("warms the model connection when asked, behind the Host guard", async () => {
+    let warmed = 0;
+    const { app } = setup({ allowedHosts: localHosts(8080) });
+    const deps = { contexts, precheck: makePrecheck(contexts), log: makeJsonLogger({ write: () => undefined }) } as unknown as Deps;
+    const withWarm = makeServer(deps, { allowedHosts: localHosts(8080), warm: () => (warmed += 1) });
+    expect((await withWarm.request("/warm", { method: "POST", headers: { host: "127.0.0.1:8080" } })).status).toBe(200);
+    expect((await withWarm.request("/warm", { method: "POST", headers: { host: "evil.example" } })).status).toBe(403);
+    expect(warmed).toBe(1);
+    expect((await app.request("/warm", { method: "POST", headers: { host: "127.0.0.1:8080" } })).status).toBe(404); // not set up: no route
+  });
+});
+
 describe("GET /voice-settings (#75)", () => {
   it("gives the page the end of turn and barge-in mode per browser", async () => {
     const lines: string[] = [];
@@ -360,6 +377,7 @@ describe("GET /voice-settings (#75)", () => {
       spokenThinking: "off",
       classifierThinking: "off",
       stickyContext: false,
+      speculativeAnswer: false,
       firstChunkChars: 60,
     } as const;
     const app = makeServer(deps, { allowedHosts: localHosts(8080), turn, dev: true });

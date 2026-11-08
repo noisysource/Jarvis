@@ -4,16 +4,17 @@
 import { err, ok, type Result } from "../result.js";
 import { makeAnthropicLlm } from "./anthropic.js";
 import type { ModelRef, Provider } from "./model-ref.js";
+import type { Logger } from "../types.js";
 import type { LlmCall } from "./types.js";
 
 /** API keys per provider, resolved at startup (see secrets.ts). */
 export type ProviderKeys = Readonly<Partial<Record<Provider, string>>>;
 
-export const makeLlm = (ref: ModelRef, keys: ProviderKeys): Result<LlmCall, string> => {
+export const makeLlm = (ref: ModelRef, keys: ProviderKeys, options: { readonly log?: Logger } = {}): Result<LlmCall, string> => {
   switch (ref.provider) {
     case "anthropic": {
       const apiKey = keys.anthropic;
-      return apiKey ? ok(makeAnthropicLlm({ model: ref.model, apiKey })) : err("No API key for provider anthropic");
+      return apiKey ? ok(makeAnthropicLlm({ model: ref.model, apiKey, ...(options.log ? { log: options.log } : {}) })) : err("No API key for provider anthropic");
     }
   }
 };

@@ -177,12 +177,27 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    - **Interrupt him by just talking.** He stops at once, the rest of the
      answer is cancelled, and what you say is the next question. Only what he
      actually said is kept in the conversation. How interrupting works is set
-     per browser: `BARGE_IN_CHROME` (default `vad`: just talk),
+     per browser: `BARGE_IN_CHROME` (default `strict`, see below),
      `BARGE_IN_SAFARI` (default `strict`: it takes clearer, longer speech,
      because Safari's echo cancellation is weaker and he could otherwise
      interrupt himself through the speakers) and `BARGE_IN_OTHER`. `push`
      ignores the mic while he talks; tap ✋ Interrupt or press Space.
-     With headphones, `vad` works everywhere.
+     With headphones, `vad` works everywhere. Chrome also defaults to
+     `strict`: through laptop speakers it heard Daniel's own "Sure" and
+     interrupted him. For the first 0.6 s of his voice, nothing interrupts
+     him while echo cancellation settles. If an answer is interrupted,
+     Jarvis doesn't apologise or go back to it unless you ask.
+   - **Testing echo:** on the speakers, at your usual volume, ask something
+     with a long answer and **stay silent** until he's done. The timing line
+     ends with `echo peak 0.62, 96 ms ≥ 0.5`: the voice detector's highest
+     reading while he spoke, and its longest run of speech-like sound.
+     - `strict` interrupts at 0.85 or more for 450 ms; `vad` at 0.5 or more
+       for 200 ms.
+     - A peak well under 0.85, or runs well under 450 ms, means `strict` is
+       safe. If the run gets near 200 ms, `vad` isn't.
+     - Do it a few times, in Chrome and in Safari, then once with
+       headphones (the peak should drop to almost 0).
+     - If `strict` still interrupts itself, use `push`.
    - Speech is detected by **Silero VAD**, running in the page from files this
      server hosts (no CDN), and transcribed by the local Whisper. Nothing
      goes to Google or Apple (the browser's own speech recognition isn't
@@ -213,6 +228,19 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      Kiro. But an EC question the precheck misses, or a change of subject,
      would be answered in the previous context instead of being routed.
      That's why it's opt-in.
+   - `SPECULATIVE_ANSWER=on` (off by default): when you haven't picked a
+     context and the local precheck finds nothing, the personal answer
+     starts at the same time as the classifier. If the classifier agrees,
+     its text is sent straight on; if not, it's cancelled and thrown away,
+     and nothing of it is sent. That removes the classifier's 0.3–1 s from
+     most turns. The caveat is like sticky context's: an EC question the
+     precheck misses reaches the answer model before it's thrown away. The
+     EC rule says it shouldn't, so it's your call.
+   - Jarvis warms its connection to Claude when it starts and when you
+     start a spoken conversation (one fixed question to the classifier,
+     nothing of yours), and keeps it open between turns. Every API attempt
+     is logged as `anthropic http` with its status, time and whether it was
+     a retry, so a slow turn shows its cause.
    - `KOKORO_DEVICE=cpu npm run voice:up` to compare Kokoro on the CPU
      with the GPU (`mps`, default), and `WHISPER_MODEL=base.en` (after
      `WHISPER_MODEL=base.en npm run voice:setup`) to compare with

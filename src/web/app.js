@@ -436,13 +436,20 @@ const speakBrowser = (text, signal, tracker) =>
  * @param {import("./turn-lib.js").TurnTiming} timing @param {() => void} onFirstSound
  */
 const startSpeaker = (onDone, timing, onFirstSound) => {
-  stopSpeaking();
+  // A previous answer stops; a filler playing for this one finishes (the first sentence waits for it).
+  speaker?.stop();
+  speaker = undefined;
+  if (!filler) synth?.cancel();
   const server = state.language === "en" ? voiceChoice.server : null;
   const ctx = server ? audio() : undefined;
   timing.voice = server ? server.provider : "browser";
   const firstSound = (/** @type {number} */ at) => {
     if (timing.firstSoundAt !== undefined) return;
     timing.firstSoundAt = at;
+    bargeInGraceUntil = Math.max(bargeInGraceUntil, at + BARGE_IN_GRACE_MS);
+    echo.peak = 0;
+    echo.run = 0;
+    echo.longest = 0;
     onFirstSound();
   };
   const sp = makeSpeaker({
@@ -507,6 +514,21 @@ let devTimings = false;
 let nextTiming;
 /** Recent totals, for the median. @type {number[]} */
 const recentTotals = [];
+/** @param {Record<string, unknown>} o */
+const withoutUndefined = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+/**
+ * Echo (#76): while Jarvis talks, how speech-like the mic is (Silero's
+ * probability), so you can tell whether he could interrupt himself through
+ * the speakers. Reset for each answer.
+ */
+const echo = { peak: 0, run: 0, longest: 0 };
+/** No barge-in this soon after his voice (or a filler) starts: echo cancellation needs a moment. */
+const BARGE_IN_GRACE_MS = 600;
+let bargeInGraceUntil = 0;
+const startBargeInGrace = () => {
+  bargeInGraceUntil = performance.now() + BARGE_IN_GRACE_MS;
+};
 
 /**
  * Shows (development) and reports a turn's timings: once when the first
@@ -515,8 +537,11 @@ const recentTotals = [];
  * @param {HTMLElement | undefined} item @param {import("./turn-lib.js").TurnTiming} timing @param {boolean} streamDone
  */
 const showTiming = (item, timing, streamDone) => {
+  // Reported once both are over, in whichever order: the stream (the
+  // server's numbers) and the playback (the first sound and the echo).
+  if (streamDone) timing.streamDone = true;
   const stages = timingStages(timing);
-  if (streamDone && (timing.firstSoundAt !== undefined || state.muted) && !timing.reported) {
+  if (timing.streamDone && timing.playbackDone && !timing.reported) {
     timing.reported = true;
     if (stages.totalMs !== undefined) {
       recentTotals.push(stages.totalMs);
@@ -525,7 +550,12 @@ const showTiming = (item, timing, streamDone) => {
     void fetch("/latency", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ browser: browserLabel(navigator.userAgent), spoken: timing.spoken, voice: timing.voice ?? "none", ...stages }),
+      body: JSON.stringify({
+        browser: browserLabel(navigator.userAgent),
+        spoken: timing.spoken,
+        voice: timing.voice ?? "none",
+        ...withoutUndefined(stages),
+      }),
     }).catch(() => undefined);
   }
   if (!devTimings || !item) return;
@@ -590,6 +620,9 @@ const ask = async (question, context) => {
   /** How the reply was actually spoken: the history, the report, then listening again. */
   /** @param {import("./speaker.js").PlaybackResult} result */
   const onPlayback = (result) => {
+    if (timing.spoken && timing.firstSoundAt !== undefined) timing.echo = { peak: Math.round(echo.peak * 100), longestMs: echo.longest };
+    timing.playbackDone = true;
+    showTiming(item, timing, false);
     // You carried on talking before he answered: this question is replaced by the whole one.
     if (controller.signal.reason === "continue") {
       userItem?.remove();
@@ -628,10 +661,12 @@ const ask = async (question, context) => {
   const fillerTimer = fillerAllowed({ spoken: timing.spoken, muted: state.muted, previousHadFiller: lastTurnHadFiller })
     ? setTimeout(
         () => {
-          if (controller.signal.aborted || timing.voiceCommitted || timing.firstSoundAt !== undefined || filler) return;
+          // Not once the first sentence is here: its audio is moments away, and a filler would only delay it.
+          if (controller.signal.aborted || timing.firstSentenceAt !== undefined || timing.voiceCommitted || filler) return;
           if (playFiller()) {
             usedFiller = true;
             timing.fillerAt = performance.now();
+            startBargeInGrace();
           }
         },
         Math.max(0, (timing.speechEndedAt ?? askStarted) + FILLER_AFTER_MS - performance.now()),
@@ -676,6 +711,7 @@ const ask = async (question, context) => {
           else if (ev.event === "sentence") {
             const sentence = String(data.text ?? "");
             timing.firstSentenceAt ??= performance.now();
+            timing.firstChunkChars ??= sentence.length;
             if (!item) item = addMessage("answer", sentence);
             else appendToMessage(item, sentence);
             await say(sentence);
@@ -1010,7 +1046,13 @@ const onProbability = (p) => {
   const open = session;
   if (!open || performance.now() < open.ignoreUntil) return;
   const talking = isSpeaking() || state.busy || state.transcribing;
-  const event = open.detector.feed(p, talking);
+  if (isSpeaking() || filler) {
+    echo.peak = Math.max(echo.peak, p);
+    echo.run = p >= 0.5 ? echo.run + TURN.frameMs : 0;
+    echo.longest = Math.max(echo.longest, echo.run);
+  }
+  // Right after his voice starts, the mic is ignored for barge-in (frames still counted).
+  const event = open.detector.feed(talking && performance.now() < bargeInGraceUntil ? 0 : p, talking);
   if (event === "start") {
     open.heard = true;
   } else if (event === "barge-in") {
@@ -1076,6 +1118,8 @@ const startVoice = async () => {
     heard: false,
     lastTurn: null,
   };
+  // Warm the server's model connection while you start talking (#76).
+  void fetch("/warm", { method: "POST" }).catch(() => undefined);
   state.voiceSession = true;
   state.autoBlocked = false;
   state.listening = true;

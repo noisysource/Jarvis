@@ -245,8 +245,9 @@ export const makeTurnDetector = (options = {}) => {
  *   speechEndedAt?: number, endOfTurnMs?: number,
  *   whisperMs?: number, whisperServerMs?: number,
  *   askAt?: number, firstSentenceAt?: number,
- *   server?: { route?: string, routeMs?: number, memoriesMs?: number, firstTokenMs?: number, firstSentenceMs?: number, totalMs?: number },
+ *   server?: { route?: string, speculative?: string, routeMs?: number, memoriesMs?: number, firstTokenMs?: number, firstSentenceMs?: number, totalMs?: number },
  *   speakAt?: number, firstSoundAt?: number, voice?: string, reported?: boolean, fillerAt?: number, voiceCommitted?: boolean,
+ *   streamDone?: boolean, playbackDone?: boolean, firstChunkChars?: number, echo?: { peak: number, longestMs: number },
  * }} TurnTiming
  */
 
@@ -264,12 +265,16 @@ export const timingStages = (t) => {
     whisperMs: t.whisperMs,
     whisperServerMs: t.whisperServerMs,
     route: t.server?.route,
+    speculative: t.server?.speculative,
     routeMs: t.server?.routeMs,
     memoriesMs: t.server?.memoriesMs,
     firstTokenMs: t.server?.firstTokenMs,
     firstSentenceMs: span(t.askAt, t.firstSentenceAt),
     voiceFirstAudioMs: span(t.speakAt, t.firstSoundAt),
     fillerMs: span(start, t.fillerAt),
+    firstChunkChars: t.firstChunkChars,
+    echoPeak: t.echo?.peak,
+    echoRunMs: t.echo?.longestMs,
     totalMs: span(start, t.firstSoundAt),
   };
 };
@@ -288,15 +293,22 @@ export const formatTiming = (s, voice, median) => {
   const parts = [];
   if (s.endOfTurnMs !== undefined) parts.push(`end of turn ${showMs(s.endOfTurnMs)}`);
   if (s.whisperMs !== undefined) parts.push(`Whisper ${showMs(s.whisperMs)}`);
-  if (s.route !== undefined) parts.push(s.route === "classifier" ? `classifier ${showMs(s.routeMs)}` : `${s.route} (no classifier)`);
+  if (s.route !== undefined) {
+    const parallel = s.speculative === "used" ? " (answer started in parallel)" : s.speculative === "discarded" ? " (parallel answer discarded)" : "";
+    parts.push(s.route === "classifier" ? `classifier ${showMs(s.routeMs)}${parallel}` : `${s.route} (no classifier)`);
+  }
   if (s.memoriesMs !== undefined && s.memoriesMs >= 20) parts.push(`memories ${showMs(s.memoriesMs)}`);
   if (s.firstSentenceMs !== undefined) {
     parts.push(`Claude first sentence ${showMs(s.firstSentenceMs)}${s.firstTokenMs !== undefined ? ` (first token ${showMs(s.firstTokenMs)})` : ""}`);
   }
-  if (s.voiceFirstAudioMs !== undefined) parts.push(`${voice ?? "voice"} first audio ${showMs(s.voiceFirstAudioMs)}`);
+  if (s.voiceFirstAudioMs !== undefined) {
+    parts.push(`${voice ?? "voice"} first audio ${showMs(s.voiceFirstAudioMs)}${s.firstChunkChars !== undefined ? ` (${s.firstChunkChars} chars)` : ""}`);
+  }
   if (s.fillerMs !== undefined) parts.push(`filler at ${showMs(s.fillerMs)}`);
   parts.push(`total ${showMs(s.totalMs)}`);
   if (median && median.count > 1) parts.push(`median ${showMs(median.median)} (${median.count})`);
+  // While he spoke, how speech-like the mic was: strict needs 0.85+ for 450 ms to interrupt, vad 0.5+ for 200 ms.
+  if (s.echoPeak !== undefined) parts.push(`echo peak ${(s.echoPeak / 100).toFixed(2)}, ${s.echoRunMs ?? 0} ms ≥ 0.5`);
   return parts.join(" · ");
 };
 

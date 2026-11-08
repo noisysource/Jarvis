@@ -238,4 +238,6 @@ export type Deps = {
   readonly log: Logger;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
   readonly stickyContext?: boolean;
+  /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */
+  readonly speculativeAnswer?: boolean;
 };
