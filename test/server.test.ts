@@ -322,6 +322,7 @@ describe("POST /latency (#76)", () => {
     firstTokenMs: 640,
     firstSentenceMs: 670,
     voiceFirstAudioMs: 250,
+    fillerMs: 810,
     totalMs: 1760,
   };
   it("logs a turn's numbers with the browser", async () => {

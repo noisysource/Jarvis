@@ -23,11 +23,16 @@ import {
   voicesFor,
 } from "./chat.js";
 import { playSpeech } from "./audio.js";
+import { pcm16ToFloat32, readAudioFormat } from "./pcm-lib.js";
 import { makeSpeaker } from "./speaker.js";
 import {
   browserFamily,
   browserLabel,
   chooseVoice,
+  FILLER_AFTER_MS,
+  FILLERS,
+  fillerAllowed,
+  pickFiller,
   formatTiming,
   makeTurnDetector,
   medianOf,
@@ -242,14 +247,105 @@ const refreshVoice = async () => {
     voiceChoice = chooseVoice(null);
   }
   renderVoiceNote();
+  void prepareFillers(); // in the voice now in use (#86)
 };
 
 /** The reply being spoken now. @type {ReturnType<typeof makeSpeaker> | undefined} */
 let speaker;
 const stopSpeaking = () => {
+  stopFiller();
   speaker?.stop();
   speaker = undefined;
   synth?.cancel();
+};
+
+// ---- fillers (#86) ----
+//
+// "One moment." when Jarvis's first sentence is slow to start. Pre-rendered
+// in the configured voice when the page loads, so they play at once. They're
+// never part of the answer: not in the history, the playback report or memory.
+
+/** The pre-rendered clips, for one voice. @type {{ key: string, clips: Map<string, { samples: Float32Array, sampleRate: number }> }} */
+let fillerClips = { key: "", clips: new Map() };
+let lastFiller = "";
+let lastTurnHadFiller = false;
+/** The filler playing now: `done` resolves when it ends or is stopped. @type {{ stop: () => void, done: Promise<void> } | undefined} */
+let filler;
+
+const stopFiller = () => {
+  filler?.stop();
+  filler = undefined;
+};
+
+/** Renders every filler once in the configured voice (again if the voice changes). */
+const prepareFillers = async () => {
+  const server = voiceChoice.server;
+  const key = server ? `${server.provider}:${server.voice}` : "";
+  if (!server || fillerClips.key === key) return;
+  /** @type {Map<string, { samples: Float32Array, sampleRate: number }>} */
+  const clips = new Map();
+  fillerClips = { key, clips };
+  for (const text of FILLERS) {
+    try {
+      const res = await fetch("/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
+      });
+      const format = res.ok ? readAudioFormat(res.headers) : null;
+      if (!format) continue;
+      clips.set(text, { samples: pcm16ToFloat32(new Uint8Array(await res.arrayBuffer())), sampleRate: format.sampleRate });
+    } catch {
+      /* that one just isn't available */
+    }
+  }
+};
+
+/**
+ * Plays a filler now, with the configured voice's clip if it's ready, else
+ * the browser voice. Returns false when there's nothing to play it with.
+ */
+const playFiller = () => {
+  const text = pickFiller(lastFiller, Math.random);
+  const clip = state.language === "en" && voiceChoice.server ? fillerClips.clips.get(text) : undefined;
+  if (clip && audioCtx) {
+    const ctx = audioCtx;
+    const buffer = ctx.createBuffer(1, clip.samples.length, clip.sampleRate);
+    buffer.getChannelData(0).set(clip.samples);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    /** @type {() => void} */
+    let end = () => {};
+    const done = new Promise((resolve) => {
+      end = () => resolve(undefined);
+      source.onended = end;
+    });
+    source.start();
+    filler = {
+      stop: () => {
+        try {
+          source.stop();
+        } catch {
+          /* already ended */
+        }
+        end();
+      },
+      done: /** @type {Promise<void>} */ (done),
+    };
+  } else if (synth && state.language === "en") {
+    const controller = new AbortController();
+    const done = speakBrowser(text, controller.signal, { fraction: () => 0 }).then(() => undefined);
+    filler = { stop: () => controller.abort(), done };
+  } else {
+    return false;
+  }
+  lastFiller = text;
+  const mine = filler;
+  void mine.done.then(() => {
+    if (filler === mine) filler = undefined;
+  });
+  return true;
 };
 const isSpeaking = () => speaker?.active() === true;
 
@@ -379,6 +475,10 @@ const startSpeaker = (onDone, timing, onFirstSound) => {
       renderVoiceNote();
     },
     onSpeaking: () => setPhase("speaking"),
+    beforeFirst: () => {
+      timing.voiceCommitted = true; // from here on, no filler starts: Daniel is about to speak
+      return filler?.done ?? Promise.resolve();
+    },
     onDone: (result) => {
       if (speaker === sp) speaker = undefined;
       onDone(result);
@@ -523,6 +623,24 @@ const ask = async (question, context) => {
 
   const askStarted = performance.now();
   timing.askAt = askStarted;
+  // A filler if the first sentence is slow (#86): spoken turns, not two in a row.
+  let usedFiller = false;
+  const fillerTimer = fillerAllowed({ spoken: timing.spoken, muted: state.muted, previousHadFiller: lastTurnHadFiller })
+    ? setTimeout(
+        () => {
+          if (controller.signal.aborted || timing.voiceCommitted || timing.firstSoundAt !== undefined || filler) return;
+          if (playFiller()) {
+            usedFiller = true;
+            timing.fillerAt = performance.now();
+          }
+        },
+        Math.max(0, (timing.speechEndedAt ?? askStarted) + FILLER_AFTER_MS - performance.now()),
+      )
+    : undefined;
+  const settleFiller = () => {
+    clearTimeout(fillerTimer);
+    if (timing.spoken) lastTurnHadFiller = usedFiller;
+  };
   try {
     const res = await fetch("/ask", {
       method: "POST",
@@ -570,6 +688,7 @@ const ask = async (question, context) => {
     reachable = controller.signal.aborted;
   }
   if (answering === controller) answering = undefined;
+  settleFiller();
 
   if (controller.signal.aborted) {
     // Interrupted (barge-in) while the answer was still coming: what was said is already recorded.
@@ -872,6 +991,7 @@ const interrupt = () => {
   const stillThinking = !isSpeaking() && (state.busy || state.transcribing);
   if (stillThinking && last && performance.now() - last.endedAt < CONTINUE_WITHIN_MS) {
     transcribing?.abort();
+    stopFiller();
     answering?.abort("continue");
     open.detector.continueFrom(last.from);
   } else {

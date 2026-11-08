@@ -20,6 +20,7 @@ import { spokenText } from "./turn-lib.js";
  *   muted?: boolean,
  *   onFallback?: (reason: string) => void,
  *   onSpeaking?: () => void,
+ *   beforeFirst?: () => Promise<void>,
  *   onDone: (result: PlaybackResult) => void,
  * }} SpeakerDeps
  */
@@ -92,6 +93,11 @@ export const makeSpeaker = (deps) => {
       prefetch(i);
       const response = fallback ? undefined : await fetched[i];
       if (controller.signal.aborted) return;
+      // A filler still playing (#86) finishes first, rather than being cut mid-word.
+      if (i === 0 && deps.beforeFirst) {
+        await deps.beforeFirst();
+        if (controller.signal.aborted) return;
+      }
       if (response instanceof Response) {
         prefetch(i + 1); // the next one is fetched while this one plays
         tracker = { fraction: () => 0 };

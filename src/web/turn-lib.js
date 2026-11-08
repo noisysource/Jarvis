@@ -246,7 +246,7 @@ export const makeTurnDetector = (options = {}) => {
  *   whisperMs?: number, whisperServerMs?: number,
  *   askAt?: number, firstSentenceAt?: number,
  *   server?: { route?: string, routeMs?: number, memoriesMs?: number, firstTokenMs?: number, firstSentenceMs?: number, totalMs?: number },
- *   speakAt?: number, firstSoundAt?: number, voice?: string, reported?: boolean,
+ *   speakAt?: number, firstSoundAt?: number, voice?: string, reported?: boolean, fillerAt?: number, voiceCommitted?: boolean,
  * }} TurnTiming
  */
 
@@ -269,6 +269,7 @@ export const timingStages = (t) => {
     firstTokenMs: t.server?.firstTokenMs,
     firstSentenceMs: span(t.askAt, t.firstSentenceAt),
     voiceFirstAudioMs: span(t.speakAt, t.firstSoundAt),
+    fillerMs: span(start, t.fillerAt),
     totalMs: span(start, t.firstSoundAt),
   };
 };
@@ -293,6 +294,7 @@ export const formatTiming = (s, voice, median) => {
     parts.push(`Claude first sentence ${showMs(s.firstSentenceMs)}${s.firstTokenMs !== undefined ? ` (first token ${showMs(s.firstTokenMs)})` : ""}`);
   }
   if (s.voiceFirstAudioMs !== undefined) parts.push(`${voice ?? "voice"} first audio ${showMs(s.voiceFirstAudioMs)}`);
+  if (s.fillerMs !== undefined) parts.push(`filler at ${showMs(s.fillerMs)}`);
   parts.push(`total ${showMs(s.totalMs)}`);
   if (median && median.count > 1) parts.push(`median ${showMs(median.median)} (${median.count})`);
   return parts.join(" · ");
@@ -312,3 +314,28 @@ export const medianOf = (values) => {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length === 0 ? 0 : sorted.length % 2 ? (sorted[mid] ?? 0) : Math.round(((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2);
 };
+
+// ---- fillers (#86) ----
+
+/** Short lines that cover a slow start. Never part of the answer, the history or memory. */
+export const FILLERS = ["Let me think.", "One moment.", "Hmm, good question.", "Let me see.", "Just a second."];
+
+/** A filler plays if Jarvis hasn't started this long after you stopped talking. */
+export const FILLER_AFTER_MS = 800;
+
+/**
+ * A filler, never the one used last time.
+ * @param {string} previous @param {() => number} random 0..1 @param {readonly string[]} [fillers]
+ */
+export const pickFiller = (previous, random, fillers = FILLERS) => {
+  const choices = fillers.filter((f) => f !== previous);
+  const pool = choices.length > 0 ? choices : fillers;
+  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))] ?? "";
+};
+
+/**
+ * Whether this turn may have a filler: spoken turns only, and never two
+ * spoken turns in a row, so it doesn't become a tic.
+ * @param {{ spoken: boolean, muted: boolean, previousHadFiller: boolean }} turn
+ */
+export const fillerAllowed = ({ spoken, muted, previousHadFiller }) => spoken && !muted && !previousHadFiller;

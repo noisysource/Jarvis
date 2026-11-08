@@ -218,6 +218,11 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      `WHISPER_MODEL=base.en npm run voice:setup`) to compare with
      `small.en`. `npm run voice:bench` times the running Kokoro and Whisper.
      `voice:up` warms both up, so the first turn isn't the slow one.
+   - **Fillers:** if Jarvis hasn't started speaking 800 ms after you stop, he
+     says a short "One moment." or "Let me think.". They're pre-rendered in
+     his voice when the page loads, so they play at once. Never the same one
+     twice in a row, never on two turns in a row, and never part of the
+     conversation or memory. Talking over one stops it.
 
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or

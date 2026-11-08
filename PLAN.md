@@ -290,6 +290,17 @@ and no conversation content is logged.
   model, which the EC rule forbids, so it stays off unless you decide
   otherwise.
 
+- **Fillers (#86).** On a spoken turn, if no answer audio has started 800
+  ms after the end of your speech, a short filler plays. There are five
+  fixed lines (`FILLERS`), pre-rendered through `/speak` in the configured
+  voice when the page loads, or spoken by the browser voice as a fallback.
+  Never the same one twice in a row, never on two spoken turns in a row,
+  and never once the first sentence is about to play. If the first
+  sentence arrives during a filler, it starts when the filler ends. They're
+  not part of the answer: not in history, the playback report or memory.
+  Barge-in and Stop stop them. With tools (later), a tool will pass its own
+  honest line ("Let me check your calendar") through the same path.
+
 - **Turn manager (#75).** One mic for the conversation (`mic.js`: echo
   cancellation, noise suppression, auto gain; resampled to 16 kHz and cut
   into 512-sample frames; the last minute kept). Each frame goes through

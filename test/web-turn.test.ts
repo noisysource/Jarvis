@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { makeSpeaker, type PlaybackResult } from "../src/web/speaker.js";
-import { browserFamily, browserLabel, chooseVoice, formatTiming, makeTurnDetector, medianOf, parseSse, phaseLabel, spokenText, timingStages, TURN } from "../src/web/turn-lib.js";
+import {
+  browserFamily,
+  browserLabel,
+  chooseVoice,
+  FILLER_AFTER_MS,
+  FILLERS,
+  fillerAllowed,
+  formatTiming,
+  makeTurnDetector,
+  medianOf,
+  parseSse,
+  phaseLabel,
+  pickFiller,
+  spokenText,
+  timingStages,
+  TURN,
+} from "../src/web/turn-lib.js";
 
 describe("parseSse (#82)", () => {
   it("reads complete events and keeps the unfinished rest, across chunk splits", () => {
@@ -315,5 +331,49 @@ describe("turn timings (#76)", () => {
     expect(medianOf([3, 1, 2])).toBe(2);
     expect(medianOf([4, 1, 2, 3])).toBe(3); // 2.5 rounded
     expect(medianOf([])).toBe(0);
+  });
+});
+
+describe("fillers (#86)", () => {
+  it("never picks the same one twice in a row", () => {
+    let previous = "";
+    for (let i = 0; i < 200; i += 1) {
+      const next = pickFiller(previous, Math.random);
+      expect(FILLERS).toContain(next);
+      expect(next).not.toBe(previous);
+      previous = next;
+    }
+    expect(pickFiller("One moment.", () => 0.999, ["One moment."])).toBe("One moment."); // only one: it has to
+  });
+
+  it("plays only on spoken turns, not muted, and not on two spoken turns in a row", () => {
+    expect(fillerAllowed({ spoken: true, muted: false, previousHadFiller: false })).toBe(true);
+    expect(fillerAllowed({ spoken: true, muted: false, previousHadFiller: true })).toBe(false);
+    expect(fillerAllowed({ spoken: false, muted: false, previousHadFiller: false })).toBe(false);
+    expect(fillerAllowed({ spoken: true, muted: true, previousHadFiller: false })).toBe(false);
+    expect(FILLER_AFTER_MS).toBe(800);
+  });
+
+  it("shows when the filler started; the total still counts to the answer's first sound", () => {
+    const stages = timingStages({ spoken: true, speechEndedAt: 1000, fillerAt: 1800, firstSoundAt: 3100 });
+    expect(stages).toMatchObject({ fillerMs: 800, totalMs: 2100 });
+    expect(formatTiming(stages, "kokoro")).toContain("filler at 800 ms · total 2.10 s");
+  });
+
+  it("the answer's first sentence waits for a filler that's still playing, and isn't part of what was said", async () => {
+    let fillerDone: () => void = () => {};
+    const filler = new Promise<void>((r) => (fillerDone = r));
+    const order: string[] = [];
+    const r = run({ beforeFirst: async () => { order.push("waiting for filler"); await filler; order.push("filler ended"); } });
+    const sp = r.speaker();
+    sp.say("Your passport expires in January.");
+    sp.finish();
+    await new Promise((x) => setTimeout(x, 30));
+    expect(r.log).toEqual([]); // not started over the filler
+    fillerDone();
+    const result = await r.done;
+    expect(order).toEqual(["waiting for filler", "filler ended"]);
+    expect(r.log).toEqual(["play Your passport expires in January."]);
+    expect(result.spoken).toBe("Your passport expires in January."); // no filler in the report or history
   });
 });

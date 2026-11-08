@@ -69,6 +69,7 @@ const LatencyReport = z
     firstTokenMs: ms,
     firstSentenceMs: ms,
     voiceFirstAudioMs: ms,
+    fillerMs: ms,
     totalMs: ms,
   })
   .strict();
