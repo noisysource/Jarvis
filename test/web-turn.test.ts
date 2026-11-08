@@ -1,0 +1,168 @@
+import { describe, expect, it } from "vitest";
+import { makeSpeaker, type PlaybackResult } from "../src/web/speaker.js";
+import { chooseVoice, parseSse, spokenText } from "../src/web/turn-lib.js";
+
+describe("parseSse (#82)", () => {
+  it("reads complete events and keeps the unfinished rest, across chunk splits", () => {
+    const first = parseSse('event: start\ndata: {"turnId":"t-1"}\n\nevent: sentence\ndata: {"index":0,');
+    expect(first.events).toEqual([{ event: "start", data: '{"turnId":"t-1"}' }]);
+    const second = parseSse(`${first.rest}"text":"Hi."}\n\n: keep-alive\n\nevent: done\r\ndata: {}\r\n\r\n`);
+    expect(second.events).toEqual([
+      { event: "sentence", data: '{"index":0,"text":"Hi."}' },
+      { event: "done", data: "{}" },
+    ]);
+    expect(second.rest).toBe("");
+    expect(parseSse("data: a\ndata: b\n\n").events).toEqual([{ event: "message", data: "a\nb" }]);
+  });
+});
+
+describe("spokenText (#75)", () => {
+  const s = ["Your passport expires in January.", "Renew it by December, to be safe.", "Want a reminder?"];
+  it("keeps the sentences played and the share of the cut one, ending in —", () => {
+    expect(spokenText(s, { full: 3 })).toBe(s.join(" "));
+    expect(spokenText(s, { full: 1 })).toBe(s[0]);
+    expect(spokenText(s, { full: 1, cutFraction: 0.5 })).toBe("Your passport expires in January. Renew it by—");
+    expect(spokenText(s, { full: 0, cutFraction: 0.4 })).toBe("Your passport—");
+    expect(spokenText(s, { full: 0, cutFraction: 0.05 })).toBe("");
+    expect(spokenText(s, { full: 1, cutFraction: 0.05 })).toBe("Your passport expires in January.—");
+    expect(spokenText(s, { full: 1, cutFraction: 1 })).toBe("Your passport expires in January. Renew it by December, to be safe—");
+  });
+});
+
+describe("chooseVoice (#82)", () => {
+  const kokoro = (available: boolean) => ({
+    provider: "kokoro",
+    voice: "bm_daniel",
+    providers: [{ id: "kokoro", available, ...(available ? {} : { problem: "Kokoro isn't running at http://127.0.0.1:8880 (npm run voice:up)" }) }],
+  });
+  it("uses the configured voice when it's running, else the browser's with why", () => {
+    expect(chooseVoice(kokoro(true))).toEqual({ server: { provider: "kokoro", voice: "bm_daniel" }, note: "" });
+    expect(chooseVoice(kokoro(false))).toEqual({
+      server: null,
+      note: "Kokoro isn't running at http://127.0.0.1:8880 (npm run voice:up), so Jarvis is using the browser voice.",
+    });
+    expect(chooseVoice({ provider: "browser", voice: "", providers: [] })).toEqual({ server: null, note: "" });
+    expect(chooseVoice({ ...kokoro(true), voice: "" }).note).toContain("No kokoro voice is set");
+    expect(chooseVoice(null).server).toBeNull();
+  });
+});
+
+/** A fake player: each sentence takes `ms`; stopping reports the share played. */
+const fakeAudio = (ms = 20) => {
+  const log: string[] = [];
+  const play = async (response: Response, signal: AbortSignal, tracker: { fraction: () => number }) => {
+    const text = await response.text();
+    log.push(`play ${text}`);
+    const started = Date.now();
+    tracker.fraction = () => Math.min(1, (Date.now() - started) / ms);
+    return new Promise<{ playedSeconds: number; totalSeconds: number; stopped: boolean }>((resolve) => {
+      const t = setTimeout(() => resolve({ playedSeconds: ms / 1000, totalSeconds: ms / 1000, stopped: false }), ms);
+      signal.addEventListener("abort", () => {
+        clearTimeout(t);
+        resolve({ playedSeconds: (Date.now() - started) / 1000, totalSeconds: ms / 1000, stopped: true });
+      });
+    });
+  };
+  const speakBrowser = async (text: string, signal: AbortSignal, tracker: { fraction: () => number }) => {
+    log.push(`browser ${text}`);
+    tracker.fraction = () => 0.5;
+    return signal.aborted ? { fraction: 0, stopped: true } : { fraction: 1, stopped: false };
+  };
+  return { log, play, speakBrowser };
+};
+
+const run = (over: Partial<Parameters<typeof makeSpeaker>[0]> = {}, ms = 20) => {
+  const audio = fakeAudio(ms);
+  const fetches: string[] = [];
+  let result: PlaybackResult | undefined;
+  const notes: string[] = [];
+  const ctx: { speaker?: ReturnType<typeof makeSpeaker> } = {};
+  const done = new Promise<PlaybackResult>((resolve) => {
+    const speaker = makeSpeaker({
+      fetchSpeech: async (text) => {
+        fetches.push(text);
+        return new Response(text);
+      },
+      play: audio.play,
+      speakBrowser: audio.speakBrowser,
+      onFallback: (why) => notes.push(why),
+      onDone: (r) => {
+        result = r;
+        resolve(r);
+      },
+      ...over,
+    });
+    ctx.speaker = speaker;
+  });
+  const speaker = () => {
+    if (!ctx.speaker) throw new Error("no speaker");
+    return ctx.speaker;
+  };
+  return { speaker, done, fetches, log: audio.log, notes, result: () => result };
+};
+
+describe("makeSpeaker (#82)", () => {
+  it("plays sentences in order as they stream in, fetching ahead, then reports played to the end", async () => {
+    const r = run();
+    const sp = r.speaker();
+    sp.say("One.");
+    sp.say("Two.");
+    expect(r.fetches).toEqual(["One.", "Two."]); // the first two straight away
+    sp.say("Three.");
+    expect(r.fetches).toEqual(["One.", "Two."]); // the third waits for playback to reach it
+    sp.finish();
+    expect(await r.done).toEqual({ interrupted: false, spoken: "One. Two. Three.", sentences: 3, fellBack: false });
+    expect(r.log).toEqual(["play One.", "play Two.", "play Three."]);
+    expect(r.fetches).toEqual(["One.", "Two.", "Three."]);
+  });
+
+  it("stops at once, reporting what was said, synchronously", async () => {
+    const r = run({}, 200);
+    const sp = r.speaker();
+    sp.say("Your passport expires in January.");
+    sp.say("Renew it by December, to be safe.");
+    await new Promise((x) => setTimeout(x, 300)); // the first has played; the second is part-way
+    sp.stop();
+    const result = r.result(); // already known, before any await
+    expect(result?.interrupted).toBe(true);
+    expect(result?.spoken.startsWith("Your passport expires in January. ")).toBe(true);
+    expect(result?.spoken.endsWith("—")).toBe(true);
+    sp.stop(); // a second stop is a no-op
+    expect(r.result()).toBe(result);
+  });
+
+  it("falls back to the browser voice when /speak fails, with the reason", async () => {
+    const r = run({
+      fetchSpeech: async () => new Response(JSON.stringify({ type: "error", message: "Kokoro isn't running" }), { status: 503 }),
+    });
+    const sp = r.speaker();
+    sp.say("Hello.");
+    sp.say("Again.");
+    sp.finish();
+    expect(await r.done).toMatchObject({ interrupted: false, spoken: "Hello. Again.", fellBack: true });
+    expect(r.notes).toEqual(["Kokoro isn't running"]);
+    expect(r.log).toEqual(["browser Hello.", "browser Again."]);
+  });
+
+  it("uses the browser voice alone when no server voice is set, and says nothing when muted", async () => {
+    const browser = run({ fetchSpeech: null });
+    browser.speaker().say("Hi.");
+    browser.speaker().finish();
+    expect(await browser.done).toMatchObject({ interrupted: false, fellBack: false });
+    expect(browser.log).toEqual(["browser Hi."]);
+
+    const muted = run({ muted: true });
+    muted.speaker().say("Hi.");
+    muted.speaker().finish();
+    expect(await muted.done).toMatchObject({ interrupted: false, spoken: "Hi." });
+    expect(muted.log).toEqual([]);
+    expect(muted.fetches).toEqual([]);
+  });
+
+  it("counts a stop before anything played as interrupted with nothing said", () => {
+    const r = run();
+    r.speaker().say("Hello there.");
+    r.speaker().stop();
+    expect(r.result()).toEqual({ interrupted: true, spoken: "", sentences: 1, fellBack: false });
+  });
+});

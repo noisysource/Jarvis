@@ -22,6 +22,9 @@ import {
   voiceKey,
   voicesFor,
 } from "./chat.js";
+import { playSpeech } from "./audio.js";
+import { makeSpeaker } from "./speaker.js";
+import { chooseVoice, parseSse, phaseLabel } from "./turn-lib.js";
 import { canRecord, recordUtterance } from "./mic.js";
 
 /** @param {string} id @returns {HTMLElement} */
@@ -41,7 +44,9 @@ const languageSelect = /** @type {HTMLSelectElement} */ (byId("language"));
 const voiceSelect = /** @type {HTMLSelectElement} */ (byId("voice"));
 const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
 const conversationButton = /** @type {HTMLButtonElement} */ (byId("conversation"));
-const listeningBanner = byId("listening");
+const phaseBanner = byId("phase");
+const phaseText = byId("phase-text");
+const voiceNote = byId("voice-note");
 const micNote = byId("mic-note");
 const autoNote = byId("auto-note");
 const rememberButton = /** @type {HTMLButtonElement} */ (byId("remember"));
@@ -87,6 +92,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  * @type {{
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
  *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
+ *   phase: import("./turn-lib.js").Phase,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
  *   conversationId: string, remember: boolean,
  * }}
@@ -98,6 +104,7 @@ const state = {
   busy: false,
   listening: false,
   transcribing: false,
+  phase: "idle",
   pending: null,
   conversation: load("jarvis.conversation") !== "false",
   voiceSession: false,
@@ -108,6 +115,13 @@ const state = {
 };
 
 // ---- rendering ----
+
+/** Listening / Thinking / Speaking, shown and read out. @param {import("./turn-lib.js").Phase} phase */
+const setPhase = (phase) => {
+  if (state.phase === phase) return;
+  state.phase = phase;
+  renderControls();
+};
 
 /** @param {string} text */
 const setStatus = (text) => {
@@ -136,6 +150,19 @@ const addMessage = (kind, text) => {
   return item;
 };
 
+/** Adds a streamed sentence to a message. @param {HTMLElement} item @param {string} sentence */
+const appendToMessage = (item, sentence) => {
+  const body = item.querySelector("p");
+  if (body) body.textContent = body.textContent ? `${body.textContent} ${sentence}` : sentence;
+  item.scrollIntoView({ block: "end", behavior: "smooth" });
+};
+
+/** @param {HTMLElement} item @param {string} text */
+const setMessageText = (item, text) => {
+  const body = item.querySelector("p");
+  if (body) body.textContent = text;
+};
+
 const renderControls = () => {
   sendButton.disabled = state.busy;
   // Context buttons can't be used while a request is in flight.
@@ -143,7 +170,9 @@ const renderControls = () => {
   micButton.setAttribute("aria-pressed", String(state.listening));
   micButton.textContent = state.listening ? "■ Stop" : "🎤 Speak";
   micButton.classList.toggle("listening", state.listening);
-  listeningBanner.hidden = !state.listening;
+  phaseBanner.dataset.phase = state.phase;
+  phaseBanner.hidden = state.phase === "idle";
+  phaseText.textContent = phaseLabel(state.phase, state.language);
   micButton.disabled = !listenAvailable() || (state.transcribing && !state.listening);
   micButton.title = !micSupported ? "This browser can't record the microphone" : listenAvailable() ? "" : "Listening is English-only for now";
   micNote.hidden = listenAvailable();
@@ -161,25 +190,57 @@ const renderControls = () => {
   document.documentElement.lang = LANGUAGES[state.language].speech;
 };
 
-// ---- speech out ----
+// ---- speech out (#82) ----
+//
+// Replies are spoken with the configured voice (TTS_PROVIDER / TTS_VOICE,
+// e.g. Kokoro's bm_daniel) through POST /speak, sentence by sentence as the
+// answer streams in. The browser voice is used when that's what's
+// configured, and otherwise only as a fallback (the service is down, or
+// /speak fails), with a note. The configured voice speaks English; in
+// Portuguese the browser voice speaks.
 
 const synth = "speechSynthesis" in window ? window.speechSynthesis : null;
 
-// Each utterance gets a token; stopping or starting new speech makes older
-// "finished speaking" callbacks stale, so a cancelled reply never reopens the mic.
-let speechToken = 0;
+/** One AudioContext for Jarvis's voice, made on the first tap or send so the browser lets it play. */
+/** @type {AudioContext | undefined} */
+let audioCtx;
+const audio = () => {
+  audioCtx ??= new AudioContext();
+  void audioCtx.resume();
+  return audioCtx;
+};
 
+/** The voice in use, from GET /tts. @type {ReturnType<typeof chooseVoice>} */
+let voiceChoice = { server: null, note: "" };
+const renderVoiceNote = () => {
+  voiceNote.textContent = voiceChoice.note;
+  voiceNote.hidden = voiceChoice.note === "" || state.muted;
+};
+const refreshVoice = async () => {
+  try {
+    const res = await fetch("/tts");
+    voiceChoice = chooseVoice(res.ok ? await res.json() : null);
+  } catch {
+    voiceChoice = chooseVoice(null);
+  }
+  renderVoiceNote();
+};
+
+/** The reply being spoken now. @type {ReturnType<typeof makeSpeaker> | undefined} */
+let speaker;
 const stopSpeaking = () => {
-  speechToken += 1;
+  speaker?.stop();
+  speaker = undefined;
   synth?.cancel();
 };
+const isSpeaking = () => speaker?.active() === true;
 
 const voices = () => (synth ? synth.getVoices() : []);
 
-/** The user's chosen voice for the current language, or null for "Automatic (best)". */
+/** The user's chosen browser voice for the current language, or null for "Automatic (best)". */
 const chosenVoiceName = () => load(voiceKey(state.language));
 
-/** Fills the voice menu with this language's installed voices, best first. */
+/** Fills the voice menu with this language's installed browser voices, best first. */
 const renderVoices = () => {
   const lang = LANGUAGES[state.language].speech;
   const ranked = voicesFor(voices(), lang);
@@ -198,50 +259,99 @@ const renderVoices = () => {
   voiceSelect.replaceChildren(automatic, ...options);
   voiceSelect.value = chosen && ranked.some((v) => v.name === chosen) ? chosen : "";
   voiceSelect.disabled = !synth || ranked.length === 0;
+  voiceSelect.title = "The browser voice, used when Jarvis's own voice isn't available";
 };
 
 /**
- * Speaks a reply. `onDone` runs once speech has really finished (not when it
- * was cancelled), or straight away when there's nothing to speak.
- * @param {string} text @param {() => void} [onDone]
+ * Says one sentence with the browser voice. Resolves when it's over, with
+ * how much of it was said (from the browser's word boundaries).
+ * @param {string} text @param {AbortSignal} signal @param {{ fraction: () => number }} tracker
+ * @returns {Promise<{ fraction: number, stopped: boolean }>}
  */
-const speak = (text, onDone) => {
-  if (!synth || state.muted) {
-    onDone?.();
-    return;
-  }
-  stopSpeaking();
-  const token = speechToken;
-  const utterance = new SpeechSynthesisUtterance(text);
-  const lang = LANGUAGES[state.language].speech;
-  utterance.lang = lang;
-  const voice = pickVoice(voices(), lang, chosenVoiceName());
-  if (voice) utterance.voice = voice;
+const speakBrowser = (text, signal, tracker) =>
+  new Promise((resolve) => {
+    if (!synth || signal.aborted) {
+      resolve({ fraction: 0, stopped: signal.aborted });
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    const lang = LANGUAGES[state.language].speech;
+    utterance.lang = lang;
+    const voice = pickVoice(voices(), lang, chosenVoiceName());
+    if (voice) utterance.voice = voice;
+    let spokenChars = 0;
+    utterance.onboundary = (e) => {
+      spokenChars = e.charIndex;
+    };
+    tracker.fraction = () => (text.length === 0 ? 0 : Math.min(1, spokenChars / text.length));
+    let started = false;
+    let finished = false;
+    const startedAt = Date.now();
+    /** @type {ReturnType<typeof setInterval> | undefined} */
+    let watch;
+    /** @param {boolean} stopped */
+    const finish = (stopped) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(watch);
+      resolve({ fraction: stopped ? tracker.fraction() : 1, stopped });
+    };
+    utterance.onstart = () => {
+      started = true;
+    };
+    utterance.onend = () => finish(signal.aborted);
+    utterance.onerror = () => finish(signal.aborted);
+    signal.addEventListener("abort", () => {
+      synth.cancel();
+      finish(true);
+    });
+    // Some browsers occasionally never fire "end". Once speech has started and
+    // nothing is speaking or queued any more, it's over. Never before it starts.
+    watch = setInterval(() => {
+      if (synth.speaking) started = true;
+      const idle = !synth.speaking && !synth.pending;
+      if ((started && idle) || (!started && Date.now() - startedAt > 10000)) finish(false);
+    }, 250);
+    synth.speak(utterance);
+  });
 
-  let started = false;
-  let finished = false;
-  const startedAt = Date.now();
-  /** @type {ReturnType<typeof setInterval> | undefined} */
-  let watch;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    clearInterval(watch);
-    if (token === speechToken) onDone?.();
-  };
-  utterance.onstart = () => {
-    started = true;
-  };
-  utterance.onend = finish;
-  utterance.onerror = finish; // a cancel also lands here, but its token is stale
-  // Some browsers occasionally never fire "end". Once speech has started and
-  // nothing is speaking or queued any more, it's over. Never before it starts.
-  watch = setInterval(() => {
-    if (synth.speaking) started = true;
-    const idle = !synth.speaking && !synth.pending;
-    if ((started && idle) || (!started && Date.now() - startedAt > 10000)) finish();
-  }, 500);
-  synth.speak(utterance);
+/**
+ * Starts speaking a reply; add sentences with say(), then finish().
+ * @param {(result: import("./speaker.js").PlaybackResult) => void} onDone
+ */
+const startSpeaker = (onDone) => {
+  stopSpeaking();
+  const server = state.language === "en" ? voiceChoice.server : null;
+  const ctx = server ? audio() : undefined;
+  const sp = makeSpeaker({
+    fetchSpeech:
+      server && ctx
+        ? (text, signal) =>
+            fetch("/speak", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
+              signal,
+            })
+        : null,
+    play: (response, signal, tracker) => {
+      if (!ctx) throw new Error("no audio");
+      return playSpeech({ ctx, response, signal, tracker });
+    },
+    speakBrowser,
+    muted: state.muted || (!server && !synth),
+    onFallback: (why) => {
+      voiceChoice = { server: null, note: `${why}, so Jarvis is using the browser voice.` };
+      renderVoiceNote();
+    },
+    onSpeaking: () => setPhase("speaking"),
+    onDone: (result) => {
+      if (speaker === sp) speaker = undefined;
+      onDone(result);
+    },
+  });
+  speaker = sp;
+  return sp;
 };
 
 // ---- asking ----
@@ -252,9 +362,12 @@ const retirePending = () => {
   state.pending = null;
 };
 
+/** The answer being streamed now, so barge-in can cancel it. @type {AbortController | undefined} */
+let answering;
+
 /**
- * Sends one question. Only one request at a time, so replies can't arrive
- * out of order.
+ * Sends one question and speaks the reply as it streams in. Only one request
+ * at a time, so replies can't arrive out of order.
  * @param {string} question
  * @param {string} [context] set when the user picked a context after a clarify
  */
@@ -263,16 +376,63 @@ const ask = async (question, context) => {
   if (text === "" || state.busy) return;
   stopSpeaking();
   state.busy = true;
+  setPhase("thinking");
   renderControls();
   if (!context) addMessage("user", text);
-  setStatus("Thinking…");
+  setStatus("");
+  const voiceReady = refreshVoice();
 
-  /** @type {import("./chat.js").ReplyView} */
+  /** @type {unknown} */
+  let final = null;
+  let status = 0;
+  let turnId = "";
+  let reachable = true;
+  /** @type {HTMLElement | undefined} */
+  let item;
+  /** @type {import("./chat.js").ReplyView | undefined} */
   let view;
+  let reopen = false;
+  /** @type {ReturnType<typeof makeSpeaker> | undefined} */
+  let sp;
+  const controller = new AbortController();
+  answering = controller;
+
+  /** How the reply was actually spoken: the history, the report, then listening again. */
+  /** @param {import("./speaker.js").PlaybackResult} result */
+  const onPlayback = (result) => {
+    const remember = view ? view.remember : true; // cut off mid-answer: it was an answer
+    if (remember) {
+      const said = result.interrupted ? result.spoken || "—" : (view?.text ?? result.spoken);
+      state.history = appendTurn(appendTurn(state.history, "user", text), "assistant", said);
+    }
+    if (result.interrupted) item?.classList.add("interrupted");
+    // The server holds a streamed answer's wrap-up until it hears how playback went (#72).
+    if (turnId !== "" && (!view || view.kind === "answer")) {
+      void fetch("/ask/spoken", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ turnId, interrupted: result.interrupted, spoken: result.spoken.slice(0, 4000) }),
+      }).catch(() => undefined);
+    }
+    if (!result.interrupted) {
+      if (state.phase === "speaking") setPhase("idle");
+      if (reopen) reopenMicSoon();
+    }
+  };
+  /** @param {string} sentence */
+  const say = async (sentence) => {
+    if (!sp) {
+      await voiceReady;
+      if (controller.signal.aborted) return;
+      sp = startSpeaker(onPlayback);
+    }
+    sp.say(sentence);
+  };
+
   try {
     const res = await fetch("/ask", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", accept: "text/event-stream" },
       body: JSON.stringify(
         buildAskBody({
           question: text,
@@ -282,15 +442,52 @@ const ask = async (question, context) => {
           remember: state.remember,
         }),
       ),
+      signal: controller.signal,
     });
-    const body = await res.json().catch(() => null);
-    view = viewFromHttp(res.status, body);
+    status = res.status;
+    if (!(res.headers.get("content-type") ?? "").includes("text/event-stream") || !res.body) {
+      final = await res.json().catch(() => null);
+    } else {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const parsed = parseSse(buffer + decoder.decode(value, { stream: true }));
+        buffer = parsed.rest;
+        for (const ev of parsed.events) {
+          const data = JSON.parse(ev.data);
+          if (ev.event === "start") turnId = String(data.turnId ?? "");
+          else if (ev.event === "sentence") {
+            const sentence = String(data.text ?? "");
+            if (!item) item = addMessage("answer", sentence);
+            else appendToMessage(item, sentence);
+            await say(sentence);
+          } else if (ev.event === "done" || ev.event === "reply") final = data;
+        }
+      }
+    }
   } catch {
-    view = viewFromHttp(0, null);
-    view.text = "I can't reach Jarvis. Is the server running?";
+    reachable = controller.signal.aborted;
+  }
+  if (answering === controller) answering = undefined;
+
+  if (controller.signal.aborted) {
+    // Interrupted (barge-in) while the answer was still coming: what was said is already recorded.
+    sp?.stop();
+    if (!sp) onPlayback({ interrupted: true, spoken: "", sentences: 0, fellBack: false });
+    state.busy = false;
+    renderControls();
+    return;
   }
 
-  const item = addMessage(view.kind, view.text);
+  view = reachable ? viewFromHttp(status, final) : { ...viewFromHttp(0, null), text: "I can't reach Jarvis. Is the server running?" };
+  if (view.kind === "answer" && item) {
+    setMessageText(item, view.text);
+  } else {
+    item = addMessage(view.kind, view.text);
+  }
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";
@@ -308,27 +505,22 @@ const ask = async (question, context) => {
     item.append(choices);
     state.pending = { question: text, options: view.options, buttons };
   }
-  if (view.remember) {
-    state.history = appendTurn(appendTurn(state.history, "user", text), "assistant", view.text);
-  }
-  state.busy = false;
-  setStatus("");
-  renderControls();
-  // The wrap-up runs after the reply; check for new memories a little later.
-  if (view.remember && state.remember) setTimeout(() => void refreshBadge(), 5000);
-
-  const reopen = shouldReopenMic({
+  reopen = shouldReopenMic({
     conversation: state.conversation,
     voiceSession: state.voiceSession,
     blocked: state.autoBlocked,
     available: listenAvailable(),
     kind: view.kind,
   });
-  if (view.speak) {
-    speak(view.speak, reopen ? reopenMicSoon : undefined);
-  } else if (reopen) {
-    reopenMicSoon();
-  }
+  // A reply that isn't a streamed answer (clarify, handoff, not connected) is spoken whole.
+  if (!sp && view.speak) await say(view.speak);
+  state.busy = false;
+  renderControls();
+  // The wrap-up runs after the reply; check for new memories a little later.
+  if (view.remember && state.remember) setTimeout(() => void refreshBadge(), 5000);
+  if (sp) sp.finish();
+  else onPlayback({ interrupted: false, spoken: "", sentences: 0, fellBack: false });
+  if (!sp && state.phase === "thinking") setPhase("idle");
   if (!state.listening && !reopen) input.focus();
 };
 
@@ -382,6 +574,7 @@ const submit = (raw, how = {}) => {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  audio(); // made on a tap or Enter, so the browser lets Jarvis's voice play
   submit(input.value);
 });
 
@@ -439,6 +632,7 @@ const endVoice = (reason) => {
     else recording.controller.abort();
   }
   state.listening = false;
+  if (state.phase === "listening") state.phase = "idle";
   setStatus(
     reason === "silence"
       ? "Stopped listening after a quiet spell. Tap 🎤 Speak to talk again."
@@ -468,7 +662,7 @@ const sttStatus = async () => {
  */
 const transcribeAndSend = async (wav) => {
   state.transcribing = true;
-  setStatus("Transcribing…");
+  setPhase("thinking");
   renderControls();
   let text = "";
   let problem = "";
@@ -485,6 +679,7 @@ const transcribeAndSend = async (wav) => {
     problem = "I can't reach Jarvis. Is the server running?";
   }
   state.transcribing = false;
+  if (state.phase === "thinking") state.phase = "idle";
   setStatus("");
   renderControls();
   if (problem !== "") {
@@ -509,7 +704,7 @@ const transcribeAndSend = async (wav) => {
 const startListening = async (auto) => {
   if (!listenAvailable() || state.busy || state.listening || state.transcribing) return;
   // Never listen while Jarvis is talking.
-  if (auto && synth?.speaking) {
+  if (auto && isSpeaking()) {
     reopenMicSoon();
     return;
   }
@@ -526,7 +721,7 @@ const startListening = async (auto) => {
   listen$.heard = false;
   listen$.auto = auto;
   listen$.stopped = false;
-  micCtx ??= new AudioContext();
+  micCtx = audio();
   const controller = new AbortController();
   const rec = recordUtterance({
     ctx: micCtx,
@@ -538,7 +733,8 @@ const startListening = async (auto) => {
   });
   recording = { stop: rec.stop, controller };
   state.listening = true;
-  setStatus(""); // the Listening banner says it
+  setStatus("");
+  setPhase("listening");
   renderControls();
 
   /** @type {{ wav: Uint8Array | null, reason: string }} */
@@ -548,6 +744,7 @@ const startListening = async (auto) => {
   } catch (e) {
     recording = undefined;
     state.listening = false;
+    if (state.phase === "listening") state.phase = "idle";
     const name = e instanceof Error ? e.name : "";
     const blocked = name === "NotAllowedError" || name === "SecurityError";
     if (blocked && auto) {
@@ -560,6 +757,7 @@ const startListening = async (auto) => {
   }
   recording = undefined;
   state.listening = false;
+  if (state.phase === "listening") state.phase = "idle";
   renderControls();
   if (result.reason === "cancelled") return;
   if (!result.wav) {
@@ -588,7 +786,7 @@ micButton.addEventListener("click", () => {
   stopSpeaking();
   clearTimeout(reopenTimer);
   // Made on a tap, so the browser lets it start.
-  micCtx ??= new AudioContext();
+  micCtx = audio();
   void startListening(false);
 });
 
@@ -767,6 +965,7 @@ muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
   save("jarvis.muted", String(state.muted));
   if (state.muted) stopSpeaking();
+  renderVoiceNote();
   renderControls();
 });
 
@@ -809,5 +1008,6 @@ synth?.addEventListener?.("voiceschanged", renderVoices);
 
 renderControls();
 renderVoices();
+void refreshVoice();
 void refreshBadge();
 input.focus();
