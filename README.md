@@ -132,6 +132,11 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    npm run voice:setup
    ```
 
+   Run it in a native arm64 terminal (not Rosetta) with Homebrew at
+   `/opt/homebrew`; the script stops otherwise. It uses only uv's own
+   Python builds, never python.org's or Homebrew's, and rebuilds an
+   environment in `.voice/` that was made with another Python.
+
    ```bash
    npm run voice:up
    ```
