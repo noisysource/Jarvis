@@ -32,6 +32,8 @@ export const makeWhisperStt = (deps: {
   readonly baseUrl: URL;
   readonly fetch?: typeof fetch;
   readonly isStarting?: () => Promise<boolean>;
+  /** Expected names, as Whisper's prompt (#83). Never logged. */
+  readonly hints?: () => Promise<{ readonly prompt: string }>;
 }): SttProvider => {
   const doFetch = deps.fetch ?? fetch;
   const url = (path: string) => new URL(path, deps.baseUrl).toString();
@@ -45,6 +47,8 @@ export const makeWhisperStt = (deps: {
       form.append("response_format", "json");
       form.append("temperature", "0");
       form.append("language", WHISPER_LANGUAGE[language]);
+      const prompt = (await deps.hints?.().catch(() => undefined))?.prompt ?? "";
+      if (prompt !== "") form.append("prompt", prompt);
       let res: Response;
       try {
         res = await doFetch(url("/inference"), { method: "POST", body: form, ...(signal ? { signal } : {}) });

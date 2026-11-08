@@ -50,10 +50,11 @@
     </main>
 
     <footer>
-      <p id="listening" class="listening" hidden>
+      <p id="phase" class="phase" data-phase="idle" role="status" aria-live="polite" hidden>
         <span class="dot" aria-hidden="true"></span>
-        <span>Listening… say “that's all” or “é tudo” to stop</span>
+        <span id="phase-text"></span>
       </p>
+      <p id="voice-note" class="note" hidden></p>
       <p id="status" role="status"></p>
       <form id="ask-form">
         <label for="question" class="visually-hidden">Ask Jarvis</label>

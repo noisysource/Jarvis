@@ -34,6 +34,13 @@ jobs:
             exit 1
           fi
 
+      - name: Whisper hints are not committed
+        run: |
+          if git ls-files --error-unmatch data/whisper-hints.txt >/dev/null 2>&1; then
+            echo "::error file=data/whisper-hints.txt::data/whisper-hints.txt holds personal names and must not be committed. Remove it with 'git rm --cached data/whisper-hints.txt'."
+            exit 1
+          fi
+
       - name: Memory database is not committed
         run: |
           if git ls-files 'data/*.sqlite' 'data/*.sqlite-*' | grep -q .; then

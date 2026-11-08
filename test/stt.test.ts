@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildWhisperPrompt, MAX_HINTS, MAX_PROMPT_CHARS, makeWhisperHints, parseHintsFile, profileNames } from "../src/stt/hints.js";
 import { makeSttProvider } from "../src/stt/registry.js";
 import { checkSpeechWav, MAX_WAV_BYTES } from "../src/stt/wav.js";
 import { cleanTranscript, makeWhisperStt } from "../src/stt/whisper.js";
@@ -56,7 +57,7 @@ describe("whisper.cpp provider", () => {
     });
     expect(await down.status()).toMatchObject({ ok: false, error: { kind: "unavailable" } });
 
-    const waiting = makeSttProvider({ provider: "whisper", whisperUrl: new URL("http://127.0.0.1:9") }, { isStarting: async (s) => s === "whisper" });
+    const waiting = makeSttProvider({ provider: "whisper", whisperUrl: new URL("http://127.0.0.1:9"), hintsPath: "data/whisper-hints.txt" }, { isStarting: async (s) => s === "whisper" });
     expect(await waiting.status()).toEqual({ ok: false, error: { kind: "starting", message: "Whisper is starting (loading its model)" } });
 
     const loading = await fakeWhisper((req, _b, res) => {
@@ -97,6 +98,56 @@ describe("whisper.cpp provider", () => {
     expect(cleanTranscript(" (silence) ")).toBe("");
     expect(cleanTranscript(" Remember that\n the boiler is serviced in March. [Music]")).toBe("Remember that the boiler is serviced in March.");
     expect(cleanTranscript("I said (quietly) hello")).toBe("I said (quietly) hello");
+  });
+});
+
+describe("Whisper name hints (#83)", () => {
+  const PROFILE = [
+    "# My profile",
+    "## About me",
+    "- Name: Alex Example",
+    "- Lives in: Lisbon",
+    "## Family",
+    "- Partner: Sam, works as an architect",
+    "- Daughter: Inês, born 2 September 2017",
+    "- Mother: Teresa (lives in Porto)",
+    "## Work",
+    "- Runs: Example Corp, a consultancy",
+  ].join("\n");
+
+  it("takes your name and the Family section's names from the profile", () => {
+    expect(profileNames(PROFILE)).toEqual(["Alex Example", "Sam", "Inês", "Teresa"]);
+    expect(profileNames("no headings here\n- Partner: Sam")).toEqual([]);
+  });
+
+  it("reads one hint per line, skipping comments, and builds a capped, deduplicated prompt", () => {
+    expect(parseHintsFile("# a comment\nExampleville\n\n  Example Corp  \n")).toEqual(["Exampleville", "Example Corp"]);
+    expect(buildWhisperPrompt(["Inês", "inês", "Exampleville", " "])).toBe("Inês, Exampleville.");
+    expect(buildWhisperPrompt([])).toBe("");
+    const many = Array.from({ length: 100 }, (_, i) => `Name${i}`);
+    expect(buildWhisperPrompt(many).split(", ")).toHaveLength(MAX_HINTS);
+    expect(buildWhisperPrompt(Array.from({ length: 30 }, (_, i) => `${"x".repeat(50)}${i}`)).length).toBeLessThanOrEqual(MAX_PROMPT_CHARS);
+  });
+
+  it("combines profile and file, and a missing file or profile is fine", async () => {
+    const both = makeWhisperHints({ readProfile: async () => PROFILE, readHintsFile: async () => "Exampleville\nSam\n" });
+    expect(await both()).toEqual({ prompt: "Alex Example, Sam, Inês, Teresa, Exampleville.", count: 5 });
+    const none = makeWhisperHints({ readProfile: async () => undefined, readHintsFile: async () => Promise.reject(new Error("ENOENT")) });
+    expect(await none()).toEqual({ prompt: "", count: 0 });
+  });
+
+  it("sends them to Whisper as its prompt", async () => {
+    let prompt: string | File | null = null;
+    const base = await fakeWhisper(async (req, body, res) => {
+      const form = await new Response(new Uint8Array(body), { headers: { "content-type": req.headers["content-type"] ?? "" } }).formData();
+      prompt = form.get("prompt");
+      res.end(JSON.stringify({ text: "Inês" }));
+    });
+    const withHints = makeWhisperStt({ baseUrl: base, hints: async () => ({ prompt: "Inês, Exampleville." }) });
+    await withHints.transcribe({ wav: speech(), language: "en" });
+    expect(prompt).toBe("Inês, Exampleville.");
+    await makeWhisperStt({ baseUrl: base, hints: async () => ({ prompt: "" }) }).transcribe({ wav: speech(), language: "en" });
+    expect(prompt).toBeNull(); // no hints, no prompt field
   });
 });
 

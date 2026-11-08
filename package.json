@@ -37,7 +37,9 @@
     "@anthropic-ai/sdk": "1.1.0",
     "@google-cloud/secret-manager": "7.2.0",
     "@hono/node-server": "2.1.5",
+    "@ricky0123/vad-web": "0.0.31",
     "hono": "4.13.13",
+    "onnxruntime-web": "1.30.0",
     "zod": "4.6.7"
   }
 }

@@ -1,0 +1,7 @@
+# Names and words Whisper should expect, one per line (#83). Copy this file
+# to data/whisper-hints.txt (gitignored, never committed) and put your own in:
+# family and friends, places, businesses, anything it tends to misspell.
+# The names in your profile's "## Family" section are added automatically.
+Jane Example
+Exampleville
+Example Corp

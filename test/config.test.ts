@@ -35,7 +35,8 @@ describe("loadConfig", () => {
         kokoroUrl: new URL("http://127.0.0.1:8880"),
         piperUrl: new URL("http://127.0.0.1:5001"),
       },
-      stt: { provider: "whisper", whisperUrl: new URL("http://127.0.0.1:8178") },
+      stt: { provider: "whisper", whisperUrl: new URL("http://127.0.0.1:8178"), hintsPath: "data/whisper-hints.txt" },
+      turn: { endOfTurnMs: 500, bargeIn: { chrome: "vad", safari: "strict", other: "vad" } },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
   });
@@ -58,8 +59,27 @@ describe("loadConfig", () => {
     expect(!loadConfig({ TTS_PROVIDER: "elevenlabs" }).ok).toBe(true);
   });
 
+  it("sets the end of turn and barge-in per browser (#75)", () => {
+    expect(loadOk({ VOICE_END_OF_TURN_MS: "700", BARGE_IN_SAFARI: "push" }).turn).toEqual({
+      endOfTurnMs: 700,
+      bargeIn: { chrome: "vad", safari: "push", other: "vad" },
+    });
+    for (const [name, value] of [
+      ["VOICE_END_OF_TURN_MS", "100"],
+      ["VOICE_END_OF_TURN_MS", "half a second"],
+      ["BARGE_IN_CHROME", "always"],
+    ] as const) {
+      const bad = loadConfig({ [name]: value });
+      expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);
+    }
+  });
+
   it("listens through Whisper on this machine only (#74)", () => {
-    expect(loadOk({ WHISPER_URL: "http://localhost:9178" }).stt).toEqual({ provider: "whisper", whisperUrl: new URL("http://localhost:9178") });
+    expect(loadOk({ WHISPER_URL: "http://localhost:9178" }).stt).toEqual({
+      provider: "whisper",
+      whisperUrl: new URL("http://localhost:9178"),
+      hintsPath: "data/whisper-hints.txt",
+    });
     for (const value of ["http://10.0.0.5:8178", "https://api.openai.com/v1/audio", "http://a:b@127.0.0.1:8178"]) {
       const bad = loadConfig({ WHISPER_URL: value });
       expect(!bad.ok && bad.error, value).toContain("WHISPER_URL: ");

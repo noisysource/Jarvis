@@ -15,10 +15,12 @@ const MIN_SAMPLES = 2048;
  * Plays a /speak response as it arrives. Resolves when playback has ended
  * (or was stopped). `onFirstAudio` is called with the time, from
  * `performance.now()`, at which the first sound actually starts.
- * @param {{ ctx: AudioContext, response: Response, signal?: AbortSignal, onFirstAudio?: (atMs: number) => void }} options
+ * `tracker.fraction` is set to report, live, the share of the audio received
+ * so far that has played (for cutting an interrupted sentence, #75).
+ * @param {{ ctx: AudioContext, response: Response, signal?: AbortSignal, onFirstAudio?: (atMs: number) => void, tracker?: { fraction: () => number } }} options
  * @returns {Promise<{ playedSeconds: number, totalSeconds: number, stopped: boolean }>}
  */
-export const playSpeech = async ({ ctx, response, signal, onFirstAudio }) => {
+export const playSpeech = async ({ ctx, response, signal, onFirstAudio, tracker }) => {
   const format = readAudioFormat(response.headers);
   if (!format || !response.body) throw new Error("Jarvis's voice sent audio this page can't play.");
   const reader = response.body.getReader();
@@ -30,6 +32,10 @@ export const playSpeech = async ({ ctx, response, signal, onFirstAudio }) => {
   let stopped = false;
   /** @type {Uint8Array} */
   let pending = new Uint8Array(0);
+  if (tracker) {
+    tracker.fraction = () =>
+      sources.length === 0 || totalSeconds === 0 ? 0 : Math.max(0, Math.min(1, (ctx.currentTime - startAt) / totalSeconds));
+  }
 
   const stop = () => {
     stopped = true;
