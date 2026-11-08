@@ -6,6 +6,7 @@ import {
   PERSONAL_INSTRUCTIONS,
   personalSystemPrompt,
 } from "../src/answer/personal.js";
+import { streamedFrom } from "../src/llm/stream.js";
 import type { LlmCall, LlmRequest, LlmResponse } from "../src/llm/types.js";
 import type { ProfileSource } from "../src/profile.js";
 import { err, ok } from "../src/result.js";
@@ -200,6 +201,26 @@ describe("makePersonalAnswerer", () => {
     expect(system).toContain("use a natural spoken length, usually short");
     expect(system).toContain("No markdown");
     expect(system).not.toContain("one to three sentences");
+  });
+
+  it("streams the answer's text when asked, and still returns the full answer", async () => {
+    const deltas: string[] = [];
+    const llm: LlmCall = Object.assign(async () => ok(textResponse("unused")), {
+      stream: () => streamedFrom(["She's ", "9."], ok(textResponse("She's 9."))),
+    });
+    const answer = makePersonalAnswerer({ llm, profile: profileSource(), timeZone: "Europe/Lisbon" });
+    expect(await answer(input({ onText: (d) => deltas.push(d) }))).toEqual({ ok: true, value: { kind: "answer", text: "She's 9." } });
+    expect(deltas).toEqual(["She's ", "9."]);
+  });
+
+  it("reports a cancelled stream as `cancelled`, logged quietly", async () => {
+    const { log, entries } = recordingLog();
+    const llm: LlmCall = Object.assign(async () => ok(textResponse("unused")), {
+      stream: () => streamedFrom(["She"], err({ kind: "aborted", message: "Cancelled", retryable: false })),
+    });
+    const result = await makePersonalAnswerer({ llm, profile: profileSource(), timeZone: "Europe/Lisbon", log })(input({ onText: () => undefined }));
+    expect(result).toEqual({ ok: false, error: { code: "cancelled", message: "Cancelled." } });
+    expect(entries).toEqual([{ level: "info", message: "answer cancelled", fields: undefined }]);
   });
 
   it("returns a safe error when the profile can't be read, without calling the model", async () => {

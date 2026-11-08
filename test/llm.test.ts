@@ -1,7 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { buildParams, makeAnthropicLlm, mapError, mapResponse } from "../src/llm/anthropic.js";
+import { buildParams, makeAnthropicLlm, mapError, mapResponse, type StreamMessage } from "../src/llm/anthropic.js";
+import { streamOrCall } from "../src/llm/stream.js";
 import { makeLlm } from "../src/llm/registry.js";
 import type { LlmRequest } from "../src/llm/types.js";
 
@@ -257,5 +258,77 @@ describe("makeLlm", () => {
       ok: false,
       error: "No API key for provider anthropic",
     });
+  });
+});
+
+describe("streaming (#72)", () => {
+  const collect = async (it: AsyncIterable<string>) => {
+    const out: string[] = [];
+    for await (const d of it) out.push(d);
+    return out;
+  };
+
+  it("yields text deltas as they arrive, then the full response", async () => {
+    const streamMessage = vi.fn<StreamMessage>(() => ({
+      deltas: (async function* () {
+        yield "Hel";
+        yield "lo there.";
+      })(),
+      final: async () => message({ content: [{ type: "text", text: "Hello there." }] } as Partial<Message>),
+    }));
+    const llm = makeAnthropicLlm({ model: "claude-sonnet-5-5", streamMessage });
+    expect(llm.stream).toBeDefined();
+    const streamed = llm.stream?.(base);
+    expect(await collect(streamed?.text ?? (async function* () {})())).toEqual(["Hel", "lo there."]);
+    expect(await streamed?.result).toMatchObject({ ok: true, value: { kind: "text", text: "Hello there." } });
+    expect(streamMessage.mock.calls[0]?.[0]).toMatchObject({ model: "claude-sonnet-5-5", fallbacks: "default" });
+  });
+
+  it("reports an abort as `aborted`, and an already-aborted signal makes no call", async () => {
+    const controller = new AbortController();
+    const streamMessage = vi.fn<StreamMessage>(() => ({
+      deltas: (async function* () {
+        yield "Hel";
+        throw new Error("stream torn down");
+      })(),
+      final: async () => {
+        throw new Error("aborted by the client");
+      },
+    }));
+    const llm = makeAnthropicLlm({ model: "claude-sonnet-5-5", streamMessage });
+    const streamed = llm.stream?.(base, controller.signal);
+    controller.abort();
+    expect(await collect(streamed?.text ?? (async function* () {})())).toEqual(["Hel"]); // errors end the text quietly
+    expect(await streamed?.result).toEqual({ ok: false, error: { kind: "aborted", message: "Cancelled", retryable: false } });
+
+    const before = llm.stream?.(base, controller.signal);
+    expect(await before?.result).toMatchObject({ ok: false, error: { kind: "aborted" } });
+    expect(streamMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps other stream errors like a normal call, and never includes the key", async () => {
+    const llm = makeAnthropicLlm({
+      model: "claude-sonnet-5-5",
+      apiKey: SECRET_KEY,
+      streamMessage: () => ({
+        deltas: (async function* () {})(),
+        final: async () => {
+          throw new APIConnectionError({ message: "down" });
+        },
+      }),
+    });
+    const result = await llm.stream?.(base).result;
+    expect(result).toMatchObject({ ok: false, error: { kind: "network" } });
+    expect(JSON.stringify(result)).not.toContain(SECRET_KEY);
+  });
+
+  it("streamOrCall falls back to one chunk for a provider without streaming", async () => {
+    const plain = Object.assign(async () => ({ ok: true as const, value: { kind: "text" as const, text: "Whole answer.", servedBy: "x", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } } }), {});
+    const streamed = streamOrCall(plain, base);
+    expect(await collect(streamed.text)).toEqual(["Whole answer."]);
+    expect(await streamed.result).toMatchObject({ ok: true });
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await streamOrCall(plain, base, aborted.signal).result).toMatchObject({ ok: false, error: { kind: "aborted" } });
   });
 });

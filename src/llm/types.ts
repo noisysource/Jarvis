@@ -104,6 +104,8 @@ export type LlmErrorKind =
   | "network"
   | "auth"
   | "bad_request"
+  /** The caller cancelled the request (e.g. the user interrupted a spoken answer). */
+  | "aborted"
   | "unknown";
 
 /** `message` is for logs: it never contains API keys or prompt contents. */
@@ -114,4 +116,23 @@ export type LlmError = {
   readonly retryable: boolean;
 };
 
-export type LlmCall = (request: LlmRequest) => Promise<Result<LlmResponse, LlmError>>;
+/**
+ * A streamed call: `text` yields the answer's text as it arrives, and
+ * `result` settles with the full response once it ends (or the error, or
+ * `aborted` when `signal` fires). Reading `text` is optional; `result` alone
+ * is enough to wait for the end.
+ */
+export type LlmStreamed = {
+  readonly text: AsyncIterable<string>;
+  readonly result: Promise<Result<LlmResponse, LlmError>>;
+};
+
+export type LlmStream = (request: LlmRequest, signal?: AbortSignal) => LlmStreamed;
+
+/**
+ * One model call. Providers that can stream also carry `stream`; callers
+ * use `streamOrCall` (src/llm/stream.ts), which falls back to one chunk.
+ */
+export type LlmCall = ((request: LlmRequest) => Promise<Result<LlmResponse, LlmError>>) & {
+  readonly stream?: LlmStream;
+};

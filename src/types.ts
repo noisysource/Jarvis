@@ -160,7 +160,9 @@ export type AppErrorCode =
   | "llm_failed"
   | "llm_refused"
   | "timeout"
-  | "config";
+  | "config"
+  /** The request was cancelled (the user interrupted a spoken answer). */
+  | "cancelled";
 
 /** An expected failure. `message` must be safe to show the user: no secrets, no profile text. */
 export type AppError = {
@@ -179,7 +181,17 @@ export type AnswerInput = {
   readonly history: readonly Turn[];
   readonly memories: readonly Memory[];
   readonly now: Date;
+  /** Streaming (#72): called with each piece of the answer's text as it arrives. */
+  readonly onText?: (delta: string) => void;
+  /** Cancels the answer (e.g. the user interrupted it). */
+  readonly signal?: AbortSignal;
 };
+
+/**
+ * A spoken language. English only in the Voice proof of concept; pt-PT is
+ * added later without changing any interface.
+ */
+export type Language = "en";
 
 export type LogFields = Readonly<Record<string, unknown>>;
 
