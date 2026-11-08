@@ -32,6 +32,15 @@ export type TtsConfig = {
   readonly piperUrl: URL;
 };
 
+/** How the page runs a spoken turn (#75). */
+export type BargeInMode = "vad" | "strict" | "push";
+export type TurnConfig = {
+  /** Silence after speech that ends your turn. */
+  readonly endOfTurnMs: number;
+  /** Interrupting Jarvis, per browser: "vad" (just talk), "strict" (talk clearly, for weaker echo cancellation) or "push" (tap Interrupt). */
+  readonly bargeIn: { readonly chrome: BargeInMode; readonly safari: BargeInMode; readonly other: BargeInMode };
+};
+
 /** Jarvis's ears (#74). The service URL is always on this machine. */
 export type SttConfig = {
   readonly provider: SttProviderId;
@@ -53,6 +62,7 @@ export type Config = {
   readonly memoryStore: MemoryStoreRef;
   readonly tts: TtsConfig;
   readonly stt: SttConfig;
+  readonly turn: TurnConfig;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
   readonly neverRememberPath: string;
   readonly secrets: {
@@ -81,7 +91,18 @@ export const DEFAULTS = {
   piperUrl: "http://127.0.0.1:5001",
   sttProvider: "whisper",
   whisperUrl: "http://127.0.0.1:8178",
+  endOfTurnMs: 500,
+  // Safari's echo cancellation is weaker than Chrome's (#75): it takes clearer speech to interrupt there.
+  bargeInChrome: "vad",
+  bargeInSafari: "strict",
+  bargeInOther: "vad",
 } as const;
+
+const END_OF_TURN_ERROR = "must be a whole number of milliseconds from 200 to 3000";
+const bargeInMode = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.enum(["vad", "strict", "push"], { error: 'must be "vad", "strict" or "push"' }).optional(),
+);
 
 const PORT_ERROR = "must be a whole number from 1 to 65535";
 
@@ -129,6 +150,18 @@ const EnvSchema = z.object({
     z.enum(["whisper"], { error: 'must be "whisper"' }).optional(),
   ),
   WHISPER_URL: optionalString,
+  VOICE_END_OF_TURN_MS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: END_OF_TURN_ERROR })
+      .int({ error: END_OF_TURN_ERROR })
+      .min(200, { error: END_OF_TURN_ERROR })
+      .max(3000, { error: END_OF_TURN_ERROR })
+      .default(DEFAULTS.endOfTurnMs),
+  ),
+  BARGE_IN_CHROME: bargeInMode,
+  BARGE_IN_SAFARI: bargeInMode,
+  BARGE_IN_OTHER: bargeInMode,
   GOOGLE_CLOUD_PROJECT: optionalString,
   ANTHROPIC_SECRET_NAME: optionalString,
   VENDUS_SECRET_NAME: optionalString,
@@ -204,6 +237,14 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
     stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl },
+    turn: {
+      endOfTurnMs: e.VOICE_END_OF_TURN_MS,
+      bargeIn: {
+        chrome: e.BARGE_IN_CHROME ?? DEFAULTS.bargeInChrome,
+        safari: e.BARGE_IN_SAFARI ?? DEFAULTS.bargeInSafari,
+        other: e.BARGE_IN_OTHER ?? DEFAULTS.bargeInOther,
+      },
+    },
     secrets: {
       gcpProject: e.GOOGLE_CLOUD_PROJECT,
       anthropicSecretName: e.ANTHROPIC_SECRET_NAME ?? DEFAULTS.anthropicSecretName,

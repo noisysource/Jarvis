@@ -6,7 +6,7 @@ import { makeJsonLogger } from "../src/log.js";
 import { makePrecheck } from "../src/precheck.js";
 import { ok } from "../src/result.js";
 import { localHosts, MAX_BODY_BYTES, makeServer } from "../src/server.js";
-import { loadWebAssets, WEB_SECURITY_HEADERS, type WebAssets } from "../src/web.js";
+import { loadVendorAssets, loadWebAssets, WEB_SECURITY_HEADERS, type WebAssets } from "../src/web.js";
 import type { Context, ContextId, Deps, MemoryHooks } from "../src/types.js";
 
 const QUESTION = "When is my daughter's birthday?";
@@ -310,6 +310,19 @@ describe("POST /ask content type (cross-site guard)", () => {
   });
 });
 
+describe("GET /voice-settings (#75)", () => {
+  it("gives the page the end of turn and barge-in mode per browser", async () => {
+    const lines: string[] = [];
+    const deps = { contexts, precheck: makePrecheck(contexts), log: makeJsonLogger({ write: (l) => lines.push(l) }) } as unknown as Deps;
+    const turn = { endOfTurnMs: 650, bargeIn: { chrome: "vad", safari: "push", other: "strict" } } as const;
+    const app = makeServer(deps, { allowedHosts: localHosts(8080), turn });
+    const res = await app.request("/voice-settings", { headers: { host: "127.0.0.1:8080" } });
+    expect(await res.json()).toEqual({ language: "en", ...turn });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect((await app.request("/voice-settings", { headers: { host: "evil.example" } })).status).toBe(403);
+  });
+});
+
 describe("chat page", () => {
   const webSetup = async () => {
     const web = await loadWebAssets();
@@ -354,6 +367,30 @@ describe("chat page", () => {
     const html = dev.ok ? (dev.value["/voices"]?.body ?? "") : "";
     expect(html).not.toMatch(/https?:\/\//);
     expect(html).not.toMatch(/<script>(?!<\/script>)/);
+  });
+
+  it("hosts voice detection itself (#75): the ONNX runtime's WebAssembly and the Silero model, no CDN", async () => {
+    const vendor = await loadVendorAssets();
+    if (!vendor.ok) throw new Error(vendor.error);
+    const web = await loadWebAssets();
+    if (!web.ok) throw new Error(web.error);
+    const { app } = setup({ web: { ...web.value, ...vendor.value }, allowedHosts: localHosts(8080) });
+    const wasm = await get(app, "/vendor/ort/ort-wasm-simd-threaded.wasm");
+    expect(wasm.status).toBe(200);
+    expect(wasm.headers.get("content-type")).toBe("application/wasm");
+    expect(wasm.headers.get("cache-control")).toBe("private, max-age=3600");
+    const bytes = new Uint8Array(await wasm.arrayBuffer());
+    expect([...bytes.subarray(0, 4)]).toEqual([0, 0x61, 0x73, 0x6d]); // "\0asm"
+    const model = await get(app, "/vendor/silero_vad_v5.onnx");
+    expect((await model.arrayBuffer()).byteLength).toBeGreaterThan(1_000_000);
+    expect((await get(app, "/vendor/ort/ort.wasm.min.mjs")).headers.get("content-type")).toContain("text/javascript");
+    // The page may compile WebAssembly, but still not eval() JavaScript or load anything from elsewhere.
+    const csp = WEB_SECURITY_HEADERS["Content-Security-Policy"] ?? "";
+    expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval';");
+    expect(csp).not.toMatch(/'unsafe-eval'|'unsafe-inline'|https?:/);
+    for (const [path, asset] of Object.entries(web.value)) {
+      if (path.endsWith(".js")) expect(String(asset.body), path).not.toMatch(/from\s+["']https?:|import\(["']https?:/);
+    }
   });
 
   it("fails clearly when a page file is missing", async () => {

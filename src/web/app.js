@@ -24,8 +24,10 @@ import {
 } from "./chat.js";
 import { playSpeech } from "./audio.js";
 import { makeSpeaker } from "./speaker.js";
-import { chooseVoice, parseSse, phaseLabel } from "./turn-lib.js";
-import { canRecord, recordUtterance } from "./mic.js";
+import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, TURN } from "./turn-lib.js";
+import { canRecord, openMic } from "./mic.js";
+import { encodeWav, makeFrameStore } from "./mic-lib.js";
+import { loadVad } from "./vad.js";
 
 /** @param {string} id @returns {HTMLElement} */
 const byId = (id) => {
@@ -167,14 +169,16 @@ const renderControls = () => {
   sendButton.disabled = state.busy;
   // Context buttons can't be used while a request is in flight.
   for (const b of state.pending?.buttons ?? []) b.disabled = state.busy;
-  micButton.setAttribute("aria-pressed", String(state.listening));
-  micButton.textContent = state.listening ? "■ Stop" : "🎤 Speak";
-  micButton.classList.toggle("listening", state.listening);
+  const pushToInterrupt = session?.bargeIn === "push" && (state.phase === "speaking" || state.phase === "thinking");
+  micButton.setAttribute("aria-pressed", String(session !== null));
+  micButton.textContent = session ? (pushToInterrupt ? "✋ Interrupt" : "■ Stop") : "🎤 Speak";
+  micButton.title = session ? (pushToInterrupt ? "Interrupt Jarvis and speak (Space)" : "End the spoken conversation (Escape)") : "";
+  micButton.classList.toggle("listening", session !== null);
   phaseBanner.dataset.phase = state.phase;
   phaseBanner.hidden = state.phase === "idle";
-  phaseText.textContent = phaseLabel(state.phase, state.language);
-  micButton.disabled = !listenAvailable() || (state.transcribing && !state.listening);
-  micButton.title = !micSupported ? "This browser can't record the microphone" : listenAvailable() ? "" : "Listening is English-only for now";
+  phaseText.textContent = phaseLabel(state.phase, state.language, session?.bargeIn ?? null);
+  micButton.disabled = !listenAvailable() && session === null;
+  if (!listenAvailable()) micButton.title = !micSupported ? "This browser can't record the microphone" : "Listening is English-only for now";
   micNote.hidden = listenAvailable();
   micNote.textContent = micSupported
     ? "Listening works in English only for now (Whisper on this computer). Type in Portuguese."
@@ -366,6 +370,18 @@ const retirePending = () => {
 let answering;
 
 /**
+ * Tells the server how a streamed answer's playback ended (#72), so it can
+ * decide the memory wrap-up: what Jarvis actually said, if he was cut off.
+ * @param {string} turnId @param {boolean} interrupted @param {string} spoken
+ */
+const reportPlayback = (turnId, interrupted, spoken) =>
+  fetch("/ask/spoken", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ turnId, interrupted, spoken: spoken.slice(0, 4000) }),
+  }).catch(() => undefined);
+
+/**
  * Sends one question and speaks the reply as it streams in. Only one request
  * at a time, so replies can't arrive out of order.
  * @param {string} question
@@ -378,7 +394,7 @@ const ask = async (question, context) => {
   state.busy = true;
   setPhase("thinking");
   renderControls();
-  if (!context) addMessage("user", text);
+  const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
   const voiceReady = refreshVoice();
 
@@ -400,6 +416,13 @@ const ask = async (question, context) => {
   /** How the reply was actually spoken: the history, the report, then listening again. */
   /** @param {import("./speaker.js").PlaybackResult} result */
   const onPlayback = (result) => {
+    // You carried on talking before he answered: this question is replaced by the whole one.
+    if (controller.signal.reason === "continue") {
+      userItem?.remove();
+      item?.remove();
+      if (turnId !== "") void reportPlayback(turnId, true, "");
+      return;
+    }
     const remember = view ? view.remember : true; // cut off mid-answer: it was an answer
     if (remember) {
       const said = result.interrupted ? result.spoken || "—" : (view?.text ?? result.spoken);
@@ -407,16 +430,11 @@ const ask = async (question, context) => {
     }
     if (result.interrupted) item?.classList.add("interrupted");
     // The server holds a streamed answer's wrap-up until it hears how playback went (#72).
-    if (turnId !== "" && (!view || view.kind === "answer")) {
-      void fetch("/ask/spoken", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ turnId, interrupted: result.interrupted, spoken: result.spoken.slice(0, 4000) }),
-      }).catch(() => undefined);
-    }
+    if (turnId !== "" && (!view || view.kind === "answer")) void reportPlayback(turnId, result.interrupted, result.spoken);
     if (!result.interrupted) {
       if (state.phase === "speaking") setPhase("idle");
       if (reopen) reopenMicSoon();
+      else if (session) endVoice("done");
     }
   };
   /** @param {string} sentence */
@@ -541,7 +559,7 @@ const pick = (contextId) => {
  * offered contexts picks it (matched here, no model call); anything else is a
  * new question. In conversation mode a spoken stop phrase ends the
  * conversation instead of being sent.
- * @param {string} raw @param {{ spoken?: boolean }} [how]
+ * @param {string} raw @param {{ spoken?: boolean, keepVoice?: boolean }} [how] keepVoice false: the last words of a conversation (Stop)
  */
 const submit = (raw, how = {}) => {
   const text = raw.trim();
@@ -553,8 +571,8 @@ const submit = (raw, how = {}) => {
   }
   // Talking starts (or continues) a spoken conversation; typing ends it, and
   // closes the mic if it was open. Words sent by tapping Stop end it too.
-  if (!how.spoken && state.listening) endVoice("reset");
-  state.voiceSession = how.spoken === true && !listen$.stopped;
+  if (!how.spoken && session) endVoice("reset");
+  state.voiceSession = how.spoken === true && how.keepVoice !== false && session !== null;
   if (state.busy) {
     // Keep the text so nothing is lost; it can be sent once the answer arrives.
     input.value = text;
@@ -586,31 +604,53 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-// ---- speech in (#74) ----
+// ---- speech in: the turn manager (#74, #75) ----
 //
-// Whisper on this machine: the page records one utterance, sends it as a
-// 16 kHz WAV to POST /transcribe, and sends the text it gets back like typed
-// text (so /ask's local EC precheck runs on it first). The browser's own
-// speech recognition, which sends audio to Google or Apple, isn't used. If
-// Whisper isn't running, the page says so; there's no fallback.
+// Pressing 🎤 opens one spoken conversation: the mic (echo cancellation,
+// noise suppression and auto gain on) stays open, every 32 ms frame goes
+// through Silero VAD (run in this page from files this server hosts), and a
+// turn detector decides when you've finished (a tunable silence, 500 ms by
+// default). Your utterance is sent as a 16 kHz WAV to Whisper on this
+// machine (/transcribe), its text to /ask like typed text (so the local EC
+// precheck runs first), and the answer is spoken sentence by sentence.
+//
+// Barge-in: while Jarvis speaks the mic stays open; talking over him stops
+// the audio at once, cancels the answer and what's still being fetched, and
+// what you're saying becomes the next question. History keeps only what he
+// actually said. How it works is set per browser (GET /voice-settings):
+// "vad", "strict" (it takes clearer speech, for weaker echo cancellation) or
+// "push" (the mic is ignored while he talks; tap ✋ Interrupt or press Space).
+//
+// The browser's own speech recognition (audio to Google or Apple) isn't
+// used, and there's no fallback to it.
 
 const micSupported = canRecord();
 /** Local listening is English-only for now (#74); Portuguese is typed. */
 const listenAvailable = () => micSupported && state.language === "en";
 
-/** @type {AudioContext | undefined} */
-let micCtx;
-/** The utterance being recorded. @type {{ stop: () => void, controller: AbortController } | undefined} */
-let recording;
-/**
- * The current listening window: whether speech was heard, whether it was
- * opened automatically, and whether the user or a stop condition closed it on purpose.
- */
-const listen$ = { heard: false, auto: false, stopped: false };
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let reopenTimer;
+/** About a minute of recent mic audio, in 32 ms frames: enough for the longest utterance. */
+const KEPT_FRAMES = Math.ceil(60_000 / TURN.frameMs);
+/** You carried on talking within this long of your turn ending: it's the same question. */
+const CONTINUE_WITHIN_MS = 4000;
 
-/** The browser wouldn't reopen the mic by itself: fall back to the button, with a note. */
+/**
+ * The open spoken conversation, if any.
+ * @type {{
+ *   mic: { close: () => void },
+ *   detector: ReturnType<typeof makeTurnDetector>,
+ *   store: ReturnType<typeof makeFrameStore>,
+ *   bargeIn: import("./turn-lib.js").BargeInMode,
+ *   oneShot: boolean,
+ *   ignoreUntil: number,
+ *   heard: boolean,
+ *   lastTurn: { from: number, endedAt: number } | null,
+ * } | null}
+ */
+let session = null;
+/** The utterance being transcribed, so it can be cancelled. @type {AbortController | undefined} */
+let transcribing;
+
+/** The browser wouldn't open the mic by itself: fall back to the button, with a note. */
 const blockAuto = () => {
   state.autoBlocked = true;
   state.voiceSession = false;
@@ -619,20 +659,27 @@ const blockAuto = () => {
 };
 
 /**
- * Ends the spoken conversation: closes the mic and doesn't reopen it.
- * @param {"silence" | "phrase" | "user" | "reset"} reason
+ * Ends the spoken conversation: closes the mic.
+ * @param {"silence" | "phrase" | "user" | "reset" | "done"} reason
  */
 const endVoice = (reason) => {
-  clearTimeout(reopenTimer);
+  const open = session;
+  session = null;
   state.voiceSession = false;
-  listen$.stopped = true;
-  if (recording) {
-    // Tapping Stop mid-sentence still sends what was heard; otherwise just close.
-    if (reason === "user" && listen$.heard) recording.stop();
-    else recording.controller.abort();
-  }
   state.listening = false;
-  if (state.phase === "listening") state.phase = "idle";
+  if (open) {
+    // Tapping Stop mid-sentence still sends what was heard.
+    if (reason === "user" && open.heard && !state.busy && !state.transcribing) {
+      const { from, to } = open.detector.span();
+      void transcribeAndSend(open.store.slice(from, to), { final: true });
+    }
+    open.mic.close();
+  }
+  if (reason === "user" || reason === "reset") {
+    stopSpeaking();
+    answering?.abort();
+  }
+  if (state.phase === "listening" || (state.phase === "speaking" && !isSpeaking())) state.phase = "idle";
   setStatus(
     reason === "silence"
       ? "Stopped listening after a quiet spell. Tap 🎤 Speak to talk again."
@@ -656,11 +703,32 @@ const sttStatus = async () => {
   }
 };
 
+/** How this browser interrupts, from GET /voice-settings. */
+const voiceSettings = async () => {
+  /** @type {{ endOfTurnMs: number, bargeIn: import("./turn-lib.js").BargeInMode }} */
+  const fallback = { endOfTurnMs: TURN.endSilenceMs, bargeIn: "vad" };
+  try {
+    const res = await fetch("/voice-settings");
+    if (!res.ok) return fallback;
+    const body = await res.json();
+    const family = browserFamily(navigator.userAgent);
+    const mode = body?.bargeIn?.[family === "firefox" ? "other" : family] ?? body?.bargeIn?.other;
+    return {
+      endOfTurnMs: Number.isInteger(body?.endOfTurnMs) ? body.endOfTurnMs : fallback.endOfTurnMs,
+      bargeIn: mode === "strict" || mode === "push" ? mode : "vad",
+    };
+  } catch {
+    return fallback;
+  }
+};
+
 /**
- * Sends a recorded utterance to Whisper, then sends its text as a spoken question.
- * @param {Uint8Array} wav
+ * Sends an utterance to Whisper, then its text as a spoken question.
+ * @param {Float32Array} samples 16 kHz @param {{ final?: boolean }} [how] final: the conversation ended with it (Stop)
  */
-const transcribeAndSend = async (wav) => {
+const transcribeAndSend = async (samples, how = {}) => {
+  const controller = new AbortController();
+  transcribing = controller;
   state.transcribing = true;
   setPhase("thinking");
   renderControls();
@@ -670,131 +738,184 @@ const transcribeAndSend = async (wav) => {
     const res = await fetch(`/transcribe?language=${state.language}`, {
       method: "POST",
       headers: { "content-type": "audio/wav" },
-      body: /** @type {Uint8Array<ArrayBuffer>} */ (wav),
+      body: /** @type {Uint8Array<ArrayBuffer>} */ (encodeWav(samples)),
+      signal: controller.signal,
     });
     const body = await res.json().catch(() => null);
     if (res.ok && typeof body?.text === "string") text = body.text;
     else problem = typeof body?.message === "string" ? body.message : `Listening failed (status ${res.status}).`;
   } catch {
-    problem = "I can't reach Jarvis. Is the server running?";
+    problem = controller.signal.aborted ? "" : "I can't reach Jarvis. Is the server running?";
   }
+  if (transcribing === controller) transcribing = undefined;
   state.transcribing = false;
-  if (state.phase === "thinking") state.phase = "idle";
-  setStatus("");
+  if (controller.signal.aborted) return; // you carried on talking: it's being sent again, whole
+  if (state.phase === "thinking") state.phase = session ? "listening" : "idle";
   renderControls();
   if (problem !== "") {
-    state.voiceSession = false;
+    endVoice("reset");
     setStatus(problem);
     return;
   }
   if (text === "") {
-    // A cough, or words Whisper couldn't make out: in conversation mode, listen again.
-    if (state.conversation && !listen$.stopped) void startListening(listen$.auto);
+    // A cough, or words Whisper couldn't make out: keep listening.
+    if (session) session.detector.listen();
     else setStatus("I didn't catch that.");
     return;
   }
   input.value = text;
-  submit(text, { spoken: true });
+  submit(text, { spoken: true, keepVoice: how.final !== true });
 };
 
 /**
- * Opens the mic for one utterance.
- * @param {boolean} auto opened by conversation mode rather than a tap
+ * You spoke over Jarvis (or tapped Interrupt): stop him at once and listen.
+ * If he hadn't started answering yet, you're carrying on with the same
+ * question: it's cancelled and sent again, whole, when you finish.
  */
-const startListening = async (auto) => {
-  if (!listenAvailable() || state.busy || state.listening || state.transcribing) return;
-  // Never listen while Jarvis is talking.
-  if (auto && isSpeaking()) {
-    reopenMicSoon();
-    return;
+const interrupt = () => {
+  const open = session;
+  if (!open) return;
+  const last = open.lastTurn;
+  const stillThinking = !isSpeaking() && (state.busy || state.transcribing);
+  if (stillThinking && last && performance.now() - last.endedAt < CONTINUE_WITHIN_MS) {
+    transcribing?.abort();
+    answering?.abort("continue");
+    open.detector.continueFrom(last.from);
+  } else {
+    stopSpeaking(); // the playback report and history are settled right here
+    answering?.abort();
+    synth?.cancel();
   }
-  const ready = await sttStatus();
-  if (!ready.ok) {
-    state.voiceSession = false;
-    setStatus(ready.problem);
-    renderControls();
-    return;
-  }
-  // Something else happened while asking (a typed question, another tap).
-  if (state.busy || state.listening || state.transcribing) return;
-
-  listen$.heard = false;
-  listen$.auto = auto;
-  listen$.stopped = false;
-  micCtx = audio();
-  const controller = new AbortController();
-  const rec = recordUtterance({
-    ctx: micCtx,
-    signal: controller.signal,
-    noSpeechMs: CONVERSATION.silenceMs,
-    onSpeech: () => {
-      listen$.heard = true;
-    },
-  });
-  recording = { stop: rec.stop, controller };
-  state.listening = true;
-  setStatus("");
-  setPhase("listening");
+  open.heard = true;
+  open.lastTurn = null;
+  state.phase = "listening";
   renderControls();
-
-  /** @type {{ wav: Uint8Array | null, reason: string }} */
-  let result;
-  try {
-    result = await rec.done;
-  } catch (e) {
-    recording = undefined;
-    state.listening = false;
-    if (state.phase === "listening") state.phase = "idle";
-    const name = e instanceof Error ? e.name : "";
-    const blocked = name === "NotAllowedError" || name === "SecurityError";
-    if (blocked && auto) {
-      blockAuto();
-      return;
-    }
-    setStatus(blocked ? "Microphone access was blocked. Allow it in the browser to speak to Jarvis." : "Couldn't start the microphone.");
-    renderControls();
-    return;
-  }
-  recording = undefined;
-  state.listening = false;
-  if (state.phase === "listening") state.phase = "idle";
-  renderControls();
-  if (result.reason === "cancelled") return;
-  if (!result.wav) {
-    if (listen$.stopped) return;
-    if (state.conversation) endVoice("silence");
-    else setStatus("I didn't hear anything.");
-    return;
-  }
-  await transcribeAndSend(result.wav);
 };
 
-/** After Jarvis finishes speaking: wait a moment, then listen again. */
+/** @param {number} p Silero's probability for the newest frame */
+const onProbability = (p) => {
+  const open = session;
+  if (!open || performance.now() < open.ignoreUntil) return;
+  const talking = isSpeaking() || state.busy || state.transcribing;
+  const event = open.detector.feed(p, talking);
+  if (event === "start") {
+    open.heard = true;
+  } else if (event === "barge-in") {
+    interrupt();
+  } else if (event === "end" || event === "max") {
+    const { from, to } = open.detector.span();
+    open.lastTurn = { from, endedAt: performance.now() };
+    open.heard = false;
+    void transcribeAndSend(open.store.slice(from, to));
+  } else if (event === "no-speech") {
+    endVoice(state.conversation ? "silence" : "done");
+    if (!state.conversation) setStatus("I didn't hear anything.");
+  }
+};
+
+/** Opens the mic and starts a spoken conversation. */
+const startVoice = async () => {
+  if (!listenAvailable() || session) return;
+  const ctx = audio(); // on the tap, so the browser lets it start
+  setStatus("");
+  const [ready, settings, vad] = await Promise.all([
+    sttStatus(),
+    voiceSettings(),
+    loadVad().catch((e) => /** @type {Error} */ (e)),
+  ]);
+  if (!ready.ok) {
+    setStatus(ready.problem);
+    return;
+  }
+  if (vad instanceof Error) {
+    setStatus(`Voice detection couldn't start (${vad.message}).`);
+    return;
+  }
+  if (session) return; // pressed twice
+  const detector = makeTurnDetector({ endSilenceMs: settings.endOfTurnMs, bargeIn: settings.bargeIn, noSpeechMs: CONVERSATION.silenceMs });
+  const store = makeFrameStore(KEPT_FRAMES);
+  /** @type {{ close: () => void }} */
+  let mic;
+  try {
+    mic = await openMic({
+      ctx,
+      onFrame: (frame) => {
+        store.push(frame);
+        vad.probability(frame).then(onProbability, () => undefined);
+      },
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    const blocked = name === "NotAllowedError" || name === "SecurityError";
+    setStatus(blocked ? "Microphone access was blocked. Allow it in the browser to speak to Jarvis." : "Couldn't start the microphone.");
+    if (blocked) blockAuto();
+    return;
+  }
+  vad.reset();
+  session = {
+    mic,
+    detector,
+    store,
+    bargeIn: settings.bargeIn,
+    oneShot: !state.conversation,
+    ignoreUntil: 0,
+    heard: false,
+    lastTurn: null,
+  };
+  state.voiceSession = true;
+  state.autoBlocked = false;
+  state.listening = true;
+  state.phase = isSpeaking() ? "speaking" : "listening";
+  renderControls();
+};
+
+/** After Jarvis has answered: listen for the next turn, or close the mic after a one-off question. */
 const reopenMicSoon = () => {
-  clearTimeout(reopenTimer);
-  reopenTimer = setTimeout(() => {
-    if (!state.voiceSession || !state.conversation || state.autoBlocked || state.busy || state.listening) return;
-    void startListening(true);
-  }, CONVERSATION.reopenDelayMs);
+  const open = session;
+  if (!open) return;
+  if (open.oneShot || !state.conversation) {
+    endVoice("done");
+    return;
+  }
+  // A moment's pause, so the tail of his voice isn't taken for yours.
+  open.ignoreUntil = performance.now() + CONVERSATION.reopenDelayMs;
+  open.detector.listen();
+  open.heard = false;
+  state.phase = "listening";
+  renderControls();
 };
 
 micButton.addEventListener("click", () => {
-  if (state.listening) {
+  if (session && session.bargeIn === "push" && (isSpeaking() || state.busy)) {
+    session.detector.interrupt();
+    interrupt();
+    return;
+  }
+  if (session) {
     endVoice("user");
     return;
   }
   stopSpeaking();
-  clearTimeout(reopenTimer);
-  // Made on a tap, so the browser lets it start.
-  micCtx = audio();
-  void startListening(false);
+  void startVoice();
+});
+
+// Push-to-interrupt from the keyboard: Space (outside the text box); Escape stops.
+document.addEventListener("keydown", (event) => {
+  if (!session || event.target === input) return;
+  if (event.key === "Escape") {
+    endVoice("user");
+  } else if (event.key === " " && session.bargeIn === "push" && (isSpeaking() || state.busy)) {
+    event.preventDefault();
+    session.detector.interrupt();
+    interrupt();
+  }
 });
 
 conversationButton.addEventListener("click", () => {
   state.conversation = !state.conversation;
   save("jarvis.conversation", String(state.conversation));
   state.autoBlocked = false; // flipping the toggle retries the automatic mic
-  if (!state.conversation) clearTimeout(reopenTimer);
+  if (session) session.oneShot = !state.conversation;
   renderControls();
 });
 

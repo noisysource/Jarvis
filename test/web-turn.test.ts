@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeSpeaker, type PlaybackResult } from "../src/web/speaker.js";
-import { chooseVoice, parseSse, spokenText } from "../src/web/turn-lib.js";
+import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, spokenText, TURN } from "../src/web/turn-lib.js";
 
 describe("parseSse (#82)", () => {
   it("reads complete events and keeps the unfinished rest, across chunk splits", () => {
@@ -164,5 +164,106 @@ describe("makeSpeaker (#82)", () => {
     r.speaker().say("Hello there.");
     r.speaker().stop();
     expect(r.result()).toEqual({ interrupted: true, spoken: "", sentences: 1, fellBack: false });
+  });
+});
+
+describe("phaseLabel (#75)", () => {
+  it("says what's happening, and how to interrupt while speaking", () => {
+    expect(phaseLabel("thinking", "en")).toBe("Thinking…");
+    expect(phaseLabel("speaking", "en")).toBe("Speaking…");
+    expect(phaseLabel("speaking", "en", "vad")).toBe("Speaking… just talk to interrupt");
+    expect(phaseLabel("speaking", "en", "push")).toBe("Speaking… tap ✋ Interrupt or press Space");
+    expect(phaseLabel("listening", "pt", "vad")).toBe("A ouvir… diz “é tudo” para parar");
+    expect(phaseLabel("idle", "en")).toBe("");
+  });
+});
+
+describe("browserFamily (#75)", () => {
+  it("tells Safari from Chrome (whose user agent also says Safari)", () => {
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+    expect(browserFamily(`${mac} Version/18.1 Safari/605.1.15`)).toBe("safari");
+    expect(browserFamily(`${mac} Chrome/131.0.0.0 Safari/537.36`)).toBe("chrome");
+    expect(browserFamily(`${mac} Chrome/131.0.0.0 Safari/537.36 Edg/131.0`)).toBe("chrome");
+    expect(browserFamily("Mozilla/5.0 (Macintosh; rv:133.0) Gecko/20100101 Firefox/133.0")).toBe("firefox");
+    expect(browserFamily("curl/8")).toBe("other");
+  });
+});
+
+describe("makeTurnDetector (#75)", () => {
+  const frames = (p: number, ms: number) => Array.from({ length: Math.round(ms / TURN.frameMs) }, () => p);
+  const feed = (d: ReturnType<typeof makeTurnDetector>, ps: number[], talking = false) => ps.map((p) => d.feed(p, talking));
+
+  it("starts on speech and ends the turn after the configured silence (500 ms by default)", () => {
+    const d = makeTurnDetector();
+    const events = feed(d, [...frames(0.05, 320), ...frames(0.9, 960), ...frames(0.1, 600)]);
+    expect(events.indexOf("start")).toBe(10 + Math.ceil(TURN.minSpeechMs / TURN.frameMs) - 1);
+    const end = events.indexOf("end");
+    expect(end).toBe(10 + 30 + Math.ceil(500 / TURN.frameMs) - 1); // 16 quiet frames = 512 ms
+    expect(events.slice(end + 1).every((e) => e === "quiet")).toBe(true);
+    // From ~320 ms before speech to ~200 ms into the pause, as frame numbers [from, to).
+    expect(d.span()).toEqual({ from: 1, to: 10 + 30 + 16 - (16 - 6) + 1 });
+  });
+
+  it("is tunable, and isn't ended by a short pause between words", () => {
+    const d = makeTurnDetector({ endSilenceMs: 800 });
+    const events = feed(d, [...frames(0.9, 320), ...frames(0.1, 600), ...frames(0.9, 320), ...frames(0.1, 800)]);
+    expect(events.filter((e) => e === "start")).toHaveLength(1);
+    expect(events.filter((e) => e === "end")).toHaveLength(1);
+    expect(events.indexOf("end")).toBeGreaterThan(30);
+  });
+
+  it("ignores a click, and gives up when nothing is said", () => {
+    const d = makeTurnDetector({ noSpeechMs: 2000 });
+    const events = feed(d, [...frames(0.1, 320), ...frames(0.95, 64), ...frames(0.1, 2000)]);
+    expect(events).not.toContain("start");
+    expect(events.at(-1)).toBe("quiet");
+    expect(events).toContain("no-speech");
+  });
+
+  it("stops an utterance that runs too long", () => {
+    const d = makeTurnDetector();
+    const events = feed(d, frames(0.9, TURN.maxMs + 500));
+    expect(events).toContain("max");
+  });
+
+  it("while Jarvis talks, interrupts only on enough speech, then listens to it", () => {
+    const vad = makeTurnDetector({ bargeIn: "vad" });
+    expect(feed(vad, [...frames(0.9, 128), 0.1], true)).not.toContain("barge-in"); // a cough
+    const barge = feed(vad, frames(0.9, 224), true);
+    expect(barge.at(-1)).toBe("barge-in"); // 7 frames = 224 ms
+    expect(vad.heard()).toBe(true);
+    // The interruption is the start of the next utterance.
+    const after = feed(vad, [...frames(0.9, 320), ...frames(0.1, 520)]);
+    expect(after.at(-1)).toBe("end");
+    expect(vad.span().from).toBeLessThan(5);
+
+    const strict = makeTurnDetector({ bargeIn: "strict" });
+    expect(feed(strict, frames(0.7, 2000), true)).not.toContain("barge-in"); // echo-ish: not sure enough
+    expect(feed(strict, [...frames(0.95, 320), 0.1], true)).not.toContain("barge-in"); // too short
+    expect(feed(strict, frames(0.95, 480), true).at(-1)).toBe("barge-in"); // 15 frames = 480 ms
+
+    const push = makeTurnDetector({ bargeIn: "push" });
+    expect(feed(push, frames(0.99, 3000), true)).not.toContain("barge-in");
+    push.interrupt();
+    expect(feed(push, [...frames(0.9, 320), ...frames(0.1, 520)]).at(-1)).toBe("end");
+  });
+
+  it("joins speech after the end of a turn to that turn, when asked", () => {
+    const d = makeTurnDetector();
+    feed(d, [...frames(0.1, 320), ...frames(0.9, 320), ...frames(0.1, 520)]);
+    const first = d.span();
+    // Still thinking: you carry on talking, and it's one utterance.
+    expect(feed(d, frames(0.9, 224), true).at(-1)).toBe("barge-in");
+    d.continueFrom(first.from + 10);
+    feed(d, [...frames(0.9, 320), ...frames(0.1, 520)]);
+    expect(d.span().from).toBe(first.from);
+  });
+
+  it("listens afresh after a turn", () => {
+    const d = makeTurnDetector();
+    feed(d, [...frames(0.9, 320), ...frames(0.1, 520)]);
+    expect(feed(d, frames(0.9, 320))).not.toContain("start"); // ended: waits for listen()
+    d.listen();
+    expect(feed(d, frames(0.9, 320))).toContain("start");
   });
 });

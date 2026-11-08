@@ -22,7 +22,7 @@ import { registerMemoryRoutes } from "./memory-routes.js";
 import type { MemoryStore } from "./memory-store.js";
 import { makeSentenceSplitter } from "./sentences.js";
 import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
-import type { TtsConfig } from "./config.js";
+import type { TtsConfig, TurnConfig } from "./config.js";
 import { registerSttRoutes } from "./stt-routes.js";
 import type { SttProvider } from "./stt/types.js";
 import { registerTtsRoutes } from "./tts-routes.js";
@@ -73,6 +73,8 @@ export const makeServer = (
     readonly tts?: { readonly providers: TtsProviders; readonly config: TtsConfig };
     /** Jarvis's ears (#74): GET /stt and POST /transcribe. Unset = no listening routes. */
     readonly stt?: SttProvider;
+    /** How the page runs a spoken turn (#75): GET /voice-settings. */
+    readonly turn?: TurnConfig;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -119,6 +121,7 @@ export const makeServer = (
     app.get(path, (c) => {
       for (const [name, value] of Object.entries(WEB_SECURITY_HEADERS)) c.header(name, value);
       c.header("Content-Type", asset.contentType);
+      if (asset.cacheControl) c.header("Cache-Control", asset.cacheControl);
       return c.body(asset.body);
     });
   }
@@ -221,6 +224,13 @@ export const makeServer = (
 
   if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
   if (options.stt) registerSttRoutes(app, { provider: options.stt, language: "en", log: deps.log });
+  const turnConfig = options.turn;
+  if (turnConfig) {
+    app.get("/voice-settings", (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({ language: "en", ...turnConfig });
+    });
+  }
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });
 
   app.notFound((c) => c.json(errorBody("Not found."), 404));

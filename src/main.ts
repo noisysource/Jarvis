@@ -14,7 +14,7 @@ import { makeTurnRegistry } from "./turns.js";
 import { DEFAULT_RUN_DIR, makeIsStarting } from "./service-starting.js";
 import { makeSttProvider } from "./stt/registry.js";
 import { makeTtsProviders } from "./tts/registry.js";
-import { loadWebAssets } from "./web.js";
+import { loadVendorAssets, loadWebAssets } from "./web.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -56,6 +56,9 @@ if (!deps.ok) refuse(deps.error);
 // The /voices audition page is dev-only (#73).
 const web = await loadWebAssets(undefined, undefined, { dev: cfg.env !== "production" });
 if (!web.ok) refuse(web.error);
+// Voice detection for the page (#75), hosted here rather than on a CDN.
+const vendor = await loadVendorAssets();
+if (!vendor.ok) refuse(vendor.error);
 // Spoken answers waiting for their playback report (#72); settled on shutdown (#78).
 const turns = makeTurnRegistry({ log });
 
@@ -70,8 +73,9 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   turns,
   tts,
   stt,
+  turn: cfg.turn,
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
-  web: web.ok ? web.value : refuse("unreachable"),
+  web: web.ok && vendor.ok ? { ...web.value, ...vendor.value } : refuse("unreachable"),
   memories: memoryStore,
 });
 

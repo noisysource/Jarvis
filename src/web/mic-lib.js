@@ -1,30 +1,9 @@
 // @ts-check
-// Pure helpers for listening (#74): no DOM, so they're unit-tested. The
-// page records the mic, turns it into a 16 kHz mono WAV here, and finds the
-// end of what you said with a simple level-based endpointer (Silero VAD
-// replaces it in #75).
+// Pure helpers for listening (#74, #75): no DOM, so they're unit-tested.
+// The mic's audio is resampled to 16 kHz, cut into Silero's 512-sample
+// frames, kept for a minute, and turned into a WAV for Whisper.
 
 export const STT_SAMPLE_RATE = 16000;
-
-/**
- * Resamples to 16 kHz by averaging each output sample's span of input
- * samples (a box filter, enough to keep speech clean for Whisper).
- * @param {Float32Array} input @param {number} inputRate @returns {Float32Array}
- */
-export const downsample = (input, inputRate) => {
-  if (inputRate === STT_SAMPLE_RATE) return input.slice();
-  if (inputRate < STT_SAMPLE_RATE) throw new Error(`can't resample up from ${inputRate} Hz`);
-  const ratio = inputRate / STT_SAMPLE_RATE;
-  const out = new Float32Array(Math.floor(input.length / ratio));
-  for (let i = 0; i < out.length; i += 1) {
-    const from = Math.floor(i * ratio);
-    const to = Math.min(input.length, Math.floor((i + 1) * ratio));
-    let sum = 0;
-    for (let j = from; j < to; j += 1) sum += input[j] ?? 0;
-    out[i] = to > from ? sum / (to - from) : 0;
-  }
-  return out;
-};
 
 /**
  * A 16-bit PCM mono WAV file.
@@ -57,111 +36,92 @@ export const encodeWav = (samples, sampleRate = STT_SAMPLE_RATE) => {
   return bytes;
 };
 
-/** @param {Float32Array} frame @returns {number} root mean square level, 0..1 */
-export const rms = (frame) => {
-  let sum = 0;
-  for (const s of frame) sum += s * s;
-  return frame.length === 0 ? 0 : Math.sqrt(sum / frame.length);
-};
-
 /**
- * speechStartMs: this long above the threshold counts as speech starting.
- * endSilenceMs: this long quiet after speech ends the utterance.
- * noSpeechMs: no speech at all for this long gives up.
- * maxMs: an utterance never runs longer (the server takes about a minute).
- * minThreshold / noiseFactor: speech is louder than max(minThreshold, noise floor × noiseFactor).
- * preRollMs: kept before the start of speech, so the first word isn't clipped.
+ * A resampler to 16 kHz that keeps its place across chunks, so no samples
+ * are lost or doubled at chunk boundaries (a box filter: each output sample averages its span of input samples).
+ * @param {number} inputRate
  */
-export const ENDPOINT = {
-  speechStartMs: 150,
-  endSilenceMs: 900,
-  noSpeechMs: 8000,
-  maxMs: 55000,
-  minThreshold: 0.012,
-  noiseFactor: 3,
-  preRollMs: 300,
-};
-
-/**
- * "waiting": no speech yet; "speech": it just started; "speaking": still
- * going; "end": a pause after speech; "max": too long, ended; "no-speech":
- * nothing heard, gave up.
- * @typedef {"waiting" | "speech" | "speaking" | "end" | "max" | "no-speech"} EndpointEvent
- */
-
-/**
- * Finds where speech starts and ends from the level of each short frame.
- * The noise floor is learnt from the frames before speech starts.
- * @param {Partial<typeof ENDPOINT>} [options]
- */
-export const makeEndpointer = (options = {}) => {
-  const o = { ...ENDPOINT, ...options };
-  let elapsed = 0;
-  let floor = -1;
-  let above = 0;
-  let quiet = 0;
-  let speaking = false;
-  /** When speech started, in ms from the start (including the run-up above the threshold). */
-  let speechAt = -1;
-  /** Once ended, every later frame gets the same answer. @type {EndpointEvent | undefined} */
-  let ended;
-  /** @param {EndpointEvent} event */
-  const end = (event) => (ended = event);
-  return {
-    /**
-     * @param {number} level the frame's RMS @param {number} frameMs its length
-     * @returns {EndpointEvent}
-     */
-    feed: (level, frameMs) => {
-      if (ended) return ended;
-      elapsed += frameMs;
-      const threshold = Math.max(o.minThreshold, (floor < 0 ? level : floor) * o.noiseFactor);
-      if (!speaking) {
-        if (level > threshold) {
-          above += frameMs;
-          if (above >= o.speechStartMs) {
-            speaking = true;
-            speechAt = elapsed - above;
-            return "speech";
-          }
-        } else {
-          above = 0;
-          floor = floor < 0 ? level : floor * 0.95 + level * 0.05;
-        }
-        if (elapsed >= o.noSpeechMs) return end("no-speech");
-        return "waiting";
-      }
-      // A little below the threshold still counts as talking (hysteresis).
-      quiet = level < threshold * 0.7 ? quiet + frameMs : 0;
-      if (quiet >= o.endSilenceMs) return end("end");
-      if (elapsed - speechAt >= o.maxMs) return end("max");
-      return "speaking";
-    },
-    /** Where to cut the recording, in ms from its start: from just before speech to just after it. */
-    span: () => ({
-      fromMs: speechAt < 0 ? 0 : Math.max(0, speechAt - o.preRollMs),
-      toMs: speaking ? Math.max(0, elapsed - Math.max(0, quiet - 200)) : elapsed,
-    }),
-    heard: () => speaking,
+export const makeResampler = (inputRate) => {
+  if (inputRate < STT_SAMPLE_RATE) throw new Error(`can't resample up from ${inputRate} Hz`);
+  const ratio = inputRate / STT_SAMPLE_RATE;
+  /** Input samples not yet used, carried to the next chunk. */
+  let carry = new Float32Array(0);
+  /** Where the next output sample starts, in input samples from the start of carry. */
+  let at = 0;
+  /** @param {Float32Array} chunk @returns {Float32Array} */
+  return (chunk) => {
+    const input = new Float32Array(carry.length + chunk.length);
+    input.set(carry, 0);
+    input.set(chunk, carry.length);
+    /** @type {number[]} */
+    const out = [];
+    while (at + ratio <= input.length) {
+      const from = Math.floor(at);
+      const to = Math.floor(at + ratio);
+      let sum = 0;
+      for (let j = from; j < to; j += 1) sum += input[j] ?? 0;
+      out.push(to > from ? sum / (to - from) : 0);
+      at += ratio;
+    }
+    const keep = Math.floor(at);
+    carry = input.slice(keep);
+    at -= keep;
+    return Float32Array.from(out);
   };
 };
 
 /**
- * Joins the recorded chunks between two times into one buffer.
- * @param {Float32Array[]} chunks @param {number} sampleRate @param {{ fromMs: number, toMs: number }} span
+ * Cuts a stream of samples into fixed-size frames.
+ * @param {number} size
  */
-export const sliceRecording = (chunks, sampleRate, span) => {
-  const total = chunks.reduce((n, c) => n + c.length, 0);
-  const from = Math.min(total, Math.floor((span.fromMs / 1000) * sampleRate));
-  const to = Math.min(total, Math.max(from, Math.ceil((span.toMs / 1000) * sampleRate)));
-  const out = new Float32Array(to - from);
-  let at = 0;
-  for (const c of chunks) {
-    const start = Math.max(from - at, 0);
-    const end = Math.min(to - at, c.length);
-    if (end > start) out.set(c.subarray(start, end), at + start - from);
-    at += c.length;
-    if (at >= to) break;
-  }
-  return out;
+export const makeFramer = (size) => {
+  let pending = new Float32Array(0);
+  /** @param {Float32Array} samples @returns {Float32Array[]} */
+  return (samples) => {
+    const all = new Float32Array(pending.length + samples.length);
+    all.set(pending, 0);
+    all.set(samples, pending.length);
+    /** @type {Float32Array[]} */
+    const frames = [];
+    let i = 0;
+    for (; i + size <= all.length; i += size) frames.push(all.slice(i, i + size));
+    pending = all.slice(i);
+    return frames;
+  };
+};
+
+/**
+ * The last `max` frames, numbered from 1 (the turn detector's numbering).
+ * Older frames are dropped, so the audio kept in the page stays bounded.
+ * @param {number} max
+ */
+export const makeFrameStore = (max) => {
+  /** @type {Float32Array[]} */
+  const frames = [];
+  let first = 1;
+  return {
+    /** @param {Float32Array} frame */
+    push: (frame) => {
+      frames.push(frame);
+      if (frames.length > max) {
+        frames.shift();
+        first += 1;
+      }
+    },
+    /** Frames [from, to) joined; what's no longer kept is left out. @param {number} from @param {number} to */
+    slice: (from, to) => {
+      const parts = frames.slice(Math.max(0, from - first), Math.max(0, to - first));
+      const out = new Float32Array(parts.reduce((n, f) => n + f.length, 0));
+      let o = 0;
+      for (const f of parts) {
+        out.set(f, o);
+        o += f.length;
+      }
+      return out;
+    },
+    clear: () => {
+      first += frames.length;
+      frames.length = 0;
+    },
+  };
 };
