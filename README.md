@@ -214,10 +214,22 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    - The page only ever sends "local" or "claude": which model each one is
      comes from config, never from the page.
    - The classifier, memory and the EC rules are unchanged.
-   - `SIMPLE_VOICE=on` makes spoken turns as simple as possible: the local EC
-     precheck (EC still goes to Kiro), then straight to the answer with your
-     profile. No classifier, no memories and nothing remembered:
-     Whisper → model → Kokoro.
+   - **`BARE_MODE=on`: a bare conversation.** Every question, typed or
+     spoken, goes straight to the brain you picked with only the
+     conversation so far and a short persona: "You are Jarvis, (your
+     name)'s personal assistant", in the conversational style (1–3
+     sentences, react first, a question back when it helps, no lists).
+     - Only the local EC precheck runs first (EC still goes to Kiro, with
+       no model).
+     - No classifier, contexts, profile or memory, read or written. With
+       Local selected, nothing at all goes to Claude.
+     - Put your name in your `.env` as `JARVIS_USER_NAME`; it's gitignored,
+       so it's never committed.
+     - Profile, memory and contexts come back one at a time, each behind its
+       own switch.
+   - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
+     who and the conversational style on both brains, in bare mode with a
+     made-up name: "Can you code?", "Who are you?" and a few more.
 
    **Why did he stop?** Each spoken answer's end is logged as one
    `playback` line. It gives the `reason` (`finished`, `barge-in`,

@@ -45,7 +45,6 @@ const AskRequestSchema = z
     remember: z.boolean({ error: "remember must be true or false" }).optional(),
     // Only the two configured brains (#88); never a model name.
     brain: z.enum(["claude", "local"], { error: 'brain must be "claude" or "local"' }).optional(),
-    spoken: z.boolean({ error: "spoken must be true or false" }).optional(),
   })
   .strict();
 
@@ -59,7 +58,7 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
         .join("; "),
     );
   }
-  const { question, context, history, conversationId, remember, brain, spoken } = parsed.data;
+  const { question, context, history, conversationId, remember, brain } = parsed.data;
   return ok({
     question,
     ...(context !== undefined ? { context: context as ContextId } : {}),
@@ -67,6 +66,5 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
     ...(conversationId !== undefined ? { conversationId } : {}),
     ...(remember !== undefined ? { remember } : {}),
     ...(brain !== undefined ? { brain } : {}),
-    ...(spoken !== undefined ? { spoken } : {}),
   });
 };

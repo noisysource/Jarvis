@@ -71,8 +71,6 @@ export type AskRequest = {
   readonly remember?: boolean;
   /** Which brain answers (#88); Claude when not given. */
   readonly brain?: Brain;
-  /** A spoken turn: with SIMPLE_VOICE=on it skips the classifier and memory (#88). */
-  readonly spoken?: boolean;
 };
 
 export type Classification =
@@ -239,6 +237,10 @@ export type Deps = {
   readonly afterReply: AfterReply;
   readonly now: () => Date;
   readonly log: Logger;
-  /** SIMPLE_VOICE=on (#88): spoken turns get only the local precheck, then the answer model with the profile. */
-  readonly simpleVoice?: boolean;
+  /**
+   * BARE_MODE=on (#88): every turn gets only the local EC precheck, then this
+   * answerer (history and a short persona). No classifier, contexts, profile
+   * or memory.
+   */
+  readonly bare?: Deps["answer"];
 };

@@ -431,9 +431,8 @@ const playbackDetails = (result, streamComplete) => ({
  * at a time, so replies can't arrive out of order.
  * @param {string} question
  * @param {string} [context] set when the user picked a context after a clarify
- * @param {{ spoken?: boolean }} [how]
  */
-const ask = async (question, context, how = {}) => {
+const ask = async (question, context) => {
   const text = question.trim();
   if (text === "" || state.busy) return;
   stopSpeaking("new-question");
@@ -507,7 +506,6 @@ const ask = async (question, context, how = {}) => {
           conversationId: state.conversationId,
           remember: state.remember,
           brain: state.brain,
-          spoken: how.spoken === true,
         }),
       ),
       signal: controller.signal,
@@ -645,7 +643,7 @@ const submit = (raw, how = {}) => {
     return;
   }
   retirePending();
-  void ask(text, undefined, { spoken: how.spoken === true });
+  void ask(text);
 };
 
 form.addEventListener("submit", (event) => {

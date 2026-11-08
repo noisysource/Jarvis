@@ -307,31 +307,52 @@ describe("brains (#88)", () => {
   });
 });
 
-describe("simple voice mode (#88)", () => {
-  it("answers a spoken question with the profile only: no classifier, no memories, no wrap-up", async () => {
-    const { deps, calls, answerInputs, flush } = makeDeps();
-    const response = await handleAsk({ ...deps, simpleVoice: true }, { question: QUESTION, spoken: true, brain: "local" });
-    await flush();
-    expect(response).toMatchObject({ type: "answer", context: "personal" });
-    expect(calls).toEqual(["answer"]);
-    expect(answerInputs[0]?.memories).toEqual([]);
+describe("bare mode (#88)", () => {
+  const bareDeps = () => {
+    const made = makeDeps();
+    const bareInputs: AnswerInput[] = [];
+    const deps: Deps = {
+      ...made.deps,
+      bare: async (input) => {
+        made.calls.push("bare answer");
+        bareInputs.push(input);
+        return ok({ kind: "answer", text: "Hi! What can I do for you?" });
+      },
+    };
+    return { ...made, deps, bareInputs };
+  };
+
+  it("sends every question, typed or spoken, straight to the brain with only the history", async () => {
+    for (const question of ["what are we doing?", "When is my daughter's birthday?", "Which invoices are unpaid?"]) {
+      const { deps, calls, bareInputs, flush } = bareDeps();
+      const history = [
+        { role: "user" as const, text: "Hello" },
+        { role: "assistant" as const, text: "Hi!" },
+      ];
+      const response = await handleAsk(deps, { question, history, brain: "local" });
+      await flush();
+      expect(response, question).toEqual({ type: "answer", context: "personal", answer: "Hi! What can I do for you?", brain: "local" });
+      // No classifier (so no context picker), no other context, no memory reads or writes.
+      expect(calls, question).toEqual(["bare answer"]);
+      expect(bareInputs[0]?.history).toEqual(history);
+      expect(bareInputs[0]?.memories).toEqual([]);
+      expect(bareInputs[0]?.brain).toBe("local");
+    }
   });
 
-  it("still runs the local precheck first: EC goes to Kiro with no model", async () => {
-    const { deps, calls } = makeDeps();
-    expect(await handleAsk({ ...deps, simpleVoice: true }, { question: "Summarise the UTP standup", spoken: true })).toMatchObject({
-      type: "handoff",
-      context: "ec-hrt",
-    });
+  it("still runs the local EC precheck first: handed to Kiro, with no model at all", async () => {
+    const { deps, calls } = bareDeps();
+    const response = await handleAsk(deps, { question: "Summarise the UTP standup", brain: "local" });
+    expect(response).toMatchObject({ type: "handoff", context: "ec-hrt" });
     expect(calls).toEqual([]);
   });
 
-  it("leaves typed questions, and spoken ones without the setting, on the full flow", async () => {
-    const typed = makeDeps();
-    await handleAsk({ ...typed.deps, simpleVoice: true }, { question: QUESTION });
-    expect(typed.calls).toContain("classify");
+  it("passes an Ollama-down message through, and is off by default", async () => {
+    const { deps } = bareDeps();
+    const down: Deps = { ...deps, bare: async () => err({ code: "llm_failed", message: "The local brain (Ollama) isn't running." }) };
+    expect(await handleAsk(down, { question: "Hi" })).toEqual({ type: "error", message: "The local brain (Ollama) isn't running." });
     const off = makeDeps();
-    await handleAsk(off.deps, { question: QUESTION, spoken: true });
+    await handleAsk(off.deps, { question: QUESTION });
     expect(off.calls).toContain("classify");
   });
 });

@@ -3,6 +3,7 @@
 // if contexts.md, the profile or the API key is missing or invalid.
 
 import { readFile } from "node:fs/promises";
+import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
 import { makeClassifier } from "./classify.js";
@@ -121,7 +122,14 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     precheck: makePrecheck(contexts.value),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log }),
     answer: makeBrainRouter({ claude: makeAnswerRouter(answerers), local: makeAnswerRouter(localAnswerers) }),
-    simpleVoice: config.simpleVoice,
+    ...(config.bareMode
+      ? {
+          bare: makeBrainRouter({
+            claude: makeBareAnswerer({ llm: answerLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
+            local: makeBareAnswerer({ llm: localLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
+          }),
+        }
+      : {}),
     isAnswered: (id) => Object.hasOwn(answerers, id),
     afterReply: background.run,
     memory: makeSafeMemoryHooks(

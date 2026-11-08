@@ -294,9 +294,31 @@ send `keep_alive: 30m`, and the model is loaded at startup. The chat page's
 The request schema accepts only those two, and config says which model
 each is. The answer carries `brain`, which the page shows; `GET /brains`
 gives the labels. An Ollama error carries a message the page can show
-("isn't running", "isn't installed"). **`SIMPLE_VOICE=on`:** a spoken turn
-gets the local precheck (handoff and routing as usual), then the personal
-answer with the profile. No classifier, memory load, wrap-up or held turn.
+("isn't running", "isn't installed").
+
+**Bare conversation mode (#88, `BARE_MODE=on`).** Every turn, typed or
+spoken, gets the local EC precheck (a handoff goes to Kiro with no model
+call), then the selected brain with **only** the history and a short
+persona (`src/answer/bare.ts`):
+- "You are Jarvis, (`JARVIS_USER_NAME`)'s personal assistant": "I" is
+  Jarvis, the person is "you". The name comes from the gitignored `.env`,
+  never the code.
+- It knows nothing of their life beyond the conversation.
+- The conversational style: 1–3 sentences unless asked, react first, a
+  question back when it helps, no lists or headings, plain words.
+
+No classifier, no contexts, no profile, no memory reads or writes, no held
+turn. With Local selected, nothing reaches Claude. `npm run eval:identity`
+checks who is who and the style on both brains.
+
+**Adding things back, one at a time, each behind its own switch:**
+1. the profile
+2. memory
+3. contexts and the classifier
+
+The personal answerer's prompt already has the who-is-who rules (the name
+from the profile's `Name:` line) and the conversational style, ready for
+the profile step.
 **Playback reasons (#89):** the page's `/ask/spoken` report carries why
 playback ended, and the server logs it as a `playback` line (numbers and
 fixed words). In a stand-in test, a barge-in after the text has fully

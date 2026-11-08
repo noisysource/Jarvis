@@ -45,7 +45,7 @@ describe("parseAskRequest", () => {
 
   it("accepts a bare question", () => {
     expect(parseAskRequest({ question: "Hi" })).toEqual({ ok: true, value: { question: "Hi" } });
-    expect(parseAskRequest({ question: "Hi", brain: "local", spoken: true })).toEqual({ ok: true, value: { question: "Hi", brain: "local", spoken: true } });
+    expect(parseAskRequest({ question: "Hi", brain: "local" })).toEqual({ ok: true, value: { question: "Hi", brain: "local" } });
     // Only the two configured brains: never a model name from the page.
     for (const brain of ["ollama:llama3.1:8b", "claude-opus-5-5", "gpt", ""]) expect(parseAskRequest({ question: "Hi", brain }).ok, brain).toBe(false);
   });

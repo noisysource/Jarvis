@@ -70,8 +70,10 @@ export type Config = {
   readonly turn: TurnConfig;
   /** Ollama on this machine (#88). */
   readonly ollamaUrl: URL;
-  /** SIMPLE_VOICE=on (#88): spoken turns get only the local precheck, then the answer model with the profile. */
-  readonly simpleVoice: boolean;
+  /** BARE_MODE=on (#88): every turn gets only the local EC precheck, then the brain with the history and a short persona. */
+  readonly bareMode: boolean;
+  /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
+  readonly userName: string | undefined;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
   readonly neverRememberPath: string;
   readonly secrets: {
@@ -171,7 +173,15 @@ const EnvSchema = z.object({
       .regex(/^[A-Za-z0-9._:/-]{1,100}$/, { error: "must be an Ollama model name, e.g. llama3.1:8b" })
       .optional(),
   ),
-  SIMPLE_VOICE: z.preprocess(
+  JARVIS_USER_NAME: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z
+      .string()
+      .trim()
+      .regex(/^[\p{L}][\p{L}' .-]{0,39}$/u, { error: "must be a name (letters, up to 40 characters)" })
+      .optional(),
+  ),
+  BARE_MODE: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
@@ -263,7 +273,8 @@ export const loadConfig = (env: Env): Result<Config, string> => {
         : { kind: "memory" },
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     ollamaUrl,
-    simpleVoice: e.SIMPLE_VOICE === "on",
+    bareMode: e.BARE_MODE === "on",
+    userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
     stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl, hintsPath: e.WHISPER_HINTS_PATH ?? DEFAULTS.whisperHintsPath },
     turn: {

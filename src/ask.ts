@@ -73,23 +73,55 @@ export type AskMeta = {
 };
 
 /**
- * Simple voice mode (#88, SIMPLE_VOICE=on): a spoken turn gets the local
- * precheck (EC/HRT still goes to Kiro, invoicing still routes), then the
- * personal answer straight away. No classifier, no memories, no wrap-up.
+ * Bare conversation mode (#88, BARE_MODE=on): the local EC precheck (EC/HRT
+ * still goes to Kiro, with no model), then the selected brain with only the
+ * history and a short persona. No classifier, no contexts, no profile, no
+ * memory reads or writes: with the Local brain, nothing reaches Claude.
  */
-const simpleResolve = (deps: Deps, request: AskRequest): { kind: "context"; context: Context } | { kind: "unclear" } => {
+const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest, meta: AskMeta): Promise<AskResponse> => {
   const local = deps.precheck(request.question);
-  if (local.kind === "handoff") return { kind: "context", context: local.context };
-  const id = local.kind === "route" ? local.contextId : "personal";
-  const context = deps.contexts.find((c) => c.id === id);
-  return context ? { kind: "context", context } : { kind: "unclear" };
+  if (local.kind === "handoff") {
+    deps.log.info("ask", { context: local.context.id, outcome: "handoff", bare: true });
+    return {
+      type: "handoff",
+      context: local.context.id,
+      to: local.context.handling.kind === "handoff" ? local.context.handling.to : "",
+      message: handoffMessage(local.context),
+    };
+  }
+  const personal = deps.contexts.find((c) => c.id === "personal");
+  if (!personal) return { type: "error", message: GENERIC_ERROR };
+  const answer = await bare({
+    context: personal,
+    question: request.question,
+    history: request.history ?? [],
+    memories: [],
+    now: deps.now(),
+    ...(meta.onText ? { onText: meta.onText } : {}),
+    ...(meta.signal ? { signal: meta.signal } : {}),
+    ...(request.brain ? { brain: request.brain } : {}),
+  });
+  if (!answer.ok) {
+    deps.log.info("ask", { outcome: answer.error.code === "cancelled" ? "cancelled" : "error", bare: true, brain: request.brain ?? "claude" });
+    return { type: "error", message: answer.error.message };
+  }
+  if (answer.value.kind !== "answer") return { type: "unavailable", context: personal.id, message: answer.value.message };
+  deps.log.info("ask", { outcome: "answer", bare: true, brain: request.brain ?? "claude" });
+  return { type: "answer", context: personal.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
 };
 
 export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
   const history = request.history ?? [];
-  const simple = deps.simpleVoice === true && request.spoken === true;
+  if (deps.bare) {
+    try {
+      return await handleBare(deps, deps.bare, request, meta);
+    } catch (e) {
+      deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });
+      return { type: "error", message: GENERIC_ERROR };
+    }
+  }
   try {
-    const resolved = simple ? simpleResolve(deps, request) : await resolveContext(deps, request, history);
+    const resolved = await resolveContext(deps, request, history);
 
     if (resolved.kind === "unknown") {
       deps.log.warn("ask", { outcome: "unknown_context" });
@@ -112,7 +144,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
     const memories =
-      deps.isAnswered(context.id) && !simple ? await deps.memory.loadMemories({ question: request.question, contextId: context.id }) : [];
+      deps.isAnswered(context.id) ? await deps.memory.loadMemories({ question: request.question, contextId: context.id }) : [];
     const answer = await deps.answer({
       context,
       question: request.question,
@@ -141,7 +173,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       // Interrupted while streaming: whether anything is learned depends on
       // what was spoken, which only the page knows (turns.ts).
       deps.log.info("ask", { context: context.id, outcome: "cancelled" });
-      if (request.remember !== false && !simple) {
+      if (request.remember !== false) {
         meta.deferWrapUp?.({ question: request.question, completed: false, answer: "", run: runWrapUp });
       }
       return { type: "error", message: answer.error.message };
@@ -162,7 +194,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     // an answer. "Don't remember this": the answer used memories, but
     // nothing is learned. A streamed answer's wrap-up waits for the page to
     // say how playback ended.
-    if (request.remember !== false && !simple) {
+    if (request.remember !== false) {
       if (meta.deferWrapUp) {
         meta.deferWrapUp({ question: request.question, completed: true, answer: answer.value.text, run: runWrapUp });
       } else {
@@ -170,7 +202,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       }
     }
 
-    deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude", ...(simple ? { simple: true } : {}) });
+    deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude" });
     return { type: "answer", context: context.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.

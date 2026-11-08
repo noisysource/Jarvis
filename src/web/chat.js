@@ -44,17 +44,16 @@ export const appendTurn = (history, role, text) =>
 /**
  * The POST /ask body. `conversationId` groups this conversation's history
  * memory on the server; `remember: false` is "don't remember this".
- * `brain`: "claude" or "local" (#88); `spoken`: a spoken turn (for SIMPLE_VOICE).
- * @param {{ question: string, context?: string, history: readonly Turn[], conversationId?: string, remember?: boolean, brain?: "claude" | "local", spoken?: boolean }} input
+ * `brain`: "claude" or "local" (#88).
+ * @param {{ question: string, context?: string, history: readonly Turn[], conversationId?: string, remember?: boolean, brain?: "claude" | "local" }} input
  */
-export const buildAskBody = ({ question, context, history, conversationId, remember, brain, spoken }) => ({
+export const buildAskBody = ({ question, context, history, conversationId, remember, brain }) => ({
   question: question.trim().slice(0, LIMITS.questionChars),
   ...(context ? { context } : {}),
   ...(history.length > 0 ? { history: [...history] } : {}),
   ...(conversationId ? { conversationId } : {}),
   ...(remember === false ? { remember: false } : {}),
   ...(brain ? { brain } : {}),
-  ...(spoken ? { spoken: true } : {}),
 });
 
 /** The page's brain choice (#88): Local unless Claude was picked. @param {string | null} saved */
