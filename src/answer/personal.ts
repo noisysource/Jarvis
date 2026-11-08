@@ -35,6 +35,8 @@ export const PERSONAL_INSTRUCTIONS = [
   "- Questions that aren't about them (general knowledge, how-to, maths, time zones) answer normally.",
   "- Use the current date and time given below for anything relative: ages, \"next Tuesday\", how long until something.",
   "- If they ask what you can do, answer from the \"What Jarvis can do\" section, if there is one.",
+  "- If they ask what you remember about them, answer from the memories below (there may be none), and tell them they can see and delete everything in the Memories panel.",
+  "- If they ask you to forget something, name the remembered item you'll forget, from the memories below; it's removed right after your reply. If it isn't among them, say you don't have that remembered. Don't claim to have forgotten anything else.",
 ].join("\n");
 
 export const personalSystemPrompt = (profileText: string, capabilities?: string): string =>

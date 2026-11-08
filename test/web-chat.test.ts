@@ -4,7 +4,10 @@ import {
   LANGUAGES,
   LIMITS,
   appendTurn,
+  badgeText,
   buildAskBody,
+  formatMemoryDay,
+  groupMemories,
   isStopPhrase,
   keepListening,
   matchContextOption,
@@ -14,6 +17,7 @@ import {
   pickVoice,
   replyView,
   shouldReopenMic,
+  unseenIds,
   viewFromHttp,
   voiceKey,
   voiceQuality,
@@ -290,5 +294,47 @@ describe("conversation mode", () => {
     expect(keepListening({ elapsedMs: 8000, heard: false, stopped: false })).toBe(false);
     expect(keepListening({ elapsedMs: 3000, heard: true, stopped: false })).toBe(false);
     expect(keepListening({ elapsedMs: 3000, heard: false, stopped: true })).toBe(false);
+  });
+});
+
+describe("memories panel helpers", () => {
+  const m = (id: string, contextId: string, kind: "fact" | "playbook" | "history", seen = true) => ({
+    id,
+    contextId,
+    contextName: contextId === "kidclub" ? "KidClub" : "Personal",
+    kind,
+    text: `text ${id}`,
+    origin: "auto" as const,
+    createdAt: "2026-11-07T10:00:00.000Z",
+    updatedAt: "2026-11-07T10:00:00.000Z",
+    seen,
+  });
+  const contexts = [
+    { id: "personal", name: "Personal" },
+    { id: "kidclub", name: "KidClub" },
+    { id: "noisysource", name: "Noisy Source" },
+  ];
+
+  it("groups by context in the given order, then by kind, leaving out empty groups", () => {
+    const groups = groupMemories([m("1", "kidclub", "playbook"), m("2", "personal", "history"), m("3", "personal", "fact")], contexts);
+    expect(groups.map((g) => [g.contextName, g.count, g.kinds.map((k) => [k.label, k.items.map((i) => i.id)])])).toEqual([
+      ["Personal", 2, [["Facts", ["3"]], ["Recent conversations", ["2"]]]],
+      ["KidClub", 1, [["How you like things done", ["1"]]]],
+    ]);
+    expect(groupMemories([], contexts)).toEqual([]);
+  });
+
+  it("still shows memories of a context it wasn't told about", () => {
+    expect(groupMemories([m("1", "oldctx", "fact")], contexts).map((g) => g.contextId)).toEqual(["oldctx"]);
+  });
+
+  it("finds unseen ids and makes the badge text", () => {
+    expect(unseenIds([m("1", "personal", "fact", false), m("2", "personal", "fact")])).toEqual(["1"]);
+    expect([0, 1, 9, 10, 42].map(badgeText)).toEqual(["", "1", "9", "9+", "9+"]);
+  });
+
+  it("formats the day in the page's language", () => {
+    expect(formatMemoryDay("2026-11-07T10:00:00.000Z", "en")).toBe("7 Nov 2026");
+    expect(formatMemoryDay("2026-11-07T10:00:00.000Z", "pt")).toBe("7 de novembro de 2026");
   });
 });

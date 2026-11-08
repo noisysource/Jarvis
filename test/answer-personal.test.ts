@@ -185,6 +185,14 @@ describe("makePersonalAnswerer", () => {
     expect(system).toContain("never invent plans or appointments");
   });
 
+  it("answers 'what do you remember?' and 'forget that…' from the loaded memories, pointing at the Memories panel", () => {
+    const system = personalSystemPrompt(PROFILE);
+    expect(system).toContain("If they ask what you remember about them, answer from the memories below");
+    expect(system).toContain("see and delete everything in the Memories panel");
+    expect(system).toContain("name the remembered item you'll forget");
+    expect(system).toContain("If it isn't among them, say you don't have that remembered");
+  });
+
   it("gives Jarvis a warm, conversational personality with natural spoken length", () => {
     const system = personalSystemPrompt(PROFILE);
     expect(system).toContain("Warm, natural and a little conversational");

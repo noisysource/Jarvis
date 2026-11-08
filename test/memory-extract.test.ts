@@ -49,6 +49,8 @@ const s = (text: string, extra: Partial<Suggestion> = {}): Suggestion => ({
   confidence: 0.9,
   explicit: false,
   sensitive: "none",
+  oneOff: false,
+  eventDate: "",
   ...extra,
 });
 
@@ -91,14 +93,24 @@ describe("filterSuggestions", () => {
       s("Inês swims on Thursdays", { action: "update", targetId: "m1" }),
       s("x", { action: "update", targetId: "m9" }),
       s("", { action: "delete", targetId: "m1" }),
-      s("", { action: "delete", targetId: "h1" }), // history isn't a related memory to change
+      s("", { action: "delete", targetId: "h1" }),
     ];
-    expect(filter({ question: "She swims on Thursdays now", related, suggestions }).decisions).toEqual([
-      { action: "update", id: "m1", text: "Inês swims on Thursdays" },
-    ]);
+    const updating = filter({ question: "She swims on Thursdays now", related, suggestions });
+    expect(updating.decisions).toEqual([{ action: "update", id: "m1", text: "Inês swims on Thursdays" }]);
+    expect(updating.dropped).toEqual({ unknown_target: 1, delete_not_asked: 2 });
     const forgetting = filter({ question: "esquece a natação", related, suggestions });
-    expect(forgetting.decisions).toContainEqual({ action: "delete", id: "m1" });
-    expect(forgetting.dropped.unknown_target).toBe(2);
+    // Forget can delete history lines too (#71).
+    expect(forgetting.decisions.filter((d) => d.action === "delete")).toEqual([
+      { action: "delete", id: "m1" },
+      { action: "delete", id: "h1" },
+    ]);
+    expect(forgetting.dropped.unknown_target).toBe(1);
+  });
+
+  it("never edits a history line: those change only through the history line itself", () => {
+    const r = filter({ related: [memory("h1", "Old talk", "personal", "history")], suggestions: [s("New talk", { action: "update", targetId: "h1" })] });
+    expect(r.decisions).toEqual([]);
+    expect(r.dropped).toEqual({ history_not_editable: 1 });
   });
 
   it("never keeps secrets, not even on an explicit request", () => {
@@ -231,6 +243,81 @@ describe("filterSuggestions", () => {
   });
 });
 
+describe("one-off events and forgetting (#71)", () => {
+  const SATURDAY_MORNING = new Date("2026-11-07T10:00:00Z"); // Saturday 7 November 2026, Lisbon
+  const at = (over: Partial<FilterInput> & { suggestions: Suggestion[] }) =>
+    filter({ now: SATURDAY_MORNING, timeZone: "Europe/Lisbon", ...over });
+
+  it("keeps an explicit one-off as a fact that expires the day after the event", () => {
+    const r = at({
+      question: "Remember Diniz has football tomorrow",
+      suggestions: [s("Diniz has football on Sunday 8 November", { explicit: true, oneOff: true, eventDate: "2026-11-08", kind: "playbook" })],
+    });
+    expect(r.decisions).toEqual([
+      { action: "add", kind: "fact", text: "Diniz has football on Sunday 8 November", origin: "explicit", expiresAt: new Date("2026-11-09T00:00:00Z") },
+    ]);
+  });
+
+  it("works the date out from the user's words, not the model's", () => {
+    const r = at({
+      question: "Lembra-te que tenho dentista na sexta",
+      suggestions: [s("Tem dentista na sexta-feira", { explicit: true, oneOff: true, eventDate: "2026-11-20", sensitive: "health" })],
+    });
+    expect(r.decisions).toEqual([
+      { action: "add", kind: "fact", text: "Tem dentista na sexta-feira", origin: "explicit", expiresAt: new Date("2026-11-14T00:00:00Z") },
+    ]);
+  });
+
+  it("falls back to the model's date, then to a month", () => {
+    const withModelDate = at({ question: "Remember the parents' evening", suggestions: [s("Parents' evening", { explicit: true, oneOff: true, eventDate: "2026-11-25" })] });
+    expect(withModelDate.decisions[0]).toMatchObject({ expiresAt: new Date("2026-11-26T00:00:00Z") });
+    const noDate = at({ question: "Remember the parents' evening", suggestions: [s("Parents' evening", { explicit: true, oneOff: true, eventDate: "2026-11-01" })] });
+    expect(noDate.decisions[0]).toMatchObject({ expiresAt: new Date("2026-12-08T00:00:00Z") }); // the past date is ignored: 30 days
+  });
+
+  it("never saves a one-off automatically: the month rule still applies there", () => {
+    const r = at({
+      question: "Diniz has football tomorrow",
+      suggestions: [s("Diniz has football on Sunday 8 November", { oneOff: true }), s("Diniz has football tomorrow")],
+    });
+    expect(r.decisions).toEqual([]);
+    expect(r.dropped).toEqual({ one_off_not_explicit: 2 }); // the second by its words, whatever the model said
+  });
+
+  it("drops an explicit one-off whose day is already over", () => {
+    const r = at({ question: "Remember I had football today", now: new Date("2026-11-07T10:00:00Z"), suggestions: [s("Had football", { explicit: true, oneOff: true })] });
+    expect(r.decisions).toHaveLength(1); // today isn't over yet
+    const late = at({ question: "Remember football today", suggestions: [s("Football", { explicit: true, oneOff: true })], now: new Date("2026-11-08T00:30:00Z") });
+    expect(late.decisions[0]).toMatchObject({ expiresAt: new Date("2026-11-09T00:00:00Z") }); // "today" is now the 8th
+  });
+
+  it("keeps no history line for an exchange that only asked to forget", () => {
+    const related = [memory("h1", "Talked about Diniz's football tomorrow", "personal", "history"), memory("m1", "Diniz has football on Sunday")];
+    const r = at({
+      question: "Forget that Diniz has football tomorrow",
+      related,
+      suggestions: [s("", { action: "delete", targetId: "m1" }), s("", { action: "delete", targetId: "h1" })],
+      historyLine: "Asked to forget Diniz's football",
+    });
+    expect(r.decisions).toEqual([
+      { action: "delete", id: "m1" },
+      { action: "delete", id: "h1" },
+    ]);
+    expect(r.historyLine).toBeUndefined();
+    expect(r.dropped).toEqual({ forget_only: 1 });
+  });
+
+  it("still keeps a history line when forgetting comes with something new", () => {
+    const r = at({
+      question: "Forget the espresso, I take tea now",
+      related: [memory("m1", "Takes espresso")],
+      suggestions: [s("", { action: "delete", targetId: "m1" }), s("Takes tea")],
+      historyLine: "Switched from espresso to tea",
+    });
+    expect(r.historyLine).toBe("Switched from espresso to tea");
+  });
+});
+
 describe("readSuggestions", () => {
   it("reads valid items and drops malformed ones", () => {
     const value = {
@@ -296,6 +383,7 @@ describe("makeModelExtract", () => {
     const text = r?.messages[0] && "text" in r.messages[0] ? r.messages[0].text : "";
     expect(text).toContain("- id=m1 [fact, 7 Nov 2026] Inês goes to Escola Exemplo");
     expect(text).toContain("<previous_history_line>Talked about school</previous_history_line>");
+    expect(text).toContain("<today>Saturday, 7 November 2026, 10:00 (Europe/Lisbon, GMT+0)</today>");
     expect(text).toContain("<question>\nRemember that Inês's teacher is Ms Rita\n</question>");
     expect(text).toContain("<answer>\nGot it, I'll remember that.\n</answer>");
   });
