@@ -43,6 +43,9 @@ const AskRequestSchema = z
       .regex(/^[A-Za-z0-9-]{8,64}$/, { error: "conversationId must be 8 to 64 letters, digits or hyphens" })
       .optional(),
     remember: z.boolean({ error: "remember must be true or false" }).optional(),
+    // Only the two configured brains (#88); never a model name.
+    brain: z.enum(["claude", "local"], { error: 'brain must be "claude" or "local"' }).optional(),
+    spoken: z.boolean({ error: "spoken must be true or false" }).optional(),
   })
   .strict();
 
@@ -56,12 +59,14 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
         .join("; "),
     );
   }
-  const { question, context, history, conversationId, remember } = parsed.data;
+  const { question, context, history, conversationId, remember, brain, spoken } = parsed.data;
   return ok({
     question,
     ...(context !== undefined ? { context: context as ContextId } : {}),
     ...(history !== undefined ? { history } : {}),
     ...(conversationId !== undefined ? { conversationId } : {}),
     ...(remember !== undefined ? { remember } : {}),
+    ...(brain !== undefined ? { brain } : {}),
+    ...(spoken !== undefined ? { spoken } : {}),
   });
 };

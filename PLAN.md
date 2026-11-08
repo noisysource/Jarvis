@@ -113,6 +113,7 @@ question, and after a clarify response it re-sends the question with
 | `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
 | `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
+| `src/llm/ollama.ts` | Ollama provider: `/api/chat` streamed (NDJSON), `keep_alive` 30 m, startup warm-up; no JSON output or tools yet | #88 |
 | `src/classify.ts` | `makeClassifier`: local precheck, then the classifier model → context id or `unclear` | #11 |
 | `src/answer/personal.ts` | Answer model: instructions + profile (cached), then Lisbon date/time and memories (uncached), history, no tools | #13 |
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
@@ -284,6 +285,24 @@ and no conversation content is logged.
   before Jarvis has started speaking, cancels that question and sends the
   whole utterance instead. The phase line (Listening / Thinking / Speaking,
   text plus colour, read out) says how to interrupt.
+
+**Local brain (#88, first slice of #55).** `ollama:<model>` is a provider
+behind `LlmCall`, streaming only. `OLLAMA_URL` must be loopback (like the
+voice services), and `OLLAMA_MODEL` defaults to `llama3.1:8b`. Requests
+send `keep_alive: 30m`, and the model is loaded at startup. The chat page's
+**Claude / Local** switch (default Local) sends `brain: "claude" | "local"`.
+The request schema accepts only those two, and config says which model
+each is. The answer carries `brain`, which the page shows; `GET /brains`
+gives the labels. An Ollama error carries a message the page can show
+("isn't running", "isn't installed"). **`SIMPLE_VOICE=on`:** a spoken turn
+gets the local precheck (handoff and routing as usual), then the personal
+answer with the profile. No classifier, memory load, wrap-up or held turn.
+**Playback reasons (#89):** the page's `/ask/spoken` report carries why
+playback ended, and the server logs it as a `playback` line (numbers and
+fixed words). In a stand-in test, a barge-in after the text has fully
+arrived reproduces the "Sure, then silence" symptom (text complete,
+`played: 0`). That's the self-interruption #85 addresses; the log on the
+Mac will confirm or rule it out.
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences

@@ -72,10 +72,24 @@ export type AskMeta = {
   readonly deferWrapUp?: (turn: DeferredWrapUp) => void;
 };
 
+/**
+ * Simple voice mode (#88, SIMPLE_VOICE=on): a spoken turn gets the local
+ * precheck (EC/HRT still goes to Kiro, invoicing still routes), then the
+ * personal answer straight away. No classifier, no memories, no wrap-up.
+ */
+const simpleResolve = (deps: Deps, request: AskRequest): { kind: "context"; context: Context } | { kind: "unclear" } => {
+  const local = deps.precheck(request.question);
+  if (local.kind === "handoff") return { kind: "context", context: local.context };
+  const id = local.kind === "route" ? local.contextId : "personal";
+  const context = deps.contexts.find((c) => c.id === id);
+  return context ? { kind: "context", context } : { kind: "unclear" };
+};
+
 export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
   const history = request.history ?? [];
+  const simple = deps.simpleVoice === true && request.spoken === true;
   try {
-    const resolved = await resolveContext(deps, request, history);
+    const resolved = simple ? simpleResolve(deps, request) : await resolveContext(deps, request, history);
 
     if (resolved.kind === "unknown") {
       deps.log.warn("ask", { outcome: "unknown_context" });
@@ -97,9 +111,8 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     }
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
-    const memories = deps.isAnswered(context.id)
-      ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
-      : [];
+    const memories =
+      deps.isAnswered(context.id) && !simple ? await deps.memory.loadMemories({ question: request.question, contextId: context.id }) : [];
     const answer = await deps.answer({
       context,
       question: request.question,
@@ -108,6 +121,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       now: deps.now(),
       ...(meta.onText ? { onText: meta.onText } : {}),
       ...(meta.signal ? { signal: meta.signal } : {}),
+      ...(request.brain ? { brain: request.brain } : {}),
     });
 
     /** The wrap-up, with the given text as the answer. Runs after the reply, in the background. */
@@ -127,7 +141,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       // Interrupted while streaming: whether anything is learned depends on
       // what was spoken, which only the page knows (turns.ts).
       deps.log.info("ask", { context: context.id, outcome: "cancelled" });
-      if (request.remember !== false) {
+      if (request.remember !== false && !simple) {
         meta.deferWrapUp?.({ question: request.question, completed: false, answer: "", run: runWrapUp });
       }
       return { type: "error", message: answer.error.message };
@@ -148,7 +162,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     // an answer. "Don't remember this": the answer used memories, but
     // nothing is learned. A streamed answer's wrap-up waits for the page to
     // say how playback ended.
-    if (request.remember !== false) {
+    if (request.remember !== false && !simple) {
       if (meta.deferWrapUp) {
         meta.deferWrapUp({ question: request.question, completed: true, answer: answer.value.text, run: runWrapUp });
       } else {
@@ -156,8 +170,8 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       }
     }
 
-    deps.log.info("ask", { context: context.id, outcome: "answer" });
-    return { type: "answer", context: context.id, answer: answer.value.text };
+    deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude", ...(simple ? { simple: true } : {}) });
+    return { type: "answer", context: context.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.
     deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });

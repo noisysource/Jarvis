@@ -99,7 +99,7 @@ const toAppError = (e: LlmError): AppError => {
     case "timeout":
       return { code: "timeout", message: "That took too long. Please try again." };
     default:
-      return { code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." };
+      return { code: "llm_failed", message: e.userMessage ?? "Sorry, something went wrong answering that. Please try again." };
   }
 };
 

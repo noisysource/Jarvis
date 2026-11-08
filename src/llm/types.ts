@@ -114,6 +114,8 @@ export type LlmError = {
   readonly message: string;
   /** Worth retrying later (the SDK has already retried transient errors). */
   readonly retryable: boolean;
+  /** Safe to show the person, when the fix is theirs (e.g. "start Ollama"). */
+  readonly userMessage?: string;
 };
 
 /**

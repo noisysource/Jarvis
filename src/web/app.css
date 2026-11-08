@@ -417,3 +417,11 @@ textarea:focus-visible {
     max-width: 95%;
   }
 }
+
+/* Which brain answered (#88). */
+.message .brain-tag {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}

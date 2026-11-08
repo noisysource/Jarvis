@@ -4,7 +4,7 @@
 
 import { err, ok, type Result } from "../result.js";
 
-export const PROVIDERS = ["anthropic"] as const;
+export const PROVIDERS = ["anthropic", "ollama"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export type ModelRef = {

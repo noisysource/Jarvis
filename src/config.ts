@@ -55,7 +55,10 @@ export type Config = {
   readonly port: number;
   readonly models: {
     readonly classifier: ModelRef;
+    /** The "Claude" brain. */
     readonly answer: ModelRef;
+    /** The "Local" brain (#88): OLLAMA_MODEL on Ollama. */
+    readonly local: ModelRef;
   };
   readonly contextsPath: string;
   readonly profileSource: ProfileSourceRef;
@@ -65,6 +68,10 @@ export type Config = {
   readonly tts: TtsConfig;
   readonly stt: SttConfig;
   readonly turn: TurnConfig;
+  /** Ollama on this machine (#88). */
+  readonly ollamaUrl: URL;
+  /** SIMPLE_VOICE=on (#88): spoken turns get only the local precheck, then the answer model with the profile. */
+  readonly simpleVoice: boolean;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
   readonly neverRememberPath: string;
   readonly secrets: {
@@ -93,6 +100,8 @@ export const DEFAULTS = {
   piperUrl: "http://127.0.0.1:5001",
   sttProvider: "whisper",
   whisperUrl: "http://127.0.0.1:8178",
+  ollamaUrl: "http://127.0.0.1:11434",
+  ollamaModel: "llama3.1:8b",
   whisperHintsPath: "data/whisper-hints.txt",
   endOfTurnMs: 500,
   // Safari's echo cancellation is weaker than Chrome's (#75): it takes clearer speech to interrupt there.
@@ -153,6 +162,19 @@ const EnvSchema = z.object({
     z.enum(["whisper"], { error: 'must be "whisper"' }).optional(),
   ),
   WHISPER_URL: optionalString,
+  OLLAMA_URL: optionalString,
+  OLLAMA_MODEL: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9._:/-]{1,100}$/, { error: "must be an Ollama model name, e.g. llama3.1:8b" })
+      .optional(),
+  ),
+  SIMPLE_VOICE: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
+  ),
   WHISPER_HINTS_PATH: optionalString,
   VOICE_END_OF_TURN_MS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -213,13 +235,14 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   const kokoroUrl = field("KOKORO_URL", parseLocalUrl(raw("KOKORO_URL") ?? DEFAULTS.kokoroUrl));
   const piperUrl = field("PIPER_URL", parseLocalUrl(raw("PIPER_URL") ?? DEFAULTS.piperUrl));
   const whisperUrl = field("WHISPER_URL", parseLocalUrl(raw("WHISPER_URL") ?? DEFAULTS.whisperUrl));
+  const ollamaUrl = field("OLLAMA_URL", parseLocalUrl(raw("OLLAMA_URL") ?? DEFAULTS.ollamaUrl));
 
   const production = raw("NODE_ENV") === "production";
   if (production && raw("GOOGLE_CLOUD_PROJECT") === undefined) {
     errors.push("GOOGLE_CLOUD_PROJECT: required in production (secrets come from Secret Manager)");
   }
 
-  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl) {
+  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl || !ollamaUrl) {
     return err(errors.join("\n"));
   }
   const e = parsed.data;
@@ -229,7 +252,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     // Locally the server has no auth, so it only listens on loopback unless told otherwise.
     host: e.HOST ?? (production ? "0.0.0.0" : "127.0.0.1"),
     port: e.PORT,
-    models: { classifier, answer },
+    models: { classifier, answer, local: { provider: "ollama", model: e.OLLAMA_MODEL ?? DEFAULTS.ollamaModel } },
     contextsPath: e.CONTEXTS_PATH ?? DEFAULTS.contextsPath,
     profileSource,
     timeZone,
@@ -239,6 +262,8 @@ export const loadConfig = (env: Env): Result<Config, string> => {
         ? { kind: "sqlite", path: e.MEMORY_DB ?? DEFAULTS.memoryDb }
         : { kind: "memory" },
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
+    ollamaUrl,
+    simpleVoice: e.SIMPLE_VOICE === "on",
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
     stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl, hintsPath: e.WHISPER_HINTS_PATH ?? DEFAULTS.whisperHintsPath },
     turn: {

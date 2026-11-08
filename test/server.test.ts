@@ -323,6 +323,20 @@ describe("GET /voice-settings (#75)", () => {
   });
 });
 
+describe("GET /brains (#88)", () => {
+  it("lists the two brains by id and label, for the page's switch", async () => {
+    const deps = { contexts, precheck: makePrecheck(contexts), log: makeJsonLogger({ write: () => undefined }) } as unknown as Deps;
+    const app = makeServer(deps, { brains: { default: "local", labels: { local: "Local · llama3.1:8b", claude: "Claude · claude-sonnet-5-5" } } });
+    expect(await (await app.request("/brains")).json()).toEqual({
+      default: "local",
+      brains: [
+        { id: "local", label: "Local · llama3.1:8b" },
+        { id: "claude", label: "Claude · claude-sonnet-5-5" },
+      ],
+    });
+  });
+});
+
 describe("chat page", () => {
   const webSetup = async () => {
     const web = await loadWebAssets();

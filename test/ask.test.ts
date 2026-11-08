@@ -297,6 +297,45 @@ describe("local precheck always runs first", () => {
   });
 });
 
+describe("brains (#88)", () => {
+  it("passes the chosen brain to the answerer and says which answered", async () => {
+    const { deps, answerInputs } = makeDeps();
+    expect(await handleAsk(deps, { question: QUESTION, brain: "local" })).toMatchObject({ type: "answer", brain: "local" });
+    expect(answerInputs[0]?.brain).toBe("local");
+    const plain = await handleAsk(deps, { question: QUESTION });
+    expect(plain).not.toHaveProperty("brain"); // older clients see no change
+  });
+});
+
+describe("simple voice mode (#88)", () => {
+  it("answers a spoken question with the profile only: no classifier, no memories, no wrap-up", async () => {
+    const { deps, calls, answerInputs, flush } = makeDeps();
+    const response = await handleAsk({ ...deps, simpleVoice: true }, { question: QUESTION, spoken: true, brain: "local" });
+    await flush();
+    expect(response).toMatchObject({ type: "answer", context: "personal" });
+    expect(calls).toEqual(["answer"]);
+    expect(answerInputs[0]?.memories).toEqual([]);
+  });
+
+  it("still runs the local precheck first: EC goes to Kiro with no model", async () => {
+    const { deps, calls } = makeDeps();
+    expect(await handleAsk({ ...deps, simpleVoice: true }, { question: "Summarise the UTP standup", spoken: true })).toMatchObject({
+      type: "handoff",
+      context: "ec-hrt",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves typed questions, and spoken ones without the setting, on the full flow", async () => {
+    const typed = makeDeps();
+    await handleAsk({ ...typed.deps, simpleVoice: true }, { question: QUESTION });
+    expect(typed.calls).toContain("classify");
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: QUESTION, spoken: true });
+    expect(off.calls).toContain("classify");
+  });
+});
+
 describe("failures", () => {
   it("rejects an unknown explicit context", async () => {
     const { deps, calls } = makeDeps();

@@ -194,6 +194,39 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      profile, and the hints are never logged.
    - English only for now; in Portuguese, type (the browser voice answers).
 
+   **Local brain (#88).** The 🧠 Local / ☁️ Claude button picks who answers,
+   and each answer says which did. Local is the default and is remembered.
+   Local runs on [Ollama](https://ollama.com) on this computer:
+
+   ```bash
+   ollama pull llama3.1:8b
+   ```
+
+   ```bash
+   ollama serve
+   ```
+
+   - `OLLAMA_MODEL` (default `llama3.1:8b`) and `OLLAMA_URL` (default
+     `http://127.0.0.1:11434`, and it must be on this machine).
+   - Jarvis loads the model when it starts and asks Ollama to keep it loaded
+     for 30 minutes, so turns don't wait for it to load. If Ollama isn't
+     running, the answer says so.
+   - The page only ever sends "local" or "claude": which model each one is
+     comes from config, never from the page.
+   - The classifier, memory and the EC rules are unchanged.
+   - `SIMPLE_VOICE=on` makes spoken turns as simple as possible: the local EC
+     precheck (EC still goes to Kiro), then straight to the answer with your
+     profile. No classifier, no memories and nothing remembered:
+     Whisper → model → Kokoro.
+
+   **Why did he stop?** Each spoken answer's end is logged as one
+   `playback` line. It gives the `reason` (`finished`, `barge-in`,
+   `new-question`, `stop`, `typed`, `muted`, `new-conversation`,
+   `answer-cancelled`), the sentences `played` of `total`, any
+   `voiceErrors`, whether the text had all arrived (`streamComplete`), and
+   for a barge-in the voice detector's reading (`bargeProb`, out of 100)
+   and `msAfterFirstAudio`. Numbers and fixed words only.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding
