@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # One-time setup of Jarvis's local voice services on a Mac with Apple
-# silicon (#73). Everything goes into .voice/ (gitignored); nothing is
-# installed system-wide except Homebrew packages (uv, espeak-ng).
+# silicon (#73, #74). Everything goes into .voice/ (gitignored); nothing is
+# installed system-wide except Homebrew packages (uv, espeak-ng, whisper-cpp).
 #
-#   npm run voice:setup      # install (safe to re-run)
-#   npm run voice:up         # start the services (127.0.0.1 only)
+#   npm run voice:setup                         # install (safe to re-run)
+#   WHISPER_MODEL=base.en npm run voice:setup   # a smaller, faster Whisper model
+#   npm run voice:up                            # start the services (127.0.0.1 only)
 #
-# Pinned versions: Kokoro-FastAPI v0.9.2, piper-tts 1.8.0.
+# Pinned versions: Kokoro-FastAPI v0.9.2, piper-tts 1.8.0. Whisper models
+# are checked against whisper.cpp's published SHA-1s.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -14,6 +16,13 @@ VOICE_DIR="$PWD/.voice"
 KOKORO_TAG="v0.9.2"
 PIPER_VERSION="1.8.0"
 PIPER_VOICES=(en_GB-alan-medium en_GB-jenny_dioco-medium en_GB-northern_english_male-medium en_US-lessac-medium)
+WHISPER_MODEL="${WHISPER_MODEL:-small.en}"
+# From whisper.cpp's models/README.md.
+case "$WHISPER_MODEL" in
+  small.en) WHISPER_SHA1="db8a495a91d927739e50b3fc1cc4c6b8f6c2d022" ;;
+  base.en) WHISPER_SHA1="137c40403d78fd54d454da0f9bd998f78703390c" ;;
+  *) echo "WHISPER_MODEL must be small.en (the default) or base.en." >&2; exit 1 ;;
+esac
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m! %s\033[0m\n' "$*" >&2; }
@@ -53,8 +62,8 @@ EOF
   exit 1
 fi
 
-say "1/3 Homebrew packages: uv (Python installer), espeak-ng (pronunciation fallback)"
-for pkg in uv espeak-ng; do
+say "1/4 Homebrew packages: uv (Python installer), espeak-ng (pronunciation fallback), whisper-cpp (listening, with Metal)"
+for pkg in uv espeak-ng whisper-cpp; do
   brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
 done
 
@@ -96,7 +105,7 @@ check_venv() {
   rm -rf "$venv"
 }
 
-say "2/3 Kokoro-FastAPI $KOKORO_TAG (uses the M1 GPU through PyTorch MPS)"
+say "2/4 Kokoro-FastAPI $KOKORO_TAG (uses the M1 GPU through PyTorch MPS)"
 if [[ ! -d "$VOICE_DIR/kokoro-fastapi" ]]; then
   git clone --quiet --depth 1 --branch "$KOKORO_TAG" https://github.com/remsky/Kokoro-FastAPI "$VOICE_DIR/kokoro-fastapi"
 fi
@@ -109,7 +118,7 @@ fi
   uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0
 )
 
-say "3/3 Piper $PIPER_VERSION and English voices"
+say "3/4 Piper $PIPER_VERSION and English voices"
 check_venv "$VOICE_DIR/piper/.venv"
 if [[ ! -d "$VOICE_DIR/piper/.venv" ]]; then
   mkdir -p "$VOICE_DIR/piper"
@@ -123,8 +132,31 @@ for voice in "${PIPER_VOICES[@]}"; do
     || warn "Couldn't download Piper voice $voice; skipping it."
 done
 
+say "4/4 Whisper model $WHISPER_MODEL (whisper.cpp)"
+if ! command -v whisper-server >/dev/null 2>&1; then
+  echo "Homebrew's whisper-cpp didn't put whisper-server on PATH. Try: brew reinstall whisper-cpp" >&2
+  exit 1
+fi
+mkdir -p "$VOICE_DIR/whisper"
+model_file="$VOICE_DIR/whisper/ggml-$WHISPER_MODEL.bin"
+sha1() { shasum -a 1 "$1" | cut -d' ' -f1; }
+if [[ -f "$model_file" && "$(sha1 "$model_file")" != "$WHISPER_SHA1" ]]; then
+  warn "$model_file doesn't match its checksum; downloading it again."
+  rm -f "$model_file"
+fi
+if [[ ! -f "$model_file" ]]; then
+  curl -fL --retry 3 --progress-bar -o "$model_file.part" \
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$WHISPER_MODEL.bin"
+  if [[ "$(sha1 "$model_file.part")" != "$WHISPER_SHA1" ]]; then
+    rm -f "$model_file.part"
+    echo "The downloaded Whisper model doesn't match its checksum; not using it." >&2
+    exit 1
+  fi
+  mv "$model_file.part" "$model_file"
+fi
+
 say "Disk used"
-du -sh "$VOICE_DIR/kokoro-fastapi" "$VOICE_DIR/piper" 2>/dev/null || true
+du -sh "$VOICE_DIR/kokoro-fastapi" "$VOICE_DIR/piper" "$VOICE_DIR/whisper" 2>/dev/null || true
 echo
 echo "Done. Start the voice services with: npm run voice:up"
 echo "Then open http://localhost:8080/voices (with npm run dev running) to pick a voice."

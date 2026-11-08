@@ -125,6 +125,10 @@ question, and after a clarify response it re-sends the question with
 | `src/tts-routes.ts` | `GET /tts` (providers and voices), `POST /speak` (streamed PCM; Host + JSON guards; no text in logs) | #73 |
 | `src/local-url.ts` | Local service URLs must be loopback, or Jarvis won't start | #73 |
 | `src/web/audio.js`, `src/web/voices.*` | PCM player for /speak; the dev-only /voices audition page | #73 |
+| `src/stt/*` | `SttProvider` (16 kHz mono WAV, language → text): whisper.cpp's server | #74 |
+| `src/stt-routes.ts` | `GET /stt` (ready?), `POST /transcribe` (audio/wav only, 2 MB, Host guard; audio never stored, transcripts never logged) | #74 |
+| `src/web/mic*.js` | Records one utterance (AudioWorklet), finds its end (level-based endpointer), encodes 16 kHz WAV | #74 |
+| `src/service-starting.ts` | "Starting" rather than "not running" while `voice:up` waits for a service | #80 |
 | `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
@@ -226,6 +230,25 @@ and no conversation content is logged.
   on 127.0.0.1 at warning log level. While it waits for a service it keeps
   `.voice/run/<service>.starting` (its PID), so `/tts` and `/voices` say
   "starting" rather than "not running" (#80).
+
+- **Ears (#74).** `SttProvider`: `transcribe({ wav, language }, signal)` →
+  text, and `status()`. One provider: **whisper.cpp's server** (Homebrew
+  `whisper-cpp`, Metal) on 127.0.0.1:8178 with **`small.en`**
+  (`WHISPER_MODEL=base.en` for speed; settled by timing in #76), started
+  without `--convert` (audio decoded in memory, no temp files) and without
+  `--print-realtime` (it doesn't print what it heard). The page records one
+  utterance through an AudioWorklet, finds where speech starts and ends with
+  a level-based endpointer (noise floor learnt before speech, 900 ms pause
+  ends it, 8 s of nothing gives up, ~55 s at most; replaced by Silero VAD in
+  #75), keeps 300 ms before speech, downsamples to 16 kHz and sends a WAV to
+  `POST /transcribe` (`audio/wav` only, so a cross-site form needs a
+  preflight this server never answers; 2 MB). The text comes back to the
+  page, which sends it to `/ask` like typed text, so the **local EC precheck
+  runs first** and an EC question reaches no model or memory. The
+  browser's Web Speech recognition (audio to Google/Apple) is no longer
+  used, with no fallback: if Whisper isn't running the page says so.
+  **English only for now**: in Portuguese the mic is disabled with a note
+  (a multilingual model is a later decision).
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences

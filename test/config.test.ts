@@ -35,6 +35,7 @@ describe("loadConfig", () => {
         kokoroUrl: new URL("http://127.0.0.1:8880"),
         piperUrl: new URL("http://127.0.0.1:5001"),
       },
+      stt: { provider: "whisper", whisperUrl: new URL("http://127.0.0.1:8178") },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
   });
@@ -55,6 +56,15 @@ describe("loadConfig", () => {
       expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);
     }
     expect(!loadConfig({ TTS_PROVIDER: "elevenlabs" }).ok).toBe(true);
+  });
+
+  it("listens through Whisper on this machine only (#74)", () => {
+    expect(loadOk({ WHISPER_URL: "http://localhost:9178" }).stt).toEqual({ provider: "whisper", whisperUrl: new URL("http://localhost:9178") });
+    for (const value of ["http://10.0.0.5:8178", "https://api.openai.com/v1/audio", "http://a:b@127.0.0.1:8178"]) {
+      const bad = loadConfig({ WHISPER_URL: value });
+      expect(!bad.ok && bad.error, value).toContain("WHISPER_URL: ");
+    }
+    expect(!loadConfig({ STT_PROVIDER: "google" }).ok).toBe(true);
   });
 
   it("chooses where memories live", () => {
