@@ -54,6 +54,8 @@ export type TurnRegistry = {
   readonly hold: (turnId: string, turn: HeldTurn) => void;
   /** Applies the page's report. False if there's no such turn (already decided, expired or unknown). */
   readonly report: (turnId: string, report: PlaybackReport) => boolean;
+  /** Shutdown (#78): settles every held turn as unreported, so no wrap-up is lost. Returns how many. */
+  readonly settleAll: () => number;
   readonly pending: () => number;
 };
 
@@ -100,6 +102,11 @@ export const makeTurnRegistry = (deps: {
       held.set(turnId, { turn, timer: setTimer(() => settle(turnId, undefined), holdMs) });
     },
     report: (turnId, report) => settle(turnId, report),
+    settleAll: () => {
+      const ids = [...held.keys()];
+      for (const id of ids) settle(id, undefined);
+      return ids.length;
+    },
     pending: () => held.size,
   };
 };

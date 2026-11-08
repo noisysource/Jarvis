@@ -29,8 +29,32 @@ describe("loadConfig", () => {
       timeZone: "Europe/Lisbon",
       memoryStore: { kind: "sqlite", path: "data/memory.sqlite" },
       neverRememberPath: "data/never-remember.txt",
+      tts: {
+        provider: "browser",
+        voice: "",
+        kokoroUrl: new URL("http://127.0.0.1:8880"),
+        piperUrl: new URL("http://127.0.0.1:5001"),
+      },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
+  });
+
+  it("chooses Jarvis's voice, with its services on this machine only", () => {
+    expect(loadOk({ TTS_PROVIDER: "kokoro", TTS_VOICE: "bm_george", KOKORO_URL: "http://localhost:9000" }).tts).toMatchObject({
+      provider: "kokoro",
+      voice: "bm_george",
+      kokoroUrl: new URL("http://localhost:9000"),
+    });
+    for (const [name, value] of [
+      ["KOKORO_URL", "http://192.168.1.20:8880"],
+      ["PIPER_URL", "https://example.com/tts"],
+      ["KOKORO_URL", "http://user:pw@127.0.0.1:8880"],
+      ["PIPER_URL", "not a url"],
+    ] as const) {
+      const bad = loadConfig({ [name]: value });
+      expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);
+    }
+    expect(!loadConfig({ TTS_PROVIDER: "elevenlabs" }).ok).toBe(true);
   });
 
   it("chooses where memories live", () => {

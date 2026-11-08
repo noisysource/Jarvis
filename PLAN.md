@@ -121,6 +121,10 @@ question, and after a clarify response it re-sends the question with
 | `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
 | `src/llm/stream.ts` | `streamOrCall` (streams if the provider can, else one chunk), `streamedFrom` for stubs | #72 |
 | `src/sentences.ts` | Streaming sentence splitter, language as a parameter | #72 |
+| `src/tts/*` | `TtsProvider` (text, language, voice → streamed 16-bit mono PCM): Kokoro (Kokoro-FastAPI), Piper, browser | #73 |
+| `src/tts-routes.ts` | `GET /tts` (providers and voices), `POST /speak` (streamed PCM; Host + JSON guards; no text in logs) | #73 |
+| `src/local-url.ts` | Local service URLs must be loopback, or Jarvis won't start | #73 |
+| `src/web/audio.js`, `src/web/voices.*` | PCM player for /speak; the dev-only /voices audition page | #73 |
 | `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
@@ -208,6 +212,18 @@ and no conversation content is logged.
   forget (not an opt-out), in which case wrap up on the question and what
   was actually spoken. No report within 2 minutes: a finished answer counts
   as heard, a cancelled one as interrupted.
+
+- **Mouth (#73).** `TtsProvider` follows the LLM pattern: `speak({ text,
+  language, voice }, signal)` → streamed 16-bit mono PCM (format and sample
+  rate in headers), and `listVoices(language)`. Providers: **Kokoro** via
+  Kokoro-FastAPI v0.9.2 (Apple GPU through PyTorch MPS; streamed raw PCM at
+  24 kHz), **Piper** 1.8.0 (its HTTP server's WAV, header read and PCM
+  passed on), and the **browser** voice (played by the page itself). Chosen
+  by `TTS_PROVIDER` / `TTS_VOICE`; the browser is the default until a voice
+  is picked. `/voices` (dev only) plays five fixed sentences in every
+  voice with time to first audio. `npm run voice:setup` installs into
+  `.voice/` with pinned versions; `npm run voice:up` starts both services
+  on 127.0.0.1 at warning log level.
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences

@@ -22,6 +22,9 @@ import { registerMemoryRoutes } from "./memory-routes.js";
 import type { MemoryStore } from "./memory-store.js";
 import { makeSentenceSplitter } from "./sentences.js";
 import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
+import type { TtsConfig } from "./config.js";
+import { registerTtsRoutes } from "./tts-routes.js";
+import type { TtsProviders } from "./tts/registry.js";
 import { parseAskRequest } from "./request.js";
 import type { Deps } from "./types.js";
 import { WEB_SECURITY_HEADERS, type WebAssets } from "./web.js";
@@ -64,6 +67,8 @@ export const makeServer = (
     /** Streamed answers waiting for their playback report (#72). */
     readonly turns?: TurnRegistry;
     readonly newTurnId?: () => string;
+    /** Jarvis's voice (#73): GET /tts and POST /speak. Unset = no voice routes. */
+    readonly tts?: { readonly providers: TtsProviders; readonly config: TtsConfig };
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -210,6 +215,7 @@ export const makeServer = (
     },
   );
 
+  if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });
 
   app.notFound((c) => c.json(errorBody("Not found."), 404));

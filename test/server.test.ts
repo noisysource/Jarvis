@@ -346,6 +346,16 @@ describe("chat page", () => {
     expect(html).not.toMatch(/<script>(?!<\/script>)/);
   });
 
+  it("serves the /voices audition page in development only (#73)", async () => {
+    const prod = await loadWebAssets();
+    const dev = await loadWebAssets(undefined, undefined, { dev: true });
+    expect(prod.ok && Object.keys(prod.value)).not.toContain("/voices");
+    expect(dev.ok && Object.keys(dev.value)).toEqual(expect.arrayContaining(["/voices", "/voices.js", "/voices-lib.js", "/voices.css", "/audio.js", "/pcm-lib.js"]));
+    const html = dev.ok ? (dev.value["/voices"]?.body ?? "") : "";
+    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).not.toMatch(/<script>(?!<\/script>)/);
+  });
+
   it("fails clearly when a page file is missing", async () => {
     const result = await loadWebAssets(async (p) => {
       if (p.endsWith("app.css")) throw new Error("ENOENT");

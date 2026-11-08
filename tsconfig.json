@@ -18,5 +18,5 @@
     "noEmit": true
   },
   "include": ["src", "test", "scripts", "*.config.ts"],
-  "exclude": ["src/web/app.js"]
+  "exclude": ["src/web/app.js", "src/web/audio.js", "src/web/voices.js"]
 }

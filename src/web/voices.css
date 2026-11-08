@@ -1,0 +1,57 @@
+.voices-page header,
+.voices-page main {
+  max-width: 72rem;
+}
+
+.voices-page header {
+  display: block;
+}
+
+#voices td:first-child {
+  white-space: nowrap;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table#voices {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+#voices th,
+#voices td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#voices td button {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+#voices .ttfa {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+#voices tr.unavailable td {
+  color: var(--muted);
+}
+
+#voices tr.chosen {
+  background: var(--user);
+}
+
+pre#choice-lines {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface);
+  user-select: all;
+}

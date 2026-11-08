@@ -85,6 +85,18 @@ describe("makeTurnRegistry", () => {
     expect(JSON.stringify(info.mock.calls)).not.toContain("Inês");
   });
 
+  it("settles every held turn as unreported on shutdown, clearing their timers", () => {
+    const { registry, ran, held, timers } = setup();
+    registry.hold("turn-0004", held("How old is Inês?")); // finished: counts as heard
+    registry.hold("turn-0005", held("Tell me about the school", false)); // cancelled: skipped
+    registry.hold("turn-0006", held("Remember Diniz has football tomorrow", false)); // cancelled, explicit: question only
+    expect(registry.settleAll()).toBe(3);
+    expect(ran).toEqual(["Full answer.", ""]);
+    expect(registry.pending()).toBe(0);
+    expect(timers.every((t) => t.cleared)).toBe(true);
+    expect(registry.settleAll()).toBe(0);
+  });
+
   it("caps how many turns it holds", () => {
     const { registry, held } = setup();
     for (let i = 0; i < 105; i += 1) registry.hold(`turn-${String(i).padStart(4, "0")}`, held("q"));

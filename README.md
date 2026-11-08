@@ -125,6 +125,38 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    say), copy `data/never-remember.example.txt` to `data/never-remember.txt`
    (gitignored) and list them, one per line.
 
+   **Jarvis's voice (optional, Mac with Apple silicon).** Jarvis can speak
+   with a local voice instead of the browser's. Nothing goes to the cloud:
+
+   ```bash
+   npm run voice:setup
+   ```
+
+   Run it in a native arm64 terminal (not Rosetta) with Homebrew at
+   `/opt/homebrew`; the script stops otherwise. It uses only uv's own
+   Python builds, never python.org's or Homebrew's, and rebuilds an
+   environment in `.voice/` that was made with another Python.
+
+   ```bash
+   npm run voice:up
+   ```
+
+   Then, with `npm run dev` running, open **http://localhost:8080/voices**:
+   every voice reads the same five sentences and shows its time to first
+   audio. "Use this voice" shows two lines to put in `.env` (`TTS_PROVIDER`,
+   `TTS_VOICE`); restart Jarvis to use it.
+
+   | Installed into `.voice/` (gitignored) | Disk, roughly | Memory while running, roughly |
+   |---|---|---|
+   | Kokoro-FastAPI v0.9.2 (Python, PyTorch with Apple GPU, the 82M-parameter model) | 1.5–2.5 GB, mostly PyTorch; the model is ~330 MB | 1–2 GB |
+   | Piper 1.8.0 + 4 English voices (~60 MB each) | ~0.3 GB | ~0.2 GB |
+
+   The setup script prints the real disk use at the end. It needs Homebrew,
+   and installs `uv` and `espeak-ng` with it. Both services listen on
+   127.0.0.1 only (Kokoro on 8880, Piper on 5001) and log at warning level,
+   so the text being spoken isn't logged; Jarvis refuses to start if
+   `KOKORO_URL` or `PIPER_URL` points anywhere but this machine.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding

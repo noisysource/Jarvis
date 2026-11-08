@@ -10,6 +10,8 @@ import { makeJsonLogger } from "./log.js";
 import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
+import { makeTurnRegistry } from "./turns.js";
+import { makeTtsProviders } from "./tts/registry.js";
 import { loadWebAssets } from "./web.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -49,9 +51,18 @@ const deps = await buildDeps({ config: cfg, env: process.env, log, background, m
 if (!deps.ok) refuse(deps.error);
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
-const web = await loadWebAssets();
+// The /voices audition page is dev-only (#73).
+const web = await loadWebAssets(undefined, undefined, { dev: cfg.env !== "production" });
 if (!web.ok) refuse(web.error);
+// Spoken answers waiting for their playback report (#72); settled on shutdown (#78).
+const turns = makeTurnRegistry({ log });
+
+// Jarvis's voice (#73): local services only (checked in config).
+const tts = { providers: makeTtsProviders({ kokoroUrl: cfg.tts.kokoroUrl, piperUrl: cfg.tts.piperUrl }), config: cfg.tts };
+
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
+  turns,
+  tts,
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok ? web.value : refuse("unreachable"),
   memories: memoryStore,
@@ -63,6 +74,7 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     env: cfg.env,
     classifier: formatModelRef(cfg.models.classifier),
     answer: formatModelRef(cfg.models.answer),
+    voice: cfg.tts.voice ? `${cfg.tts.provider}:${cfg.tts.voice}` : cfg.tts.provider,
     memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
   });
 });
@@ -76,6 +88,10 @@ const shutdown = (signal: string): void => {
   force.unref();
   // Stops accepting new connections and waits for in-flight requests.
   server.close(() => {
+    // Spoken answers still waiting for their playback report are settled as
+    // unreported (#78), so their wrap-ups are queued before the drain.
+    const settled = turns.settleAll();
+    if (settled > 0) log.info("settled spoken turns", { count: settled });
     // Let wrap-ups still running after their replies finish, then close the database.
     const waiting = background.pending();
     if (waiting > 0) log.info("waiting for background work", { tasks: waiting });
