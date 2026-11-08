@@ -24,7 +24,8 @@ export type TtsAudio = {
   readonly chunks: AsyncIterable<Uint8Array>;
 };
 
-export type TtsErrorKind = "unavailable" | "bad_voice" | "failed" | "aborted";
+/** "starting": the local service is down because voice:up is still waiting for it (#80). */
+export type TtsErrorKind = "unavailable" | "starting" | "bad_voice" | "failed" | "aborted";
 
 /** `message` is for logs and the /voices page: never the text being spoken. */
 export type TtsError = { readonly kind: TtsErrorKind; readonly message: string };

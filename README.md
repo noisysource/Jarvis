@@ -144,18 +144,31 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    Then, with `npm run dev` running, open **http://localhost:8080/voices**:
    every voice reads the same five sentences and shows its time to first
    audio. "Use this voice" shows two lines to put in `.env` (`TTS_PROVIDER`,
-   `TTS_VOICE`); restart Jarvis to use it.
+   `TTS_VOICE`); restart Jarvis to use it. Kokoro's first start takes a
+   minute or two; until it's up, `/voices` says "Kokoro is starting" and
+   refreshes by itself.
 
    | Installed into `.voice/` (gitignored) | Disk, roughly | Memory while running, roughly |
    |---|---|---|
    | Kokoro-FastAPI v0.9.2 (Python, PyTorch with Apple GPU, the 82M-parameter model) | 1.5–2.5 GB, mostly PyTorch; the model is ~330 MB | 1–2 GB |
    | Piper 1.8.0 + 4 English voices (~60 MB each) | ~0.3 GB | ~0.2 GB |
 
+   | Whisper (whisper.cpp via Homebrew, with Metal) + `small.en` model | ~0.5 GB (the model is 466 MB) | ~0.9 GB |
+   | …or `WHISPER_MODEL=base.en` (faster, a little less accurate) | ~0.15 GB | ~0.4 GB |
+
    The setup script prints the real disk use at the end. It needs Homebrew,
-   and installs `uv` and `espeak-ng` with it. Both services listen on
-   127.0.0.1 only (Kokoro on 8880, Piper on 5001) and log at warning level,
-   so the text being spoken isn't logged; Jarvis refuses to start if
-   `KOKORO_URL` or `PIPER_URL` points anywhere but this machine.
+   and installs `uv`, `espeak-ng` and `whisper-cpp` with it; the Whisper
+   model is checked against whisper.cpp's published SHA-1. All three
+   services listen on 127.0.0.1 only (Kokoro on 8880, Piper on 5001,
+   Whisper on 8178). Kokoro and Piper log at warning level, so the text being
+   spoken isn't logged; Whisper doesn't print what it heard and keeps the
+   audio in memory. Jarvis refuses to start if `KOKORO_URL`, `PIPER_URL` or
+   `WHISPER_URL` points anywhere but this machine.
+
+   **Listening** (🎤 Speak) uses that local Whisper: the page records what
+   you say and sends it to Jarvis on this machine, never to Google or Apple
+   (the browser's own speech recognition isn't used). If Whisper isn't
+   running, the page says so. English only for now; in Portuguese, type.
 
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or

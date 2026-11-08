@@ -87,6 +87,20 @@ describe("GET /tts", () => {
   });
 });
 
+describe("GET /tts while a service is starting (#80)", () => {
+  it("marks it as starting, and /speak answers 503 with the reason", async () => {
+    const starting = { kind: "starting" as const, message: "Kokoro is starting (the first start takes a minute or two)" };
+    const { app, speak } = setup({ kokoro: { listVoices: async () => err(starting), speak: async () => err(starting) } });
+    const res = await app.request("/tts", { headers: { host: "127.0.0.1:8080" } });
+    const body = (await res.json()) as { providers: unknown[] };
+    expect(body.providers[0]).toEqual({ id: "kokoro", available: false, voices: [], problem: starting.message, starting: true });
+    expect(body.providers[1]).not.toHaveProperty("starting");
+    const spoke = await speak({ text: SECRET_TEXT });
+    expect(spoke.status).toBe(503);
+    expect(await spoke.json()).toEqual({ type: "error", message: starting.message });
+  });
+});
+
 describe("POST /speak", () => {
   it("streams the configured voice's PCM with its format headers", async () => {
     const { speak, spoken } = setup();

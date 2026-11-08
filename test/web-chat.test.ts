@@ -9,7 +9,6 @@ import {
   formatMemoryDay,
   groupMemories,
   isStopPhrase,
-  keepListening,
   matchContextOption,
   nameWords,
   newConversationId,
@@ -288,12 +287,8 @@ describe("conversation mode", () => {
     expect(shouldReopenMic({ ...reopen, kind: "error" })).toBe(false);
   });
 
-  it("keeps listening through about 8 seconds of silence, then stops", () => {
+  it("listens for about 8 seconds of silence before giving up", () => {
     expect(CONVERSATION.silenceMs).toBe(8000);
-    expect(keepListening({ elapsedMs: 5000, heard: false, stopped: false })).toBe(true);
-    expect(keepListening({ elapsedMs: 8000, heard: false, stopped: false })).toBe(false);
-    expect(keepListening({ elapsedMs: 3000, heard: true, stopped: false })).toBe(false);
-    expect(keepListening({ elapsedMs: 3000, heard: false, stopped: true })).toBe(false);
   });
 });
 

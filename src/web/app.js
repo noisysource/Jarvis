@@ -1,6 +1,6 @@
 // @ts-check
-// Chat page wiring: DOM, POST /ask, speech recognition and speech synthesis.
-// Uses only the browser's built-in Web Speech APIs. Conversation history
+// Chat page wiring: DOM, POST /ask, listening (local Whisper through
+// /transcribe, #74) and speech synthesis (the browser's voices). Conversation history
 // lives in this page's memory only; reload or "New conversation" clears it.
 
 import {
@@ -12,7 +12,6 @@ import {
   formatMemoryDay,
   groupMemories,
   isStopPhrase,
-  keepListening,
   matchContextOption,
   newConversationId,
   parseLanguage,
@@ -23,6 +22,7 @@ import {
   voiceKey,
   voicesFor,
 } from "./chat.js";
+import { canRecord, recordUtterance } from "./mic.js";
 
 /** @param {string} id @returns {HTMLElement} */
 const byId = (id) => {
@@ -42,6 +42,7 @@ const voiceSelect = /** @type {HTMLSelectElement} */ (byId("voice"));
 const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
 const conversationButton = /** @type {HTMLButtonElement} */ (byId("conversation"));
 const listeningBanner = byId("listening");
+const micNote = byId("mic-note");
 const autoNote = byId("auto-note");
 const rememberButton = /** @type {HTMLButtonElement} */ (byId("remember"));
 const memoriesButton = /** @type {HTMLButtonElement} */ (byId("memories"));
@@ -85,7 +86,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  * autoBlocked: the browser refused to reopen the mic by itself; paused until the toggle is flipped.
  * @type {{
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
- *   listening: boolean, pending: PendingClarify | null,
+ *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
  *   conversationId: string, remember: boolean,
  * }}
@@ -96,6 +97,7 @@ const state = {
   muted: load("jarvis.muted") === "true",
   busy: false,
   listening: false,
+  transcribing: false,
   pending: null,
   conversation: load("jarvis.conversation") !== "false",
   voiceSession: false,
@@ -142,6 +144,12 @@ const renderControls = () => {
   micButton.textContent = state.listening ? "■ Stop" : "🎤 Speak";
   micButton.classList.toggle("listening", state.listening);
   listeningBanner.hidden = !state.listening;
+  micButton.disabled = !listenAvailable() || (state.transcribing && !state.listening);
+  micButton.title = !micSupported ? "This browser can't record the microphone" : listenAvailable() ? "" : "Listening is English-only for now";
+  micNote.hidden = listenAvailable();
+  micNote.textContent = micSupported
+    ? "Listening works in English only for now (Whisper on this computer). Type in Portuguese."
+    : "This browser can't record the microphone. Typing works; for voice use Chrome or Safari.";
   conversationButton.setAttribute("aria-pressed", String(state.conversation));
   conversationButton.textContent = state.conversation ? "💬 Conversation on" : "💬 Conversation off";
   autoNote.hidden = !(state.conversation && state.autoBlocked);
@@ -251,9 +259,6 @@ const retirePending = () => {
  * @param {string} [context] set when the user picked a context after a clarify
  */
 const ask = async (question, context) => {
-  // A new question while listening in conversation mode can't happen (the mic
-  // closes on the final result), but never leave a stale timer running.
-  clearSilenceTimer();
   const text = question.trim();
   if (text === "" || state.busy) return;
   stopSpeaking();
@@ -316,7 +321,7 @@ const ask = async (question, context) => {
     conversation: state.conversation,
     voiceSession: state.voiceSession,
     blocked: state.autoBlocked,
-    available: recognition !== null,
+    available: listenAvailable(),
     kind: view.kind,
   });
   if (view.speak) {
@@ -388,36 +393,29 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-// ---- speech in ----
+// ---- speech in (#74) ----
+//
+// Whisper on this machine: the page records one utterance, sends it as a
+// 16 kHz WAV to POST /transcribe, and sends the text it gets back like typed
+// text (so /ask's local EC precheck runs on it first). The browser's own
+// speech recognition, which sends audio to Google or Apple, isn't used. If
+// Whisper isn't running, the page says so; there's no fallback.
 
-/** @type {any} */
-const w = window;
-const Recognition = w.SpeechRecognition ?? w.webkitSpeechRecognition;
-/** @type {any} */
-let recognition = null;
+const micSupported = canRecord();
+/** Local listening is English-only for now (#74); Portuguese is typed. */
+const listenAvailable = () => micSupported && state.language === "en";
 
+/** @type {AudioContext | undefined} */
+let micCtx;
+/** The utterance being recorded. @type {{ stop: () => void, controller: AbortController } | undefined} */
+let recording;
 /**
- * The current listening window: when it opened, whether anything was heard,
- * whether it was opened automatically, and whether the user or a stop
- * condition closed it on purpose.
+ * The current listening window: whether speech was heard, whether it was
+ * opened automatically, and whether the user or a stop condition closed it on purpose.
  */
-const listen$ = { startedAt: 0, heard: false, auto: false, stopped: false, lastError: "" };
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let silenceTimer;
+const listen$ = { heard: false, auto: false, stopped: false };
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let reopenTimer;
-
-const clearSilenceTimer = () => {
-  clearTimeout(silenceTimer);
-  silenceTimer = undefined;
-};
-
-/** (Re)starts the silence countdown: about 8 seconds without hearing anything ends conversation mode. */
-const armSilenceTimer = () => {
-  clearSilenceTimer();
-  if (!state.conversation) return; // plain mic: the browser decides when to stop
-  silenceTimer = setTimeout(() => endVoice("silence"), CONVERSATION.silenceMs);
-};
 
 /** The browser wouldn't reopen the mic by itself: fall back to the button, with a note. */
 const blockAuto = () => {
@@ -432,14 +430,13 @@ const blockAuto = () => {
  * @param {"silence" | "phrase" | "user" | "reset"} reason
  */
 const endVoice = (reason) => {
-  clearSilenceTimer();
   clearTimeout(reopenTimer);
   state.voiceSession = false;
   listen$.stopped = true;
-  if (state.listening && recognition) {
+  if (recording) {
     // Tapping Stop mid-sentence still sends what was heard; otherwise just close.
-    if (reason === "user" && listen$.heard) recognition.stop();
-    else recognition.abort();
+    if (reason === "user" && listen$.heard) recording.stop();
+    else recording.controller.abort();
   }
   state.listening = false;
   setStatus(
@@ -452,40 +449,126 @@ const endVoice = (reason) => {
   renderControls();
 };
 
+/** Is Whisper up? @returns {Promise<{ ok: true } | { ok: false, problem: string }>} */
+const sttStatus = async () => {
+  try {
+    const res = await fetch("/stt");
+    const body = await res.json();
+    if (body?.available === true) return { ok: true };
+    const problem = typeof body?.problem === "string" ? body.problem : "Listening isn't available.";
+    return { ok: false, problem: body?.starting ? `${problem}… try again in a moment.` : problem };
+  } catch {
+    return { ok: false, problem: "I can't reach Jarvis. Is the server running?" };
+  }
+};
+
 /**
- * Opens the mic.
- * @param {boolean} auto opened by conversation mode rather than a tap
- * @param {boolean} [resume] continuing the same listening window after the browser gave up early
+ * Sends a recorded utterance to Whisper, then sends its text as a spoken question.
+ * @param {Uint8Array} wav
  */
-const startListening = (auto, resume = false) => {
-  if (!recognition || state.busy) return;
-  if (state.listening && !resume) return;
+const transcribeAndSend = async (wav) => {
+  state.transcribing = true;
+  setStatus("Transcribing…");
+  renderControls();
+  let text = "";
+  let problem = "";
+  try {
+    const res = await fetch(`/transcribe?language=${state.language}`, {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: /** @type {Uint8Array<ArrayBuffer>} */ (wav),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok && typeof body?.text === "string") text = body.text;
+    else problem = typeof body?.message === "string" ? body.message : `Listening failed (status ${res.status}).`;
+  } catch {
+    problem = "I can't reach Jarvis. Is the server running?";
+  }
+  state.transcribing = false;
+  setStatus("");
+  renderControls();
+  if (problem !== "") {
+    state.voiceSession = false;
+    setStatus(problem);
+    return;
+  }
+  if (text === "") {
+    // A cough, or words Whisper couldn't make out: in conversation mode, listen again.
+    if (state.conversation && !listen$.stopped) void startListening(listen$.auto);
+    else setStatus("I didn't catch that.");
+    return;
+  }
+  input.value = text;
+  submit(text, { spoken: true });
+};
+
+/**
+ * Opens the mic for one utterance.
+ * @param {boolean} auto opened by conversation mode rather than a tap
+ */
+const startListening = async (auto) => {
+  if (!listenAvailable() || state.busy || state.listening || state.transcribing) return;
   // Never listen while Jarvis is talking.
   if (auto && synth?.speaking) {
     reopenMicSoon();
     return;
   }
-  recognition.lang = LANGUAGES[state.language].speech;
-  if (!resume) {
-    listen$.startedAt = Date.now();
-    listen$.heard = false;
-    listen$.auto = auto;
-    listen$.stopped = false;
-  }
-  listen$.lastError = "";
-  try {
-    recognition.start();
-  } catch {
-    if (auto) blockAuto();
-    else setStatus("Couldn't start the microphone.");
-    state.listening = false;
+  const ready = await sttStatus();
+  if (!ready.ok) {
+    state.voiceSession = false;
+    setStatus(ready.problem);
     renderControls();
     return;
   }
+  // Something else happened while asking (a typed question, another tap).
+  if (state.busy || state.listening || state.transcribing) return;
+
+  listen$.heard = false;
+  listen$.auto = auto;
+  listen$.stopped = false;
+  micCtx ??= new AudioContext();
+  const controller = new AbortController();
+  const rec = recordUtterance({
+    ctx: micCtx,
+    signal: controller.signal,
+    noSpeechMs: CONVERSATION.silenceMs,
+    onSpeech: () => {
+      listen$.heard = true;
+    },
+  });
+  recording = { stop: rec.stop, controller };
   state.listening = true;
-  if (!resume) armSilenceTimer();
   setStatus(""); // the Listening banner says it
   renderControls();
+
+  /** @type {{ wav: Uint8Array | null, reason: string }} */
+  let result;
+  try {
+    result = await rec.done;
+  } catch (e) {
+    recording = undefined;
+    state.listening = false;
+    const name = e instanceof Error ? e.name : "";
+    const blocked = name === "NotAllowedError" || name === "SecurityError";
+    if (blocked && auto) {
+      blockAuto();
+      return;
+    }
+    setStatus(blocked ? "Microphone access was blocked. Allow it in the browser to speak to Jarvis." : "Couldn't start the microphone.");
+    renderControls();
+    return;
+  }
+  recording = undefined;
+  state.listening = false;
+  renderControls();
+  if (result.reason === "cancelled") return;
+  if (!result.wav) {
+    if (listen$.stopped) return;
+    if (state.conversation) endVoice("silence");
+    else setStatus("I didn't hear anything.");
+    return;
+  }
+  await transcribeAndSend(result.wav);
 };
 
 /** After Jarvis finishes speaking: wait a moment, then listen again. */
@@ -493,89 +576,27 @@ const reopenMicSoon = () => {
   clearTimeout(reopenTimer);
   reopenTimer = setTimeout(() => {
     if (!state.voiceSession || !state.conversation || state.autoBlocked || state.busy || state.listening) return;
-    startListening(true);
+    void startListening(true);
   }, CONVERSATION.reopenDelayMs);
 };
 
-if (!Recognition) {
-  micButton.disabled = true;
-  micButton.title = "Speech recognition isn't available in this browser";
-  byId("mic-note").hidden = false;
-} else {
-  recognition = new Recognition();
-  recognition.interimResults = true;
-  recognition.continuous = false;
-  recognition.onresult = (/** @type {any} */ event) => {
-    let heard = "";
-    let final = false;
-    for (const result of event.results) {
-      heard += result[0].transcript;
-      final = final || result.isFinal;
-    }
-    if (heard.trim() !== "") {
-      listen$.heard = true;
-      armSilenceTimer(); // still talking: the quiet spell starts again
-    }
-    input.value = heard;
-    if (final) {
-      clearSilenceTimer();
-      submit(heard, { spoken: true });
-    }
-  };
-  recognition.onerror = (/** @type {any} */ event) => {
-    listen$.lastError = String(event.error ?? "");
-  };
-  recognition.onend = () => {
-    const error = listen$.lastError;
-    const blocked = error === "not-allowed" || error === "service-not-allowed";
-    if (blocked && listen$.auto) {
-      state.listening = false;
-      clearSilenceTimer();
-      blockAuto();
-      return;
-    }
-    // Chrome gives up after a few seconds of silence; in conversation mode keep
-    // the window open for the full quiet spell.
-    const resume =
-      state.conversation &&
-      !blocked &&
-      (error === "" || error === "no-speech") &&
-      keepListening({ elapsedMs: Date.now() - listen$.startedAt, heard: listen$.heard, stopped: listen$.stopped });
-    if (resume) {
-      startListening(listen$.auto, true);
-      return;
-    }
-    state.listening = false;
-    if (!listen$.heard) clearSilenceTimer();
-    renderControls();
-    if (state.busy || listen$.stopped) return;
-    if (blocked) setStatus("Microphone access was blocked. Allow it in the browser to speak to Jarvis.");
-    else if (!listen$.heard && state.conversation) endVoice("silence");
-    else if (error === "no-speech") setStatus("I didn't hear anything.");
-    else if (error !== "" && error !== "aborted") setStatus("Speech recognition stopped.");
-    else setStatus("");
-  };
-}
-
 micButton.addEventListener("click", () => {
-  if (!recognition) return;
   if (state.listening) {
     endVoice("user");
     return;
   }
   stopSpeaking();
   clearTimeout(reopenTimer);
-  startListening(false);
+  // Made on a tap, so the browser lets it start.
+  micCtx ??= new AudioContext();
+  void startListening(false);
 });
 
 conversationButton.addEventListener("click", () => {
   state.conversation = !state.conversation;
   save("jarvis.conversation", String(state.conversation));
   state.autoBlocked = false; // flipping the toggle retries the automatic mic
-  if (!state.conversation) {
-    clearTimeout(reopenTimer);
-    clearSilenceTimer();
-  }
+  if (!state.conversation) clearTimeout(reopenTimer);
   renderControls();
 });
 
@@ -752,6 +773,7 @@ muteButton.addEventListener("click", () => {
 languageSelect.addEventListener("change", () => {
   state.language = parseLanguage(languageSelect.value);
   save("jarvis.language", state.language);
+  if (state.listening && !listenAvailable()) endVoice("reset");
   renderControls();
   renderVoices();
 });

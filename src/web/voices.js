@@ -16,6 +16,7 @@ const byId = (id) => {
 const status = byId("status");
 const head = byId("voices-head");
 const body = byId("voices-body");
+const browserBody = byId("browser-body");
 
 /** @type {AudioContext | undefined} */
 let ctx;
@@ -70,21 +71,24 @@ const play = async (row, text) => {
   return firstAt - asked;
 };
 
-/** A provider that isn't running: one row, one message. @param {string} provider @param {string} problem */
-const addUnavailable = (provider, problem) => {
+/**
+ * A provider that isn't running, or is still starting (#80): one row, one message.
+ * @param {string} provider @param {string} problem @param {boolean} starting
+ */
+const addUnavailable = (provider, problem, starting) => {
   const tr = document.createElement("tr");
-  tr.className = "unavailable";
+  tr.className = starting ? "unavailable starting" : "unavailable";
   const name = document.createElement("td");
   name.textContent = provider;
   const message = document.createElement("td");
   message.colSpan = AUDITION_SENTENCES.length + 2;
-  message.textContent = problem;
+  message.textContent = starting ? `${problem}… this list refreshes when it's up.` : problem;
   tr.append(name, message);
   body.append(tr);
 };
 
-/** @param {{ provider: string, voice: string, label: string, available: boolean, problem?: string }} row */
-const addRow = (row) => {
+/** @param {{ provider: string, voice: string, label: string, available: boolean, problem?: string }} row @param {HTMLElement} [into] */
+const addRow = (row, into = body) => {
   const key = `${row.provider}:${row.voice}`;
   const tr = document.createElement("tr");
   if (!row.available) tr.className = "unavailable";
@@ -149,24 +153,41 @@ const addRow = (row) => {
   });
   use.append(choose);
   tr.append(all, use);
-  body.append(tr);
+  into.append(tr);
+};
+
+const STARTING_POLL_MS = 3000;
+let lastShown = "";
+
+/** Kokoro and Piper rows; while one is starting, asks again until it's up. */
+const loadServerVoices = async () => {
+  const res = await fetch("/tts");
+  const info = await res.json();
+  byId("current").textContent = `Now: ${info.provider}${info.voice ? ` · ${info.voice}` : ""} (${info.language})`;
+  // Rebuilt only when something changed, so a voice being auditioned isn't wiped by the refresh.
+  const shown = JSON.stringify(info.providers);
+  if (shown !== lastShown) {
+    lastShown = shown;
+    body.replaceChildren();
+    for (const p of info.providers) {
+      if (p.id === "browser") continue;
+      if (!p.available) addUnavailable(p.id, p.problem ?? "not available", p.starting === true);
+      for (const v of p.voices) addRow({ provider: p.id, voice: v.id, label: v.label, available: true });
+    }
+  }
+  if (info.providers.some((/** @type {{ starting?: boolean }} */ p) => p.starting)) {
+    setTimeout(() => void loadServerVoices(), STARTING_POLL_MS);
+  }
 };
 
 const load = async () => {
   const headCells = ["Voice", ...AUDITION_SENTENCES.map((s) => s.label), "All (median)", ""];
   head.replaceChildren(...headCells.map((t) => Object.assign(document.createElement("th"), { textContent: t })));
   status.textContent = "Loading voices…";
-  const res = await fetch("/tts");
-  const info = await res.json();
-  byId("current").textContent = `Now: ${info.provider}${info.voice ? ` · ${info.voice}` : ""} (${info.language})`;
-  for (const p of info.providers) {
-    if (p.id === "browser") continue;
-    if (!p.available) addUnavailable(p.id, p.problem ?? "not available");
-    for (const v of p.voices) addRow({ provider: p.id, voice: v.id, label: v.label, available: true });
-  }
+  await loadServerVoices();
   const addBrowser = () => {
     for (const v of browserEnglishVoices(speechSynthesis.getVoices(), voicesFor)) {
-      addRow({ provider: "browser", voice: v.name, label: `${v.name} (${v.lang})`, available: true });
+      addRow({ provider: "browser", voice: v.name, label: `${v.name} (${v.lang})`, available: true }, browserBody);
     }
   };
   if (speechSynthesis.getVoices().length > 0) addBrowser();

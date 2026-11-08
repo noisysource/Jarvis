@@ -23,6 +23,8 @@ import type { MemoryStore } from "./memory-store.js";
 import { makeSentenceSplitter } from "./sentences.js";
 import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
 import type { TtsConfig } from "./config.js";
+import { registerSttRoutes } from "./stt-routes.js";
+import type { SttProvider } from "./stt/types.js";
 import { registerTtsRoutes } from "./tts-routes.js";
 import type { TtsProviders } from "./tts/registry.js";
 import { parseAskRequest } from "./request.js";
@@ -69,6 +71,8 @@ export const makeServer = (
     readonly newTurnId?: () => string;
     /** Jarvis's voice (#73): GET /tts and POST /speak. Unset = no voice routes. */
     readonly tts?: { readonly providers: TtsProviders; readonly config: TtsConfig };
+    /** Jarvis's ears (#74): GET /stt and POST /transcribe. Unset = no listening routes. */
+    readonly stt?: SttProvider;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -216,6 +220,7 @@ export const makeServer = (
   );
 
   if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
+  if (options.stt) registerSttRoutes(app, { provider: options.stt, language: "en", log: deps.log });
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });
 
   app.notFound((c) => c.json(errorBody("Not found."), 404));

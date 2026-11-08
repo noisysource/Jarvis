@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { parseModelRef, type ModelRef } from "./llm/model-ref.js";
 import { parseLocalUrl } from "./local-url.js";
+import type { SttProviderId } from "./stt/types.js";
 import type { TtsProviderId } from "./tts/types.js";
 import { err, ok, type Result } from "./result.js";
 
@@ -31,6 +32,12 @@ export type TtsConfig = {
   readonly piperUrl: URL;
 };
 
+/** Jarvis's ears (#74). The service URL is always on this machine. */
+export type SttConfig = {
+  readonly provider: SttProviderId;
+  readonly whisperUrl: URL;
+};
+
 export type Config = {
   readonly env: RuntimeEnv;
   readonly host: string;
@@ -45,6 +52,7 @@ export type Config = {
   readonly timeZone: string;
   readonly memoryStore: MemoryStoreRef;
   readonly tts: TtsConfig;
+  readonly stt: SttConfig;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
   readonly neverRememberPath: string;
   readonly secrets: {
@@ -71,6 +79,8 @@ export const DEFAULTS = {
   ttsProvider: "browser",
   kokoroUrl: "http://127.0.0.1:8880",
   piperUrl: "http://127.0.0.1:5001",
+  sttProvider: "whisper",
+  whisperUrl: "http://127.0.0.1:8178",
 } as const;
 
 const PORT_ERROR = "must be a whole number from 1 to 65535";
@@ -114,6 +124,11 @@ const EnvSchema = z.object({
   TTS_VOICE: optionalString,
   KOKORO_URL: optionalString,
   PIPER_URL: optionalString,
+  STT_PROVIDER: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["whisper"], { error: 'must be "whisper"' }).optional(),
+  ),
+  WHISPER_URL: optionalString,
   GOOGLE_CLOUD_PROJECT: optionalString,
   ANTHROPIC_SECRET_NAME: optionalString,
   VENDUS_SECRET_NAME: optionalString,
@@ -160,13 +175,14 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   const timeZone = field("TIMEZONE", parseTimeZone(raw("TIMEZONE") ?? DEFAULTS.timeZone));
   const kokoroUrl = field("KOKORO_URL", parseLocalUrl(raw("KOKORO_URL") ?? DEFAULTS.kokoroUrl));
   const piperUrl = field("PIPER_URL", parseLocalUrl(raw("PIPER_URL") ?? DEFAULTS.piperUrl));
+  const whisperUrl = field("WHISPER_URL", parseLocalUrl(raw("WHISPER_URL") ?? DEFAULTS.whisperUrl));
 
   const production = raw("NODE_ENV") === "production";
   if (production && raw("GOOGLE_CLOUD_PROJECT") === undefined) {
     errors.push("GOOGLE_CLOUD_PROJECT: required in production (secrets come from Secret Manager)");
   }
 
-  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl) {
+  if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl) {
     return err(errors.join("\n"));
   }
   const e = parsed.data;
@@ -187,6 +203,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
         : { kind: "memory" },
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
+    stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl },
     secrets: {
       gcpProject: e.GOOGLE_CLOUD_PROJECT,
       anthropicSecretName: e.ANTHROPIC_SECRET_NAME ?? DEFAULTS.anthropicSecretName,

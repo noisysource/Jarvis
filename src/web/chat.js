@@ -245,14 +245,6 @@ export const shouldReopenMic = ({ conversation, voiceSession, blocked, available
   conversation && voiceSession && !blocked && available && kind !== "error";
 
 /**
- * The browser ended recognition with nothing heard (Chrome gives up after a
- * few seconds). Keep listening if the silence window isn't over yet.
- * @param {{ elapsedMs: number, heard: boolean, stopped: boolean }} s
- */
-export const keepListening = ({ elapsedMs, heard, stopped }) =>
-  !stopped && !heard && elapsedMs < CONVERSATION.silenceMs;
-
-/**
  * A memory as GET /memories returns it.
  * @typedef {{ id: string, contextId: string, contextName: string, kind: "fact" | "playbook" | "history", text: string,
  *   origin: "auto" | "explicit", createdAt: string, updatedAt: string, expiresAt?: string, seen: boolean }} MemoryView

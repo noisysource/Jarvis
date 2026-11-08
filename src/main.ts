@@ -11,6 +11,8 @@ import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
 import { makeTurnRegistry } from "./turns.js";
+import { DEFAULT_RUN_DIR, makeIsStarting } from "./service-starting.js";
+import { makeSttProvider } from "./stt/registry.js";
 import { makeTtsProviders } from "./tts/registry.js";
 import { loadWebAssets } from "./web.js";
 
@@ -57,12 +59,17 @@ if (!web.ok) refuse(web.error);
 // Spoken answers waiting for their playback report (#72); settled on shutdown (#78).
 const turns = makeTurnRegistry({ log });
 
-// Jarvis's voice (#73): local services only (checked in config).
-const tts = { providers: makeTtsProviders({ kokoroUrl: cfg.tts.kokoroUrl, piperUrl: cfg.tts.piperUrl }), config: cfg.tts };
+// Jarvis's voice (#73): local services only (checked in config). A service
+// voice:up is still waiting for shows as "starting" (#80).
+const isStarting = makeIsStarting({ runDir: DEFAULT_RUN_DIR });
+const tts = { providers: makeTtsProviders({ kokoroUrl: cfg.tts.kokoroUrl, piperUrl: cfg.tts.piperUrl, isStarting }), config: cfg.tts };
+// Jarvis's ears (#74): whisper.cpp on this machine (checked in config).
+const stt = makeSttProvider(cfg.stt, { isStarting });
 
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   turns,
   tts,
+  stt,
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok ? web.value : refuse("unreachable"),
   memories: memoryStore,

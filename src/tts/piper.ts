@@ -13,7 +13,11 @@ const LOCALE_PREFIXES: Record<Language, readonly string[]> = { en: ["en_GB-", "e
 export const isPiperVoiceFor = (id: string, language: Language): boolean =>
   /^[a-z]{2}_[A-Z]{2}-[a-z0-9_]+-(x_low|low|medium|high)$/.test(id) && LOCALE_PREFIXES[language].some((p) => id.startsWith(p));
 
-const unreachable = (base: URL): TtsError => ({ kind: "unavailable", message: `Piper isn't running at ${base.origin} (npm run voice:up)` });
+/** Down: "starting" while voice:up is still waiting for it (#80), else "isn't running". */
+const unreachable = async (base: URL, isStarting: (() => Promise<boolean>) | undefined): Promise<TtsError> =>
+  (await isStarting?.())
+    ? { kind: "starting", message: `Piper is starting (the first start takes a minute or two)` }
+    : { kind: "unavailable", message: `Piper isn't running at ${base.origin} (npm run voice:up)` };
 
 /** Splits a WAV byte stream into its format and the PCM that follows. */
 export const readWavStream = async (chunks: AsyncIterable<Uint8Array>): Promise<TtsAudio | { readonly error: string }> => {
@@ -47,7 +51,7 @@ export const readWavStream = async (chunks: AsyncIterable<Uint8Array>): Promise<
   }
 };
 
-export const makePiperTts = (deps: { readonly baseUrl: URL; readonly fetch?: typeof fetch }): TtsProvider => {
+export const makePiperTts = (deps: { readonly baseUrl: URL; readonly fetch?: typeof fetch; readonly isStarting?: () => Promise<boolean> }): TtsProvider => {
   const doFetch = deps.fetch ?? fetch;
   const url = (path: string) => new URL(path, deps.baseUrl).toString();
 
@@ -64,7 +68,7 @@ export const makePiperTts = (deps: { readonly baseUrl: URL; readonly fetch?: typ
           ...(signal ? { signal } : {}),
         });
       } catch {
-        return err(signal?.aborted ? { kind: "aborted", message: "Cancelled" } : unreachable(deps.baseUrl));
+        return err(signal?.aborted ? { kind: "aborted", message: "Cancelled" } : await unreachable(deps.baseUrl, deps.isStarting));
       }
       if (!res.ok) {
         return err(
@@ -88,7 +92,7 @@ export const makePiperTts = (deps: { readonly baseUrl: URL; readonly fetch?: typ
         const ids = Object.keys(body).filter((id) => isPiperVoiceFor(id, language)).sort();
         return ok(ids.map((id): TtsVoice => ({ id, label: id })));
       } catch {
-        return err(unreachable(deps.baseUrl));
+        return err(await unreachable(deps.baseUrl, deps.isStarting));
       }
     },
   };
