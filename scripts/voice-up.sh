@@ -14,20 +14,33 @@ VOICE_DIR="$PWD/.voice"
 KOKORO_PORT="${KOKORO_PORT:-8880}"
 PIPER_PORT="${PIPER_PORT:-5001}"
 LOGS="$VOICE_DIR/logs"
+# While this script waits for a service, .voice/run/<service>.starting holds
+# this script's PID, so /voices can say "Kokoro is starting" instead of "not
+# running" (the first start takes a minute or two). Cleared once the service
+# answers, gives up, or this script stops.
+RUN="$VOICE_DIR/run"
 
 if [[ ! -d "$VOICE_DIR/kokoro-fastapi/.venv" || ! -d "$VOICE_DIR/piper/.venv" ]]; then
   echo "Run npm run voice:setup first." >&2
   exit 1
 fi
-mkdir -p "$LOGS"
+mkdir -p "$LOGS" "$RUN"
+starting() { echo "$$" >"$RUN/$1.starting"; }
+started() { rm -f "$RUN/$1.starting"; }
 
 pids=()
 stop() {
+  started kokoro
+  started piper
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
 }
-trap stop EXIT INT TERM
+# Ctrl-C or a TERM exits (a plain trap would run stop and carry on waiting); exiting runs stop once.
+trap stop EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
+starting kokoro
 (
   cd "$VOICE_DIR/kokoro-fastapi"
   export USE_GPU=true DEVICE_TYPE=mps PYTORCH_ENABLE_MPS_FALLBACK=1
@@ -37,8 +50,13 @@ trap stop EXIT INT TERM
 ) >"$LOGS/kokoro.log" 2>&1 &
 pids+=($!)
 
-first_voice="$(ls "$VOICE_DIR/piper/voices"/*.onnx 2>/dev/null | head -n 1 | xargs -n1 basename 2>/dev/null | sed 's/\.onnx$//')"
+# A glob, not ls: under pipefail, ls failing on no voices would stop the script.
+first_voice=""
+for f in "$VOICE_DIR/piper/voices"/*.onnx; do
+  if [[ -e "$f" ]]; then first_voice="$(basename "$f" .onnx)"; break; fi
+done
 if [[ -n "$first_voice" ]]; then
+  starting piper
   "$VOICE_DIR/piper/.venv/bin/python" -m piper.http_server --host 127.0.0.1 --port "$PIPER_PORT" \
     --data-dir "$VOICE_DIR/piper/voices" -m "$first_voice" >"$LOGS/piper.log" 2>&1 &
   pids+=($!)
@@ -46,16 +64,17 @@ else
   echo "No Piper voices downloaded; skipping Piper." >&2
 fi
 
-wait_for() { # name url seconds
+wait_for() { # name url seconds service
   for _ in $(seq 1 "$3"); do
-    if curl -fsS -o /dev/null "$2" 2>/dev/null; then echo "✓ $1 is up at $2"; return 0; fi
+    if curl -fsS -o /dev/null "$2" 2>/dev/null; then started "$4"; echo "✓ $1 is up at $2"; return 0; fi
     sleep 1
   done
+  started "$4"
   echo "✗ $1 didn't answer at $2 within $3 s; see $LOGS" >&2
   return 1
 }
-wait_for "Kokoro" "http://127.0.0.1:$KOKORO_PORT/health" 180 || true
-[[ -n "$first_voice" ]] && { wait_for "Piper" "http://127.0.0.1:$PIPER_PORT/voices" 60 || true; }
+wait_for "Kokoro" "http://127.0.0.1:$KOKORO_PORT/health" 180 kokoro || true
+[[ -n "$first_voice" ]] && { wait_for "Piper" "http://127.0.0.1:$PIPER_PORT/voices" 60 piper || true; }
 
 echo "Voice services running (Ctrl-C to stop). Logs: $LOGS"
 wait

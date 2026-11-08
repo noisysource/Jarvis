@@ -23,9 +23,13 @@ export const kokoroVoiceLabel = (id: string): string => {
 export const isKokoroVoiceFor = (id: string, language: Language): boolean =>
   /^[a-z][fm]_[a-z0-9_]+$/.test(id) && LANGUAGE_PREFIXES[language].includes(id[0] ?? "");
 
-const unreachable = (base: URL): TtsError => ({ kind: "unavailable", message: `Kokoro isn't running at ${base.origin} (npm run voice:up)` });
+/** Down: "starting" while voice:up is still waiting for it (#80), else "isn't running". */
+const unreachable = async (base: URL, isStarting: (() => Promise<boolean>) | undefined): Promise<TtsError> =>
+  (await isStarting?.())
+    ? { kind: "starting", message: `Kokoro is starting (the first start takes a minute or two)` }
+    : { kind: "unavailable", message: `Kokoro isn't running at ${base.origin} (npm run voice:up)` };
 
-export const makeKokoroTts = (deps: { readonly baseUrl: URL; readonly fetch?: typeof fetch }): TtsProvider => {
+export const makeKokoroTts = (deps: { readonly baseUrl: URL; readonly fetch?: typeof fetch; readonly isStarting?: () => Promise<boolean> }): TtsProvider => {
   const doFetch = deps.fetch ?? fetch;
   const url = (path: string) => new URL(path, deps.baseUrl).toString();
 
@@ -42,7 +46,7 @@ export const makeKokoroTts = (deps: { readonly baseUrl: URL; readonly fetch?: ty
           ...(signal ? { signal } : {}),
         });
       } catch {
-        return err(signal?.aborted ? { kind: "aborted", message: "Cancelled" } : unreachable(deps.baseUrl));
+        return err(signal?.aborted ? { kind: "aborted", message: "Cancelled" } : await unreachable(deps.baseUrl, deps.isStarting));
       }
       if (!res.ok) {
         return err(
@@ -64,7 +68,7 @@ export const makeKokoroTts = (deps: { readonly baseUrl: URL; readonly fetch?: ty
           .sort();
         return ok(ids.map((id): TtsVoice => ({ id, label: kokoroVoiceLabel(id) })));
       } catch {
-        return err(unreachable(deps.baseUrl));
+        return err(await unreachable(deps.baseUrl, deps.isStarting));
       }
     },
   };

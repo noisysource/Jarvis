@@ -33,7 +33,7 @@ const isJson = (contentType: string | undefined): boolean =>
   (contentType ?? "").split(";")[0]?.trim().toLowerCase() === "application/json";
 
 // "aborted" means the client already left; any status will do.
-const STATUS = { unavailable: 503, bad_voice: 400, failed: 502, aborted: 408 } as const;
+const STATUS = { unavailable: 503, starting: 503, bad_voice: 400, failed: 502, aborted: 408 } as const;
 
 export const registerTtsRoutes = (
   app: Hono<ServerEnv>,
@@ -46,7 +46,7 @@ export const registerTtsRoutes = (
         const voices = await deps.providers[id].listVoices(deps.language);
         return voices.ok
           ? { id, available: true, voices: voices.value }
-          : { id, available: false, voices: [], problem: voices.error.message };
+          : { id, available: false, voices: [], problem: voices.error.message, ...(voices.error.kind === "starting" ? { starting: true } : {}) };
       }),
     );
     c.header("Cache-Control", "no-store");

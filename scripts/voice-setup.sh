@@ -33,8 +33,23 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 if [[ "$(uname -s)" == "Darwin" && "$(brew --prefix)" != "/opt/homebrew" ]]; then
-  echo "The brew on your PATH is at $(brew --prefix), not the native Apple-silicon Homebrew at /opt/homebrew." >&2
-  echo "Install Homebrew natively (https://brew.sh) and put /opt/homebrew/bin first in PATH, then run this again." >&2
+  cat >&2 <<EOF
+The brew on your PATH is at $(brew --prefix): that's the Intel Homebrew, which
+runs under Rosetta. Jarvis's voices need the native Apple-silicon Homebrew in
+/opt/homebrew. To install it:
+
+  1. In this (native arm64) terminal, run Homebrew's installer:
+       /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+     It installs into /opt/homebrew because the terminal is arm64.
+  2. Put it first in PATH for new terminals:
+       echo 'eval "\$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+  3. Open a new terminal and check:
+       brew --prefix        # should print /opt/homebrew
+  4. Run npm run voice:setup again.
+
+The Intel Homebrew in /usr/local can stay; it just has to come after
+/opt/homebrew in PATH.
+EOF
   exit 1
 fi
 

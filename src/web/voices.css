@@ -44,6 +44,10 @@ table#voices {
   color: var(--muted);
 }
 
+#voices tr.starting td {
+  font-style: italic;
+}
+
 #voices tr.chosen {
   background: var(--user);
 }

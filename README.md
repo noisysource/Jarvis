@@ -144,7 +144,9 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    Then, with `npm run dev` running, open **http://localhost:8080/voices**:
    every voice reads the same five sentences and shows its time to first
    audio. "Use this voice" shows two lines to put in `.env` (`TTS_PROVIDER`,
-   `TTS_VOICE`); restart Jarvis to use it.
+   `TTS_VOICE`); restart Jarvis to use it. Kokoro's first start takes a
+   minute or two; until it's up, `/voices` says "Kokoro is starting" and
+   refreshes by itself.
 
    | Installed into `.voice/` (gitignored) | Disk, roughly | Memory while running, roughly |
    |---|---|---|

@@ -223,7 +223,9 @@ and no conversation content is logged.
   is picked. `/voices` (dev only) plays five fixed sentences in every
   voice with time to first audio. `npm run voice:setup` installs into
   `.voice/` with pinned versions; `npm run voice:up` starts both services
-  on 127.0.0.1 at warning log level.
+  on 127.0.0.1 at warning log level. While it waits for a service it keeps
+  `.voice/run/<service>.starting` (its PID), so `/tts` and `/voices` say
+  "starting" rather than "not running" (#80).
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences
