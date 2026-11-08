@@ -10,6 +10,7 @@ import { makeJsonLogger } from "./log.js";
 import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
+import { makeTurnRegistry } from "./turns.js";
 import { loadWebAssets } from "./web.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -51,7 +52,11 @@ if (!deps.ok) refuse(deps.error);
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
 const web = await loadWebAssets();
 if (!web.ok) refuse(web.error);
+// Spoken answers waiting for their playback report (#72); settled on shutdown (#78).
+const turns = makeTurnRegistry({ log });
+
 const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
+  turns,
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok ? web.value : refuse("unreachable"),
   memories: memoryStore,
@@ -76,6 +81,10 @@ const shutdown = (signal: string): void => {
   force.unref();
   // Stops accepting new connections and waits for in-flight requests.
   server.close(() => {
+    // Spoken answers still waiting for their playback report are settled as
+    // unreported (#78), so their wrap-ups are queued before the drain.
+    const settled = turns.settleAll();
+    if (settled > 0) log.info("settled spoken turns", { count: settled });
     // Let wrap-ups still running after their replies finish, then close the database.
     const waiting = background.pending();
     if (waiting > 0) log.info("waiting for background work", { tasks: waiting });
