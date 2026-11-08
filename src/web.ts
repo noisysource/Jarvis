@@ -15,6 +15,16 @@ const FILES: readonly { path: string; file: string; contentType: string }[] = [
   { path: "/app.js", file: "app.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/chat.js", file: "chat.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/app.css", file: "app.css", contentType: "text/css; charset=utf-8" },
+  { path: "/audio.js", file: "audio.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/pcm-lib.js", file: "pcm-lib.js", contentType: "text/javascript; charset=utf-8" },
+];
+
+/** Dev-only pages (#73): never served in production. */
+const DEV_FILES: readonly { path: string; file: string; contentType: string }[] = [
+  { path: "/voices", file: "voices.html", contentType: "text/html; charset=utf-8" },
+  { path: "/voices.js", file: "voices.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/voices-lib.js", file: "voices-lib.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/voices.css", file: "voices.css", contentType: "text/css; charset=utf-8" },
 ];
 
 /**
@@ -34,9 +44,10 @@ export const WEB_SECURITY_HEADERS: Readonly<Record<string, string>> = {
 export const loadWebAssets = async (
   read: (path: string) => Promise<string> = (p) => readFile(p, "utf8"),
   dir: string = WEB_DIR,
+  options: { readonly dev?: boolean } = {},
 ): Promise<Result<WebAssets, string>> => {
   const entries: [string, WebAsset][] = [];
-  for (const f of FILES) {
+  for (const f of [...FILES, ...(options.dev ? DEV_FILES : [])]) {
     const path = join(dir, f.file);
     try {
       entries.push([f.path, { body: await read(path), contentType: f.contentType }]);

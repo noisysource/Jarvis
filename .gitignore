@@ -12,3 +12,5 @@ data/*.sqlite
 data/*.sqlite-*
 # Names memories must never contain (colleagues): personal, never commit
 data/never-remember.txt
+# Local voice services, models and their logs (npm run voice:setup)
+.voice/
