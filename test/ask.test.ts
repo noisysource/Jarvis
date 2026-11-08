@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
-import { clarifyMessage, handleAsk } from "../src/ask.js";
+import { clarifyMessage, type DeferredWrapUp, handleAsk } from "../src/ask.js";
 import { parseContexts } from "../src/contexts.js";
 import { makeSafeMemoryHooks } from "../src/memory.js";
 import { makePrecheck } from "../src/precheck.js";
@@ -137,6 +137,37 @@ describe("answered contexts", () => {
     expect(calls).toEqual(["classify", "loadMemories", "answer"]);
     expect(answerInputs[0]?.memories).toEqual([memory]);
     expect(wrapUps).toEqual([]);
+  });
+
+  it("streaming: passes text on, and hands the wrap-up over instead of scheduling it", async () => {
+    const { deps, calls, answerInputs } = makeDeps();
+    const deferred: DeferredWrapUp[] = [];
+    const onText = () => undefined;
+    const signal = new AbortController().signal;
+    const response = await handleAsk(deps, { question: QUESTION }, { onText, signal, deferWrapUp: (t) => deferred.push(t) });
+    expect(response.type).toBe("answer");
+    expect(answerInputs[0]?.onText).toBe(onText);
+    expect(answerInputs[0]?.signal).toBe(signal);
+    expect(calls).not.toContain("after reply: memory wrap-up");
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toMatchObject({ question: QUESTION, completed: true, answer: "2 September." });
+    deferred[0]?.run("2 Sept—");
+    expect(calls.at(-1)).toBe("after reply: memory wrap-up");
+  });
+
+  it("streaming: a cancelled answer is handed over as not completed, and replies with an error", async () => {
+    const { deps } = makeDeps({ answer: err({ code: "cancelled", message: "Cancelled." }) });
+    const deferred: DeferredWrapUp[] = [];
+    const response = await handleAsk(deps, { question: "Remember Diniz has football tomorrow" }, { deferWrapUp: (t) => deferred.push(t) });
+    expect(response).toEqual({ type: "error", message: "Cancelled." });
+    expect(deferred[0]).toMatchObject({ completed: false, answer: "" });
+  });
+
+  it("streaming: remember: false hands nothing over", async () => {
+    const { deps } = makeDeps();
+    const deferred: DeferredWrapUp[] = [];
+    await handleAsk(deps, { question: QUESTION, remember: false }, { deferWrapUp: (t) => deferred.push(t) });
+    expect(deferred).toEqual([]);
   });
 
   it("skips classification when the context is given", async () => {

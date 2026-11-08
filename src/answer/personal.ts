@@ -6,7 +6,8 @@
 // from the profile and the conversation; if the profile doesn't say, Jarvis
 // says so.
 
-import type { LlmCall, LlmError, LlmMessage } from "../llm/types.js";
+import { streamOrCall } from "../llm/stream.js";
+import type { LlmCall, LlmError, LlmMessage, LlmRequest } from "../llm/types.js";
 import type { ProfileSource } from "../profile.js";
 import { err, ok, type Result } from "../result.js";
 import { formatDay, formatNow } from "../time.js";
@@ -91,6 +92,8 @@ export const historyMessages = (history: readonly Turn[]): LlmMessage[] => {
 
 const toAppError = (e: LlmError): AppError => {
   switch (e.kind) {
+    case "aborted":
+      return { code: "cancelled", message: "Cancelled." };
     case "refused":
       return { code: "llm_refused", message: "Sorry, I can't help with that one." };
     case "timeout":
@@ -108,7 +111,7 @@ export const makePersonalAnswerer = (deps: {
   readonly capabilities?: string;
   readonly log?: Logger;
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
-  return async ({ question, history, memories, now }) => {
+  return async ({ question, history, memories, now, onText, signal }) => {
     const profile = await deps.profile();
     if (!profile.ok) {
       // The error names the path, never the profile's content.
@@ -116,17 +119,28 @@ export const makePersonalAnswerer = (deps: {
       return err({ code: "config", message: "I can't read your profile right now." });
     }
 
-    const result = await deps.llm({
+    const request: LlmRequest = {
       system: personalSystemPrompt(profile.value.text, deps.capabilities),
       cacheSystem: true,
       systemSuffix: personalSystemSuffix({ now, timeZone: deps.timeZone, memories }),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "medium",
       maxTokens: ANSWER_MAX_TOKENS,
-    });
+    };
+    // Streaming (#72): pass each piece of text on as it arrives; the full
+    // answer still comes back at the end, as without streaming.
+    let result: Awaited<ReturnType<LlmCall>>;
+    if (onText) {
+      const streamed = streamOrCall(deps.llm, request, signal);
+      for await (const delta of streamed.text) onText(delta);
+      result = await streamed.result;
+    } else {
+      result = await deps.llm(request);
+    }
 
     if (!result.ok) {
-      deps.log?.warn("answer model failed", { kind: result.error.kind });
+      if (result.error.kind === "aborted") deps.log?.info("answer cancelled");
+      else deps.log?.warn("answer model failed", { kind: result.error.kind });
       return err(toAppError(result.error));
     }
     if (result.value.kind !== "text" || result.value.text === "") {

@@ -5,6 +5,7 @@ import Anthropic, {
   APIConnectionError,
   APIConnectionTimeoutError,
   APIError,
+  APIUserAbortError,
   AuthenticationError,
   BadRequestError,
   InternalServerError,
@@ -15,6 +16,7 @@ import Anthropic, {
 import { err, ok, type Result } from "../result.js";
 import type {
   LlmCall,
+  LlmStream,
   LlmError,
   LlmMessage,
   LlmRequest,
@@ -30,6 +32,12 @@ type ContentBlockParam = Anthropic.Beta.Messages.BetaContentBlockParam;
 
 /** The one SDK call this provider makes; injected so tests can stub it. */
 export type CreateMessage = (params: CreateParams) => Promise<Message>;
+
+/** The streaming SDK call: text deltas as they arrive, then the full message. Injected so tests can stub it. */
+export type StreamMessage = (
+  params: CreateParams,
+  signal?: AbortSignal,
+) => { readonly deltas: AsyncIterable<string>; readonly final: () => Promise<Message> };
 
 const PROVIDER = "anthropic";
 
@@ -166,6 +174,7 @@ export const mapResponse = (message: Message, wantsJson: boolean): Result<LlmRes
 
 /** Most specific SDK error class first. Messages never include the API key or prompt. */
 export const mapError = (e: unknown): LlmError => {
+  if (e instanceof APIUserAbortError) return { kind: "aborted", message: "Cancelled", retryable: false };
   if (e instanceof APIConnectionTimeoutError) return { kind: "timeout", message: "Anthropic API timed out", retryable: true };
   if (e instanceof APIConnectionError) return { kind: "network", message: "Couldn't reach the Anthropic API", retryable: true };
   if (e instanceof RateLimitError) return { kind: "rate_limited", message: "Anthropic API rate limit hit", retryable: true };
@@ -185,24 +194,69 @@ export const mapError = (e: unknown): LlmError => {
   return { kind: "unknown", message: e instanceof Error ? e.message : String(e), retryable: false };
 };
 
+const ABORTED: LlmError = { kind: "aborted", message: "Cancelled", retryable: false };
+
 export const makeAnthropicLlm = (deps: {
   readonly model: string;
   readonly apiKey?: string;
   /** For tests; defaults to the real SDK client. */
   readonly create?: CreateMessage;
+  readonly streamMessage?: StreamMessage;
 }): LlmCall => {
-  const create: CreateMessage =
-    deps.create ??
-    ((): CreateMessage => {
-      const client = new Anthropic({ apiKey: deps.apiKey, timeout: 60_000, maxRetries: 2 });
-      return (params) => client.beta.messages.create(params);
-    })();
+  let client: Anthropic | undefined;
+  const sdk = (): Anthropic => (client ??= new Anthropic({ apiKey: deps.apiKey, timeout: 60_000, maxRetries: 2 }));
+  const create: CreateMessage = deps.create ?? ((params) => sdk().beta.messages.create(params));
+  const streamMessage: StreamMessage =
+    deps.streamMessage ??
+    ((params, signal) => {
+      const s = sdk().beta.messages.stream(params, signal ? { signal } : {});
+      return {
+        deltas: (async function* () {
+          for await (const event of s) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") yield event.delta.text;
+          }
+        })(),
+        final: () => s.finalMessage(),
+      };
+    });
 
-  return async (request) => {
+  const call = async (request: LlmRequest) => {
     try {
       return mapResponse(await create(buildParams(deps.model, request)), request.outputSchema !== undefined);
     } catch (e) {
       return err(mapError(e));
     }
   };
+
+  const stream: LlmStream = (request, signal) => {
+    if (signal?.aborted) {
+      return { text: (async function* () {})(), result: Promise.resolve(err(ABORTED)) };
+    }
+    let run: ReturnType<StreamMessage>;
+    try {
+      run = streamMessage(buildParams(deps.model, request), signal);
+    } catch (e) {
+      return { text: (async function* () {})(), result: Promise.resolve(err(mapError(e))) };
+    }
+    const result = (async () => {
+      try {
+        return mapResponse(await run.final(), request.outputSchema !== undefined);
+      } catch (e) {
+        return err(signal?.aborted ? ABORTED : mapError(e));
+      }
+    })();
+    return {
+      result,
+      // Errors end the text quietly; they're reported once, through `result`.
+      text: (async function* () {
+        try {
+          for await (const delta of run.deltas) yield delta;
+        } catch {
+          /* see result */
+        }
+      })(),
+    };
+  };
+
+  return Object.assign(call, { stream });
 };

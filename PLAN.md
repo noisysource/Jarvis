@@ -12,6 +12,7 @@ Work is tracked in GitHub Issues and the **Jarvis** project board
 | Milestone | Goal | Label |
 |---|---|---|
 | **M0: talk to Jarvis** | Chat page with voice, run locally; answers questions about you from your profile | `m0` |
+| **Voice** (proof of concept, English) | A real spoken conversation, all local except Claude: ~1.5 s from the end of your sentence to Jarvis's first audio, and you can interrupt it (#72–#76) | `voice` |
 | v0: KidClub invoices | Read-only Vendus tool; Cloud Run deploy | `after-m0`, `jarvis-v0` |
 | After v0 | Memory in Firestore (#24) and its performance (#56), phone access (#19; Pi + Tailscale #53), daily brief (#49), local speech (#54), local models via Ollama (#55) | `after-v0`, `backlog` |
 
@@ -118,6 +119,9 @@ question, and after a clarify response it re-sends the question with
 | `src/memory.ts` | `makeMemoryHooks` on a `MemoryStore` (load: ~20 facts/playbooks + 3 history lines per context; wrap-up applies `extract`'s decisions, one history line per conversation); `makeSafeMemoryHooks`: 2 s timeout, failures never fail a question | #23, #59 |
 | `src/memory-store.ts` | `MemoryStore` interface, word ranking, in-memory store | #59 |
 | `src/memory-extract.ts` | The wrap-up's extract step: one classifier-model call (question + final answer + related memories, never tool results) with a fixed JSON format, then `filterSuggestions` enforces every rule in code | #61 |
+| `src/llm/stream.ts` | `streamOrCall` (streams if the provider can, else one chunk), `streamedFrom` for stubs | #72 |
+| `src/sentences.ts` | Streaming sentence splitter, language as a parameter | #72 |
+| `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
 | `src/memory-rules.ts` | Pure rule checks: explicit "remember" and "forget" in the user's own words, secrets, business records, sensitive categories, EC cues + never-remember names | #61 |
@@ -180,6 +184,30 @@ finishes (never during; right away if muted). It closes after ~8 s of silence
 the server), or on the Stop tap. Typing ends the spoken conversation. If the
 browser refuses an automatic start (`not-allowed`, or `start()` throws), it's
 paused for the page and the normal mic button remains, with a note.
+
+**Voice (#72–#76).** A pipeline coordinated by a turn manager in the page:
+ears (local Whisper, `/transcribe`) → brain (`/ask`, streamed) → mouth
+(local TTS, `/speak`). English only for now; `Language` is a parameter
+everywhere, so pt-PT needs no redesign. Every local service listens on
+127.0.0.1 only, behind the same Host and JSON guards; audio is never stored
+and no conversation content is logged.
+
+- **Streaming answers (#72).** `POST /ask` with `Accept: text/event-stream`
+  sends `start {turnId}`, then `sentence {index, text}` as each sentence
+  completes (`src/sentences.ts`: abbreviations, decimals, initials, list
+  numbers; a long first sentence is cut at a clause so speech starts
+  sooner), then `done` with the full answer; clarify, handoff, "not
+  connected yet" and errors come as one `reply`. Without that header `/ask`
+  is unchanged. Only the answer model streams (`LlmCall.stream`, with
+  `streamOrCall` falling back to one chunk); routing, the precheck and the
+  memory rules are untouched. Leaving the stream cancels the model call.
+  Because a streamed answer finishes before it's been *spoken*, its wrap-up
+  waits (`src/turns.ts`) for the page's `POST /ask/spoken {turnId,
+  interrupted, spoken}`: played to the end → wrap up on the full answer;
+  interrupted → skip, unless the question explicitly asked to remember or
+  forget (not an opt-out), in which case wrap up on the question and what
+  was actually spoken. No report within 2 minutes: a finished answer counts
+  as heard, a cancelled one as interrupted.
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences
@@ -287,6 +315,13 @@ Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
 tests and build on every PR.
 
 ## Build order
+
+**Voice:** #72 streaming answers → #73 mouth (TtsProvider: Kokoro-FastAPI,
+Piper, browser; `/voices` audition page) → #74 ears (whisper.cpp with
+Metal, `small.en`) → #75 turn manager (Silero VAD, end of turn after
+~500 ms, barge-in, Safari echo fallback) → #76 latency (per-stage timings,
+browser in the logs, sticky context decided with real numbers).
+
 
 Done: #1 decisions · #2 scaffold · #3 CI
 

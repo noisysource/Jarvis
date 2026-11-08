@@ -14,10 +14,14 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { streamSSE } from "hono/streaming";
+import { z } from "zod";
 import { handleAsk } from "./ask.js";
 import { withLogFields } from "./log.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
 import type { MemoryStore } from "./memory-store.js";
+import { makeSentenceSplitter } from "./sentences.js";
+import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
 import { parseAskRequest } from "./request.js";
 import type { Deps } from "./types.js";
 import { WEB_SECURITY_HEADERS, type WebAssets } from "./web.js";
@@ -32,6 +36,18 @@ export type ServerEnv = { Variables: { requestId: string } };
 /** The Host values a local browser sends for this server. */
 export const localHosts = (port: number): readonly string[] => [`127.0.0.1:${port}`, `localhost:${port}`];
 
+/** The page asks for a streamed answer with `Accept: text/event-stream`. */
+const wantsStream = (accept: string | undefined): boolean =>
+  (accept ?? "").split(",").some((part) => part.split(";")[0]?.trim().toLowerCase() === "text/event-stream");
+
+const SpokenReport = z
+  .object({
+    turnId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/),
+    interrupted: z.boolean(),
+    spoken: z.string().max(4_000),
+  })
+  .strict();
+
 const isJson = (contentType: string | undefined): boolean =>
   (contentType ?? "").split(";")[0]?.trim().toLowerCase() === "application/json";
 
@@ -45,9 +61,14 @@ export const makeServer = (
     readonly web?: WebAssets;
     /** The memory store behind the Memories panel's routes. Unset = no /memories routes. */
     readonly memories?: MemoryStore;
+    /** Streamed answers waiting for their playback report (#72). */
+    readonly turns?: TurnRegistry;
+    readonly newTurnId?: () => string;
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
+  const newTurnId = options.newTurnId ?? randomUUID;
+  const turns = options.turns ?? makeTurnRegistry({ log: deps.log });
   const allowedHosts = options.allowedHosts?.map((h) => h.toLowerCase());
   const app = new Hono<ServerEnv>();
 
@@ -116,12 +137,76 @@ export const makeServer = (
       const request = parseAskRequest(body);
       if (!request.ok) return c.json(errorBody(request.error), 400);
 
-      const response = await handleAsk(
-        { ...deps, log: withLogFields(deps.log, { requestId: c.get("requestId") }) },
-        request.value,
-        { requestId: c.get("requestId") },
-      );
-      return c.json(response);
+      const requestId = c.get("requestId");
+      const askDeps = { ...deps, log: withLogFields(deps.log, { requestId }) };
+
+      if (!wantsStream(c.req.header("accept"))) {
+        return c.json(await handleAsk(askDeps, request.value, { requestId }));
+      }
+
+      // Streaming (#72): start, then each sentence as it completes, then
+      // done (an answer) or reply (anything else). Leaving cancels the answer.
+      return streamSSE(c, async (stream) => {
+        const started = performance.now();
+        const turnId = newTurnId();
+        const controller = new AbortController();
+        stream.onAbort(() => controller.abort());
+        c.req.raw.signal.addEventListener("abort", () => controller.abort());
+        const splitter = makeSentenceSplitter({ language: "en" });
+        let sentences = 0;
+        let firstSentenceMs: number | undefined;
+        let writes = Promise.resolve();
+        const send = (event: string, data: unknown): void => {
+          writes = writes.then(() => stream.writeSSE({ event, data: JSON.stringify(data) })).catch(() => undefined);
+        };
+        const sendSentences = (list: readonly string[]): void => {
+          for (const text of list) {
+            firstSentenceMs ??= Math.round(performance.now() - started);
+            send("sentence", { index: sentences, text });
+            sentences += 1;
+          }
+        };
+
+        send("start", { turnId });
+        const response = await handleAsk(askDeps, request.value, {
+          requestId,
+          signal: controller.signal,
+          onText: (delta) => sendSentences(splitter.push(delta)),
+          deferWrapUp: (turn) => turns.hold(turnId, turn),
+        });
+        if (response.type === "answer") {
+          sendSentences(splitter.flush());
+          send("done", response);
+        } else {
+          send("reply", response);
+        }
+        await writes;
+        askDeps.log.info("ask stream", {
+          outcome: controller.signal.aborted ? "cancelled" : response.type,
+          sentences,
+          ...(firstSentenceMs !== undefined ? { firstSentenceMs } : {}),
+          totalMs: Math.round(performance.now() - started),
+        });
+      });
+    },
+  );
+
+  // How a streamed answer's playback ended, so its wrap-up can be decided (turns.ts).
+  app.post(
+    "/ask/spoken",
+    async (c, next) => {
+      if (!isJson(c.req.header("content-type"))) {
+        deps.log.warn("rejected request", { requestId: c.get("requestId"), reason: "not_json" });
+        return c.json(errorBody("POST /ask/spoken needs Content-Type: application/json."), 415);
+      }
+      await next();
+    },
+    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }),
+    async (c) => {
+      const body = SpokenReport.safeParse(await c.req.json().catch(() => undefined));
+      if (!body.success) return c.json(errorBody("Send { turnId, interrupted, spoken }."), 400);
+      const known = turns.report(body.data.turnId, { interrupted: body.data.interrupted, spoken: body.data.spoken });
+      return known ? c.json({ ok: true }) : c.json(errorBody("No answer is waiting for that turn."), 404);
     },
   );
 
