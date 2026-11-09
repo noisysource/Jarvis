@@ -28,27 +28,37 @@ export const clarifyMessage = (options: readonly ContextOption[]): string => {
 
 const GENERIC_ERROR = "Sorry, something went wrong. Please try again.";
 
+/** How the context was decided, for latency timings (#76). */
+export type RouteHow = "precheck" | "picked" | "sticky" | "classifier";
+
 const resolveContext = async (
   deps: Deps,
   request: AskRequest,
   history: readonly Turn[],
-): Promise<{ kind: "context"; context: Context } | { kind: "unclear" } | { kind: "unknown" }> => {
+): Promise<{ how: RouteHow } & ({ kind: "context"; context: Context } | { kind: "unclear" } | { kind: "unknown" })> => {
   // The local precheck wins over a picked context, so EC/HRT requests always reach Kiro.
   const local = deps.precheck(request.question);
-  if (local.kind === "handoff") return { kind: "context", context: local.context };
+  if (local.kind === "handoff") return { how: "precheck", kind: "context", context: local.context };
   if (local.kind === "route") {
     const routed = deps.contexts.find((c) => c.id === local.contextId);
-    return routed ? { kind: "context", context: routed } : { kind: "unclear" };
+    return routed ? { how: "precheck", kind: "context", context: routed } : { how: "precheck", kind: "unclear" };
   }
 
   if (request.context !== undefined) {
     const chosen = deps.contexts.find((c) => c.id === request.context);
-    return chosen ? { kind: "context", context: chosen } : { kind: "unknown" };
+    return chosen ? { how: "picked", kind: "context", context: chosen } : { how: "picked", kind: "unknown" };
+  }
+  // Sticky context (#76, opt-in): a spoken follow-up stays in the context
+  // the conversation was answered in, so the classifier is skipped. Only an
+  // answered context sticks, and the precheck above has already run.
+  if (deps.stickyContext === true && request.stickyContext !== undefined && deps.isAnswered(request.stickyContext)) {
+    const sticky = deps.contexts.find((c) => c.id === request.stickyContext);
+    if (sticky && sticky.handling.kind !== "handoff") return { how: "sticky", kind: "context", context: sticky };
   }
   const classification = await deps.classify({ question: request.question, history });
-  if (classification.kind === "unclear") return { kind: "unclear" };
+  if (classification.kind === "unclear") return { how: "classifier", kind: "unclear" };
   const context = deps.contexts.find((c) => c.id === classification.contextId);
-  return context ? { kind: "context", context } : { kind: "unclear" };
+  return context ? { how: "classifier", kind: "context", context } : { how: "classifier", kind: "unclear" };
 };
 
 /** A streamed (spoken) turn's wrap-up, handed to the caller to run once playback is known (see turns.ts). */
@@ -70,6 +80,67 @@ export type AskMeta = {
    * the wrap-up over, to run once it's known what was actually spoken.
    */
   readonly deferWrapUp?: (turn: DeferredWrapUp) => void;
+  /** Latency timings (#76): how the context was decided and how long that and the memories took. Numbers only. */
+  readonly onStage?: (
+    stage: "route" | "memories",
+    fields: { readonly ms: number; readonly how?: RouteHow; readonly speculative?: "used" | "discarded" },
+  ) => void;
+};
+
+/** The context answered speculatively while the classifier runs (#76, SPECULATIVE_ANSWER=on). */
+const SPECULATIVE_CONTEXT = "personal";
+
+/**
+ * Speculative answer (#76, opt-in): when the classifier will run (no picked
+ * or sticky context, and the local precheck found nothing), the personal
+ * answer starts at the same time. Its text is held back until the classifier
+ * agrees, then sent on; if it picks anything else, the speculative answer is
+ * cancelled and thrown away (no wrap-up, nothing sent).
+ */
+const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Turn[], meta: AskMeta) => {
+  if (deps.speculativeAnswer !== true || request.context !== undefined || !deps.isAnswered(SPECULATIVE_CONTEXT as Context["id"])) return undefined;
+  if (deps.precheck(request.question).kind !== "none") return undefined;
+  const stickyWouldApply = deps.stickyContext === true && request.stickyContext !== undefined && deps.isAnswered(request.stickyContext);
+  if (stickyWouldApply) return undefined;
+  const context = deps.contexts.find((c) => c.id === SPECULATIVE_CONTEXT && c.handling.kind === "answer");
+  if (!context) return undefined;
+
+  const controller = new AbortController();
+  meta.signal?.addEventListener("abort", () => controller.abort());
+  const held: string[] = [];
+  let live = false;
+  const onText = (delta: string): void => {
+    if (live) meta.onText?.(delta);
+    else held.push(delta);
+  };
+  const run = (async () => {
+    const memories = await deps.memory.loadMemories({ question: request.question, contextId: context.id });
+    const answer = await deps.answer({
+      context,
+      question: request.question,
+      history,
+      memories,
+      now: deps.now(),
+      onText,
+      signal: controller.signal,
+      ...(request.spoken === true ? { spoken: true } : {}),
+      ...(request.brain ? { brain: request.brain } : {}),
+    });
+    return { memories, answer };
+  })();
+  return {
+    context,
+    /** The classifier agreed: send what's held, then the rest as it comes. */
+    use: () => {
+      live = true;
+      for (const d of held.splice(0)) meta.onText?.(d);
+      return run;
+    },
+    discard: () => {
+      controller.abort();
+      void run.catch(() => undefined);
+    },
+  };
 };
 
 /**
@@ -121,7 +192,16 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     }
   }
   try {
+    const routeStarted = performance.now();
+    const speculation = startSpeculation(deps, request, history, meta);
     const resolved = await resolveContext(deps, request, history);
+    const useSpeculation = speculation !== undefined && resolved.kind === "context" && resolved.context.id === speculation.context.id;
+    if (speculation && !useSpeculation) speculation.discard();
+    meta.onStage?.("route", {
+      ms: Math.round(performance.now() - routeStarted),
+      how: resolved.how,
+      ...(speculation ? { speculative: useSpeculation ? "used" : "discarded" } : {}),
+    });
 
     if (resolved.kind === "unknown") {
       deps.log.warn("ask", { outcome: "unknown_context" });
@@ -143,18 +223,29 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     }
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
-    const memories =
-      deps.isAnswered(context.id) ? await deps.memory.loadMemories({ question: request.question, contextId: context.id }) : [];
-    const answer = await deps.answer({
-      context,
-      question: request.question,
-      history,
-      memories,
-      now: deps.now(),
-      ...(meta.onText ? { onText: meta.onText } : {}),
-      ...(meta.signal ? { signal: meta.signal } : {}),
-      ...(request.brain ? { brain: request.brain } : {}),
-    });
+    const memoriesStarted = performance.now();
+    const { memories, answer } = useSpeculation
+      ? await speculation.use()
+      : await (async () => {
+          const loaded = deps.isAnswered(context.id)
+            ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
+            : [];
+          meta.onStage?.("memories", { ms: Math.round(performance.now() - memoriesStarted) });
+          return {
+            memories: loaded,
+            answer: await deps.answer({
+              context,
+              question: request.question,
+              history,
+              memories: loaded,
+              now: deps.now(),
+              ...(meta.onText ? { onText: meta.onText } : {}),
+              ...(meta.signal ? { signal: meta.signal } : {}),
+              ...(request.spoken === true ? { spoken: true } : {}),
+              ...(request.brain ? { brain: request.brain } : {}),
+            }),
+          };
+        })();
 
     /** The wrap-up, with the given text as the answer. Runs after the reply, in the background. */
     const runWrapUp = (answerText: string): void =>

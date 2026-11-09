@@ -60,6 +60,25 @@ const recordingLog = () => {
   return { log, entries };
 };
 
+describe("spoken answers (#76)", () => {
+  it("tells the model that a cut-off reply (ending in —) was an interruption, not something to apologise for", () => {
+    expect(PERSONAL_INSTRUCTIONS).toContain("ends with \"—\" was cut off because they interrupted you");
+    expect(PERSONAL_INSTRUCTIONS).toContain("Don't apologise for it, mention it or go back to it");
+  });
+
+  it("answer spoken turns without thinking first when VOICE_THINKING is off; typed turns are unchanged", async () => {
+    const { llm, requests } = stubLlm();
+    const answer = makePersonalAnswerer({ llm, profile: profileSource(), timeZone: "Europe/Lisbon", spokenThinking: "off" });
+    await answer({ ...input(), spoken: true });
+    await answer(input());
+    expect(requests[0]?.thinking).toBe("off");
+    expect(requests[1]?.thinking).toBeUndefined();
+    const on = stubLlm();
+    await makePersonalAnswerer({ llm: on.llm, profile: profileSource(), timeZone: "Europe/Lisbon", spokenThinking: "on" })({ ...input(), spoken: true });
+    expect(on.requests[0]?.thinking).toBeUndefined();
+  });
+});
+
 describe("makePersonalAnswerer", () => {
   it("answers with one model call and no tools", async () => {
     const { llm, requests } = stubLlm();

@@ -53,6 +53,7 @@ export const personalInstructions = (name?: string): string => {
     "",
     "Also:",
     "- Questions that aren't about them (general knowledge, how-to, maths, time zones) answer normally.",
+    "- A reply of yours in the conversation that ends with \"—\" was cut off because they interrupted you, on purpose: they want to move on. Don't apologise for it, mention it or go back to it; answer what they say now. Only return to it if they ask.",
     "- Use the current date and time given below for anything relative: ages, \"next Tuesday\", how long until something.",
     "- If they ask what you can do, answer from the \"What Jarvis can do\" section, if there is one.",
     "- If they ask what you remember about them, answer from the memories below (there may be none), and tell them they can see and delete everything in the Memories panel.",
@@ -133,8 +134,10 @@ export const makePersonalAnswerer = (deps: {
   /** "What Jarvis can do", for questions about Jarvis itself. Stable text, so it's cached with the profile. */
   readonly capabilities?: string;
   readonly log?: Logger;
+  /** Latency (#76): "off" answers spoken turns without thinking first, so the first words come sooner. */
+  readonly spokenThinking?: "on" | "off";
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
-  return async ({ question, history, memories, now, onText, signal }) => {
+  return async ({ question, history, memories, now, onText, signal, spoken }) => {
     const profile = await deps.profile();
     if (!profile.ok) {
       // The error names the path, never the profile's content.
@@ -148,6 +151,7 @@ export const makePersonalAnswerer = (deps: {
       systemSuffix: personalSystemSuffix({ now, timeZone: deps.timeZone, memories }),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "medium",
+      ...(spoken === true && deps.spokenThinking === "off" ? { thinking: "off" as const } : {}),
       maxTokens: ANSWER_MAX_TOKENS,
     };
     // Streaming (#72): pass each piece of text on as it arrives; the full

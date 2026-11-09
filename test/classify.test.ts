@@ -70,6 +70,17 @@ describe("local precheck runs first", () => {
   });
 });
 
+describe("classifier thinking (#76)", () => {
+  it("asks for no thinking when configured off, and leaves it to the model otherwise", async () => {
+    const off = stubLlm({ context: "personal" });
+    await makeClassifier({ contexts, llm: off.llm, thinking: "off" })({ question: "When is my daughter's birthday?", history: [] });
+    expect(off.requests[0]?.thinking).toBe("off");
+    const on = stubLlm({ context: "personal" });
+    await makeClassifier({ contexts, llm: on.llm, thinking: "on" })({ question: "When is my daughter's birthday?", history: [] });
+    expect(on.requests[0]?.thinking).toBeUndefined();
+  });
+});
+
 describe("classifier model", () => {
   it("returns the context the model picks", async () => {
     const { llm } = stubLlm({ context: "kidclub" });

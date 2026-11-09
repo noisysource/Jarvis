@@ -46,6 +46,7 @@ describe("bare mode prompt (#88)", () => {
     expect(result).toEqual(ok({ kind: "answer", text: "Hi!" }));
     expect(requests[0]?.system).toBe(barePrompt("Alex"));
     expect(requests[0]?.systemSuffix).toBeUndefined();
+    expect(requests[0]?.thinking).toBe("off"); // a conversation: no thinking first (#76)
     expect(requests[0]?.messages).toEqual([
       { role: "user", text: "Hello" },
       { role: "assistant", text: "Hi Alex!" },

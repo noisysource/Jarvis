@@ -310,14 +310,80 @@ describe("POST /ask content type (cross-site guard)", () => {
   });
 });
 
+describe("POST /latency (#76)", () => {
+  const report = {
+    browser: "safari 18",
+    spoken: true,
+    voice: "kokoro",
+    route: "classifier",
+    endOfTurnMs: 512,
+    whisperMs: 300,
+    routeMs: 280,
+    firstTokenMs: 640,
+    firstSentenceMs: 670,
+    voiceFirstAudioMs: 250,
+    fillerMs: 810,
+    firstChunkChars: 58,
+    echoPeak: 62,
+    echoRunMs: 96,
+    speculative: "used",
+    totalMs: 1760,
+  };
+  it("logs a turn's numbers with the browser", async () => {
+    const { app, lines } = setup({ allowedHosts: localHosts(8080) });
+    const res = await app.request("/latency", {
+      method: "POST",
+      headers: { host: "127.0.0.1:8080", "content-type": "application/json" },
+      body: JSON.stringify(report),
+    });
+    expect(res.status).toBe(200);
+    const logged = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.message === "latency");
+    expect(logged).toMatchObject(report);
+  });
+
+  it("takes numbers only: no text fields, no strings in number fields, behind the guards", async () => {
+    const { app, lines } = setup({ allowedHosts: localHosts(8080) });
+    const post = (body: unknown, headers: Record<string, string> = {}) =>
+      app.request("/latency", { method: "POST", headers: { host: "127.0.0.1:8080", "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    expect((await post({ ...report, question: "When does my passport expire?" })).status).toBe(400);
+    expect((await post({ ...report, totalMs: "fast" })).status).toBe(400);
+    expect((await post({ ...report, browser: "When does my passport expire?" })).status).toBe(400);
+    expect((await post(report, { "content-type": "text/plain" })).status).toBe(415);
+    expect((await post(report, { host: "evil.example" })).status).toBe(403);
+    expect(lines.join("\n")).not.toContain("passport");
+  });
+});
+
+describe("POST /warm (#76)", () => {
+  it("warms the model connection when asked, behind the Host guard", async () => {
+    let warmed = 0;
+    const { app } = setup({ allowedHosts: localHosts(8080) });
+    const deps = { contexts, precheck: makePrecheck(contexts), log: makeJsonLogger({ write: () => undefined }) } as unknown as Deps;
+    const withWarm = makeServer(deps, { allowedHosts: localHosts(8080), warm: () => (warmed += 1) });
+    expect((await withWarm.request("/warm", { method: "POST", headers: { host: "127.0.0.1:8080" } })).status).toBe(200);
+    expect((await withWarm.request("/warm", { method: "POST", headers: { host: "evil.example" } })).status).toBe(403);
+    expect(warmed).toBe(1);
+    expect((await app.request("/warm", { method: "POST", headers: { host: "127.0.0.1:8080" } })).status).toBe(404); // not set up: no route
+  });
+});
+
 describe("GET /voice-settings (#75)", () => {
   it("gives the page the end of turn and barge-in mode per browser", async () => {
     const lines: string[] = [];
     const deps = { contexts, precheck: makePrecheck(contexts), log: makeJsonLogger({ write: (l) => lines.push(l) }) } as unknown as Deps;
-    const turn = { endOfTurnMs: 650, bargeIn: { chrome: "vad", safari: "push", other: "strict" } } as const;
-    const app = makeServer(deps, { allowedHosts: localHosts(8080), turn });
+    const turn = {
+      endOfTurnMs: 650,
+      bargeIn: { chrome: "vad", safari: "push", other: "strict" },
+      spokenThinking: "off",
+      classifierThinking: "off",
+      stickyContext: false,
+      speculativeAnswer: false,
+      firstChunkChars: 60,
+    } as const;
+    const app = makeServer(deps, { allowedHosts: localHosts(8080), turn, dev: true });
     const res = await app.request("/voice-settings", { headers: { host: "127.0.0.1:8080" } });
-    expect(await res.json()).toEqual({ language: "en", ...turn });
+    // Only what the page needs; the server-side tuning stays on the server.
+    expect(await res.json()).toEqual({ language: "en", endOfTurnMs: 650, bargeIn: turn.bargeIn, dev: true });
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect((await app.request("/voice-settings", { headers: { host: "evil.example" } })).status).toBe(403);
   });

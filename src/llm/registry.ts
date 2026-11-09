@@ -5,6 +5,7 @@ import { err, ok, type Result } from "../result.js";
 import { makeAnthropicLlm } from "./anthropic.js";
 import { makeOllamaLlm } from "./ollama.js";
 import type { ModelRef, Provider } from "./model-ref.js";
+import type { Logger } from "../types.js";
 import type { LlmCall } from "./types.js";
 
 /** API keys per provider, resolved at startup (see secrets.ts). */
@@ -15,11 +16,17 @@ export type ProviderUrls = { readonly ollama?: URL; readonly ollamaThink?: boole
 
 export const DEFAULT_OLLAMA_URL = new URL("http://127.0.0.1:11434");
 
-export const makeLlm = (ref: ModelRef, keys: ProviderKeys, urls: ProviderUrls = {}): Result<LlmCall, string> => {
+/** `log`: each HTTP attempt (#76); the URLs: where local providers run (#88). */
+export const makeLlm = (
+  ref: ModelRef,
+  keys: ProviderKeys,
+  options: ProviderUrls & { readonly log?: Logger } = {},
+): Result<LlmCall, string> => {
+  const urls = options;
   switch (ref.provider) {
     case "anthropic": {
       const apiKey = keys.anthropic;
-      return apiKey ? ok(makeAnthropicLlm({ model: ref.model, apiKey })) : err("No API key for provider anthropic");
+      return apiKey ? ok(makeAnthropicLlm({ model: ref.model, apiKey, ...(options.log ? { log: options.log } : {}) })) : err("No API key for provider anthropic");
     }
     case "ollama":
       return ok(

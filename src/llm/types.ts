@@ -67,6 +67,11 @@ export type LlmRequest = {
   /** Ask for JSON matching this schema; the response is then `kind: "json"`. */
   readonly outputSchema?: JsonObjectSchema;
   readonly effort?: Effort;
+  /**
+   * "off": answer without thinking first, for latency (#76): the first words
+   * come sooner. Each provider maps it to what its model allows.
+   */
+  readonly thinking?: "off";
   readonly maxTokens: number;
 };
 

@@ -133,6 +133,7 @@ question, and after a clarify response it re-sends the question with
 | `src/stt/hints.ts` | Whisper name hints from the profile and `data/whisper-hints.txt`; never logged | #83 |
 | `src/web/speaker.js`, `src/web/turn-lib.js` | Speaking a reply sentence by sentence (prefetch, fallback, what was said); SSE parser, turn detector, phase labels | #82, #75 |
 | `src/web/silero.js`, `src/web/vad.js` | Silero VAD v5 on onnxruntime-web, served from `/vendor/…` | #75 |
+| `scripts/voice-bench.ts` | `npm run voice:bench`: times the running Kokoro and Whisper | #76 |
 | `src/turns.ts` | Holds a streamed answer's wrap-up until playback is reported; `decideWrapUp` | #72 |
 | `src/memory-routes.ts` | Memories panel API: `GET /memories`, `DELETE /memories/:id`, `POST /memories/wipe`, `POST /memories/seen`; Host guard, JSON-only POSTs, `no-store`, no memory text in logs | #62 |
 | `src/memory-cli.ts`, `scripts/memory.ts` | `npm run memory -- list / delete / wipe / export` on the same store as the server | #62 |
@@ -262,6 +263,74 @@ and no conversation content is logged.
   as a fallback when the service is down or `/speak` fails, with a note.
   Every streamed answer sends its playback report to `/ask/spoken`.
 
+- **Latency (#76).** Every turn is timed:
+  - end of turn (the silence waited)
+  - Whisper (round trip, plus the server's time in a `Server-Timing` header)
+  - routing (precheck, picked, sticky or classifier), and memories
+  - Claude's first token and first sentence (the SSE `timing` event)
+  - the voice's first audio
+  - the total, from the end of your speech to the first sound
+
+  The page shows them under each answer in development and posts them,
+  numbers only, with the browser and its version, to `POST /latency` (a
+  strict schema that accepts no text). They're logged as one `latency`
+  line. **The bottleneck was thinking:** Claude Sonnet 5.5 and Claude
+  Haiku 5.5 think by default, and the thinking is hidden, so the first
+  sentence came only after it. Spoken answers (`spoken: true` from the
+  page) now go without thinking (`VOICE_THINKING=off`; Sonnet 5.5's
+  `between_tools`, `disabled` on models that allow it, low effort on Opus
+  5.5 and Fable, which can't turn it off), and so does the classifier
+  (`CLASSIFIER_THINKING=off`). Typed answers keep thinking. The first chunk
+  is cut at a clause after 60 characters (`VOICE_FIRST_CHUNK_CHARS`).
+  `voice:up` takes `KOKORO_DEVICE=mps|cpu` and warms Kokoro and Whisper up;
+  `npm run voice:bench` times them. **Your first Mac run** (3–4 s typical;
+  one 12 s first turn):
+  - **Self-interruption:** Chrome's `vad` heard "Sure" through the
+    speakers, so Chrome now defaults to `strict` too. Barge-in is ignored
+    for 600 ms after his voice starts. The timing line shows the echo peak
+    and run, for tuning. The prompt tells Claude that a reply ending in "—"
+    was a deliberate interruption: no apologising, no going back to it.
+  - **Cold start:** the first classifier call takes the new connection, and
+    the first use of its JSON schema, which is compiled once on Anthropic's
+    side. Both are now paid by a warm-up (at startup and on `POST /warm`
+    when a conversation starts). Connections are kept open for 30 s
+    (`undici` with keep-alive; Node's own fetch closes them after about
+    4 s). Each HTTP attempt is logged (status, ms, retrying) to tell a retry
+    from slowness.
+  - **Speculative answer, opt-in:** `SPECULATIVE_ANSWER=on` starts the
+    personal answer while the classifier runs. Its text is held back until
+    the classifier agrees, and it's cancelled otherwise. It's off by
+    default for the same EC reason as sticky context.
+  - **First chunk:** a first sentence with no comma-like mark is cut at a
+    word once it's 2× `VOICE_FIRST_CHUNK_CHARS`. The timing line shows the
+    first chunk's length next to the voice's first audio.
+  - **Fillers:** one only starts if the first sentence hasn't arrived yet
+    (once it has, its audio is moments away, and a filler would only delay
+    it). Starting the answer no longer stops a filler that's playing; the
+    answer waits for it to end.
+  - **Median:** each turn is reported once the stream and the playback are
+    both over, in either order. It used to be lost when the first sound
+    came after the stream ended.
+
+  **Sticky context is opt-in**
+  (`STICKY_CONTEXT=on`): a spoken follow-up stays in the last answered
+  context, which the page sends as `stickyContext`, skipping the
+  classifier. The precheck still runs first and handoff contexts never
+  stick, but an EC question the precheck misses would reach the answer
+  model, which the EC rule forbids, so it stays off unless you decide
+  otherwise.
+
+- **Fillers (#86).** On a spoken turn, if no answer audio has started 800
+  ms after the end of your speech, a short filler plays. There are five
+  fixed lines (`FILLERS`), pre-rendered through `/speak` in the configured
+  voice when the page loads, or spoken by the browser voice as a fallback.
+  Never the same one twice in a row, never on two spoken turns in a row,
+  and never once the first sentence is about to play. If the first
+  sentence arrives during a filler, it starts when the filler ends. They're
+  not part of the answer: not in history, the playback report or memory.
+  Barge-in and Stop stop them. With tools (later), a tool will pass its own
+  honest line ("Let me check your calendar") through the same path.
+
 - **Turn manager (#75).** One mic for the conversation (`mic.js`: echo
   cancellation, noise suppression, auto gain; resampled to 16 kHz and cut
   into 512-sample frames; the last minute kept). Each frame goes through
@@ -338,8 +407,19 @@ the current architecture.
 6. Chatterbox and Dia2 as voice providers on `/voices`, to compare with
    Daniel.
 
-**Next milestone, "Trust":** an honesty guard in code (claimed actions
-blocked when no tool did them), then your data and tools.
+**Next milestone, "Trust"** (#91):
+1. **An honesty guard in code, for every brain.**
+   - If a reply claims an action ("I've scheduled/created/sent/booked/
+     added…", "Done") and no tool ran in that turn, it isn't shown.
+   - It's replaced with an honest "I can't do that yet".
+   - The blocked claim is logged as numbers and a category only, no text.
+2. **Haiku as a brain option** (☁️ Claude Haiku), for cheap chat.
+3. **Bring back, one at a time, each behind its own switch and checked
+   with the evals:** the profile, then memory, then contexts and the
+   classifier.
+4. **The first real tool, behind your explicit OK:** the calendar, read
+   first and then create. The reply must come from the tool's result,
+   never the model's word.
 
 **Adding things back, one at a time, each behind its own switch:**
 1. the profile

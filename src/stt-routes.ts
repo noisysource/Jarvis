@@ -76,6 +76,7 @@ export const registerSttRoutes = (
       }
       deps.log.info("transcribe", { ...fields, empty: result.value.text === "" });
       c.header("Cache-Control", "no-store");
+      c.header("Server-Timing", `whisper;dur=${fields.transcribeMs}`); // for the page's timing line (#76)
       return c.json({ text: result.value.text });
     },
   );

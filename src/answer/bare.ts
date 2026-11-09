@@ -51,6 +51,8 @@ export const makeBareAnswerer = (deps: {
       cacheSystem: true,
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "low",
+      // A conversation: answer without thinking first (Claude; Ollama has its own think setting).
+      thinking: "off",
       maxTokens: BARE_MAX_TOKENS,
     };
     let result: Awaited<ReturnType<LlmCall>>;

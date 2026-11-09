@@ -76,6 +76,32 @@ const SpokenReport = z
   })
   .strict();
 
+/** One turn's latency from the page (#76): numbers, the browser and the voice, never what was said. */
+const ms = z.number().int().min(0).max(600_000).optional();
+const LatencyReport = z
+  .object({
+    browser: z.string().regex(/^[a-z]+( \d{1,4})?$/),
+    spoken: z.boolean(),
+    voice: z.enum(["kokoro", "piper", "browser", "none"]),
+    route: z.enum(["precheck", "picked", "sticky", "classifier"]).optional(),
+    brain: z.enum(["claude", "local"]).optional(),
+    speculative: z.enum(["used", "discarded"]).optional(),
+    endOfTurnMs: ms,
+    whisperMs: ms,
+    whisperServerMs: ms,
+    routeMs: ms,
+    memoriesMs: ms,
+    firstTokenMs: ms,
+    firstSentenceMs: ms,
+    voiceFirstAudioMs: ms,
+    fillerMs: ms,
+    firstChunkChars: z.number().int().min(0).max(5000).optional(),
+    echoPeak: z.number().int().min(0).max(100).optional(),
+    echoRunMs: ms,
+    totalMs: ms,
+  })
+  .strict();
+
 const isJson = (contentType: string | undefined): boolean =>
   (contentType ?? "").split(";")[0]?.trim().toLowerCase() === "application/json";
 
@@ -98,6 +124,10 @@ export const makeServer = (
     readonly stt?: SttProvider;
     /** How the page runs a spoken turn (#75): GET /voice-settings. */
     readonly turn?: TurnConfig;
+    /** Development: the page shows a timing line under each answer (#76). */
+    readonly dev?: boolean;
+    /** Warms the model connection (#76): POST /warm, when a spoken conversation starts. */
+    readonly warm?: () => void;
     /** The two brains the page can pick (#88): GET /brains. Ids and labels only. */
     readonly brains?: { readonly default: "claude" | "local"; readonly labels: { readonly claude: string; readonly local: string } };
   } = {},
@@ -189,9 +219,12 @@ export const makeServer = (
         const controller = new AbortController();
         stream.onAbort(() => controller.abort());
         c.req.raw.signal.addEventListener("abort", () => controller.abort());
-        const splitter = makeSentenceSplitter({ language: "en" });
+        const splitter = makeSentenceSplitter({ language: "en", ...(options.turn ? { firstClauseAfter: options.turn.firstChunkChars } : {}) });
         let sentences = 0;
         let firstSentenceMs: number | undefined;
+        // Latency (#76): numbers only, never content.
+        let firstTokenMs: number | undefined;
+        const stages: { routeMs?: number; route?: string; memoriesMs?: number; speculative?: string } = {};
         let writes = Promise.resolve();
         const send = (event: string, data: unknown): void => {
           writes = writes.then(() => stream.writeSSE({ event, data: JSON.stringify(data) })).catch(() => undefined);
@@ -208,22 +241,32 @@ export const makeServer = (
         const response = await handleAsk(askDeps, request.value, {
           requestId,
           signal: controller.signal,
-          onText: (delta) => sendSentences(splitter.push(delta)),
+          onText: (delta) => {
+            firstTokenMs ??= Math.round(performance.now() - started);
+            sendSentences(splitter.push(delta));
+          },
           deferWrapUp: (turn) => turns.hold(turnId, turn),
+          onStage: (stage, fields) => {
+            if (stage === "route") {
+              stages.routeMs = fields.ms;
+              if (fields.how) stages.route = fields.how;
+              if (fields.speculative) stages.speculative = fields.speculative;
+            } else {
+              stages.memoriesMs = fields.ms;
+            }
+          },
         });
-        if (response.type === "answer") {
-          sendSentences(splitter.flush());
-          send("done", response);
-        } else {
-          send("reply", response);
-        }
-        await writes;
-        askDeps.log.info("ask stream", {
-          outcome: controller.signal.aborted ? "cancelled" : response.type,
-          sentences,
+        if (response.type === "answer") sendSentences(splitter.flush());
+        const timing = {
+          ...stages,
+          ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
           ...(firstSentenceMs !== undefined ? { firstSentenceMs } : {}),
           totalMs: Math.round(performance.now() - started),
-        });
+        };
+        send("timing", timing);
+        send(response.type === "answer" ? "done" : "reply", response);
+        await writes;
+        askDeps.log.info("ask stream", { outcome: controller.signal.aborted ? "cancelled" : response.type, sentences, ...timing });
       });
     },
   );
@@ -251,6 +294,31 @@ export const makeServer = (
     },
   );
 
+  // A spoken conversation is starting: warm the model connection (#76). No body, nothing returned.
+  const warm = options.warm;
+  if (warm) {
+    app.post("/warm", (c) => {
+      warm();
+      return c.json({ ok: true });
+    });
+  }
+
+  // Latency per turn (#76): logged as numbers only, with the browser, to compare stages and browsers.
+  app.post(
+    "/latency",
+    async (c, next) => {
+      if (!isJson(c.req.header("content-type"))) return c.json(errorBody("POST /latency needs Content-Type: application/json."), 415);
+      await next();
+    },
+    bodyLimit({ maxSize: 4 * 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }),
+    async (c) => {
+      const body = LatencyReport.safeParse(await c.req.json().catch(() => undefined));
+      if (!body.success) return c.json(errorBody("Send the turn's timings: numbers only."), 400);
+      deps.log.info("latency", { requestId: c.get("requestId"), ...body.data });
+      return c.json({ ok: true });
+    },
+  );
+
   if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
   if (options.stt) registerSttRoutes(app, { provider: options.stt, language: "en", log: deps.log });
   const brains = options.brains;
@@ -270,7 +338,7 @@ export const makeServer = (
   if (turnConfig) {
     app.get("/voice-settings", (c) => {
       c.header("Cache-Control", "no-store");
-      return c.json({ language: "en", ...turnConfig });
+      return c.json({ language: "en", endOfTurnMs: turnConfig.endOfTurnMs, bargeIn: turnConfig.bargeIn, dev: options.dev === true });
     });
   }
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });

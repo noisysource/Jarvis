@@ -14,6 +14,8 @@ import Anthropic, {
   RateLimitError,
 } from "@anthropic-ai/sdk";
 import { err, ok, type Result } from "../result.js";
+import type { Logger } from "../types.js";
+import { keepAliveFetch, makeSdkLogger } from "./http.js";
 import type {
   LlmCall,
   LlmStream,
@@ -85,8 +87,24 @@ const toMessageParam = (message: LlmMessage): MessageParam => {
   return { role: "assistant", content: blocks.length > 0 ? blocks : message.text };
 };
 
-export const buildParams = (model: string, request: LlmRequest): CreateParams => ({
+/**
+ * Thinking off (#76), per model: Claude Sonnet 5.5 turns it off with
+ * `between_tools`; Claude Haiku 5.5, Opus 5, Sonnet 5 and older take
+ * `disabled` (both need effort high or below, which is all Jarvis uses).
+ * Claude Opus 5.5 and Fable can't turn it off, so the effort is lowered.
+ */
+export const thinkingOff = (model: string): Pick<CreateParams, "thinking"> & { effort?: LlmRequest["effort"] } => {
+  if (/^claude-sonnet-5-5/.test(model)) return { thinking: { type: "between_tools" } };
+  if (/^claude-(opus-5-5|fable|mythos)/.test(model)) return { effort: "low" };
+  return { thinking: { type: "disabled" } };
+};
+
+export const buildParams = (model: string, request: LlmRequest): CreateParams => {
+  const off = request.thinking === "off" ? thinkingOff(model) : undefined;
+  const effort = off ? (off.effort ?? request.effort) : request.effort;
+  return {
   model,
+  ...(off?.thinking ? { thinking: off.thinking } : {}),
   max_tokens: request.maxTokens,
   system:
     request.cacheSystem || request.systemSuffix
@@ -110,10 +128,10 @@ export const buildParams = (model: string, request: LlmRequest): CreateParams =>
         })),
       }
     : {}),
-  ...(request.effort || request.outputSchema
+  ...(effort || request.outputSchema
     ? {
         output_config: {
-          ...(request.effort ? { effort: request.effort } : {}),
+          ...(effort ? { effort } : {}),
           ...(request.outputSchema
             ? { format: { type: "json_schema" as const, schema: { ...request.outputSchema } } }
             : {}),
@@ -121,7 +139,8 @@ export const buildParams = (model: string, request: LlmRequest): CreateParams =>
       }
     : {}),
   ...(SERVER_FALLBACK_MODELS.has(model) ? { betas: [FALLBACK_BETA], fallbacks: "default" as const } : {}),
-});
+  };
+};
 
 export const mapResponse = (message: Message, wantsJson: boolean): Result<LlmResponse, LlmError> => {
   const common = {
@@ -202,9 +221,18 @@ export const makeAnthropicLlm = (deps: {
   /** For tests; defaults to the real SDK client. */
   readonly create?: CreateMessage;
   readonly streamMessage?: StreamMessage;
+  /** Each HTTP attempt's status and time (numbers only, #76). */
+  readonly log?: Logger;
 }): LlmCall => {
   let client: Anthropic | undefined;
-  const sdk = (): Anthropic => (client ??= new Anthropic({ apiKey: deps.apiKey, timeout: 60_000, maxRetries: 2 }));
+  const sdk = (): Anthropic =>
+    (client ??= new Anthropic({
+      apiKey: deps.apiKey,
+      timeout: 60_000,
+      maxRetries: 2,
+      fetch: keepAliveFetch,
+      ...(deps.log ? { logger: makeSdkLogger(deps.log, deps.model), logLevel: "info" as const } : {}),
+    }));
   const create: CreateMessage = deps.create ?? ((params) => sdk().beta.messages.create(params));
   const streamMessage: StreamMessage =
     deps.streamMessage ??

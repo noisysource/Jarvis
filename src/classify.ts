@@ -76,6 +76,7 @@ const readContextId = (value: unknown, contexts: readonly Context[]): Classifica
 export const makeClassifier = (deps: {
   readonly contexts: readonly Context[];
   readonly llm: LlmCall;
+  readonly thinking?: "on" | "off";
   readonly log?: Logger;
 }): Deps["classify"] => {
   const precheck = makePrecheck(deps.contexts);
@@ -93,6 +94,8 @@ export const makeClassifier = (deps: {
       messages: [{ role: "user", text: classifierUserMessage(question, history) }],
       outputSchema,
       effort: "low",
+      // Latency (#76): picking a context needs no thinking first.
+      ...(deps.thinking === "off" ? { thinking: "off" as const } : {}),
       maxTokens: CLASSIFIER_MAX_TOKENS,
     });
 

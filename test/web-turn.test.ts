@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { makeSpeaker, type PlaybackResult } from "../src/web/speaker.js";
-import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, spokenText, TURN } from "../src/web/turn-lib.js";
+import {
+  browserFamily,
+  browserLabel,
+  chooseVoice,
+  FILLER_AFTER_MS,
+  FILLERS,
+  fillerAllowed,
+  formatTiming,
+  makeTurnDetector,
+  medianOf,
+  parseSse,
+  phaseLabel,
+  pickFiller,
+  spokenText,
+  timingStages,
+  TURN,
+} from "../src/web/turn-lib.js";
 
 describe("parseSse (#82)", () => {
   it("reads complete events and keeps the unfinished rest, across chunk splits", () => {
@@ -265,6 +281,120 @@ describe("makeTurnDetector (#75)", () => {
     expect(feed(d, frames(0.9, 320))).not.toContain("start"); // ended: waits for listen()
     d.listen();
     expect(feed(d, frames(0.9, 320))).toContain("start");
+  });
+});
+
+describe("turn timings (#76)", () => {
+  const spoken = {
+    spoken: true,
+    speechEndedAt: 1000,
+    endOfTurnMs: 512,
+    whisperMs: 310,
+    whisperServerMs: 290,
+    askAt: 1830,
+    firstSentenceAt: 2500,
+    server: { route: "classifier", routeMs: 280, memoriesMs: 3, firstTokenMs: 640, firstSentenceMs: 650, totalMs: 2100 },
+    speakAt: 2505,
+    firstSoundAt: 2760,
+    voice: "kokoro",
+  };
+
+  it("derives each stage, the total running from the end of your speech to the first sound", () => {
+    expect(timingStages(spoken)).toEqual({
+      brain: undefined,
+      endOfTurnMs: 512,
+      whisperMs: 310,
+      whisperServerMs: 290,
+      route: "classifier",
+      routeMs: 280,
+      memoriesMs: 3,
+      firstTokenMs: 640,
+      firstSentenceMs: 670,
+      voiceFirstAudioMs: 255,
+      totalMs: 1760,
+    });
+    // Typed: from pressing Send.
+    expect(timingStages({ spoken: false, askAt: 100, firstSoundAt: 1400 }).totalMs).toBe(1300);
+    expect(timingStages({ spoken: true, speechEndedAt: 5 }).totalMs).toBeUndefined(); // no sound yet
+  });
+
+  it("formats the dev line: stages, total and median, and no text", () => {
+    expect(formatTiming(timingStages(spoken), "kokoro", { median: 1900, count: 4 })).toBe(
+      "end of turn 512 ms · Whisper 310 ms · classifier 280 ms · Claude first sentence 670 ms (first token 640 ms) · kokoro first audio 255 ms · total 1.76 s · median 1.90 s (4)",
+    );
+    expect(formatTiming(timingStages({ ...spoken, server: { route: "precheck", routeMs: 0 } }), "kokoro")).toContain("precheck (no classifier)");
+    expect(formatTiming(timingStages({ ...spoken, brain: "local" }), "kokoro")).toContain("Local first sentence 670 ms");
+  });
+
+  it("labels the browser with its major version, and takes medians", () => {
+    expect(browserLabel("Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15")).toBe("safari 18");
+    expect(browserLabel("Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")).toBe("chrome 131");
+    expect(browserLabel("curl/8")).toBe("other");
+    expect(medianOf([3, 1, 2])).toBe(2);
+    expect(medianOf([4, 1, 2, 3])).toBe(3); // 2.5 rounded
+    expect(medianOf([])).toBe(0);
+  });
+});
+
+describe("timing line additions (#76)", () => {
+  it("shows the parallel answer, the first chunk's length and the echo while he spoke", () => {
+    const stages = timingStages({
+      spoken: true,
+      speechEndedAt: 0,
+      firstChunkChars: 58,
+      echo: { peak: 62, longestMs: 96 },
+      server: { route: "classifier", routeMs: 900, speculative: "used" },
+      speakAt: 1000,
+      firstSoundAt: 1300,
+    });
+    const line = formatTiming(stages, "kokoro");
+    expect(line).toContain("classifier 900 ms (answer started in parallel)");
+    expect(line).toContain("kokoro first audio 300 ms (58 chars)");
+    expect(line).toContain("echo peak 0.62, 96 ms ≥ 0.5");
+  });
+});
+
+describe("fillers (#86)", () => {
+  it("never picks the same one twice in a row", () => {
+    let previous = "";
+    for (let i = 0; i < 200; i += 1) {
+      const next = pickFiller(previous, Math.random);
+      expect(FILLERS).toContain(next);
+      expect(next).not.toBe(previous);
+      previous = next;
+    }
+    expect(pickFiller("One moment.", () => 0.999, ["One moment."])).toBe("One moment."); // only one: it has to
+  });
+
+  it("plays only on spoken turns, not muted, and not on two spoken turns in a row", () => {
+    expect(fillerAllowed({ spoken: true, muted: false, previousHadFiller: false })).toBe(true);
+    expect(fillerAllowed({ spoken: true, muted: false, previousHadFiller: true })).toBe(false);
+    expect(fillerAllowed({ spoken: false, muted: false, previousHadFiller: false })).toBe(false);
+    expect(fillerAllowed({ spoken: true, muted: true, previousHadFiller: false })).toBe(false);
+    expect(FILLER_AFTER_MS).toBe(800);
+  });
+
+  it("shows when the filler started; the total still counts to the answer's first sound", () => {
+    const stages = timingStages({ spoken: true, speechEndedAt: 1000, fillerAt: 1800, firstSoundAt: 3100 });
+    expect(stages).toMatchObject({ fillerMs: 800, totalMs: 2100 });
+    expect(formatTiming(stages, "kokoro")).toContain("filler at 800 ms · total 2.10 s");
+  });
+
+  it("the answer's first sentence waits for a filler that's still playing, and isn't part of what was said", async () => {
+    let fillerDone: () => void = () => {};
+    const filler = new Promise<void>((r) => (fillerDone = r));
+    const order: string[] = [];
+    const r = run({ beforeFirst: async () => { order.push("waiting for filler"); await filler; order.push("filler ended"); } });
+    const sp = r.speaker();
+    sp.say("Your passport expires in January.");
+    sp.finish();
+    await new Promise((x) => setTimeout(x, 30));
+    expect(r.log).toEqual([]); // not started over the filler
+    fillerDone();
+    const result = await r.done;
+    expect(order).toEqual(["waiting for filler", "filler ended"]);
+    expect(r.log).toEqual(["play Your passport expires in January."]);
+    expect(result.spoken).toBe("Your passport expires in January."); // no filler in the report or history
   });
 });
 

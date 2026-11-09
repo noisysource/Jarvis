@@ -24,8 +24,24 @@ import {
   voicesFor,
 } from "./chat.js";
 import { playSpeech } from "./audio.js";
+import { pcm16ToFloat32, readAudioFormat } from "./pcm-lib.js";
 import { makeSpeaker } from "./speaker.js";
-import { browserFamily, chooseVoice, makeTurnDetector, parseSse, phaseLabel, TURN } from "./turn-lib.js";
+import {
+  browserFamily,
+  browserLabel,
+  chooseVoice,
+  FILLER_AFTER_MS,
+  FILLERS,
+  fillerAllowed,
+  pickFiller,
+  formatTiming,
+  makeTurnDetector,
+  medianOf,
+  parseSse,
+  phaseLabel,
+  timingStages,
+  TURN,
+} from "./turn-lib.js";
 import { canRecord, openMic } from "./mic.js";
 import { encodeWav, makeFrameStore } from "./mic-lib.js";
 import { loadVad } from "./vad.js";
@@ -96,7 +112,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  * @type {{
  *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
  *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
- *   phase: import("./turn-lib.js").Phase,
+ *   phase: import("./turn-lib.js").Phase, lastContext: string | undefined,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
  *   conversationId: string, remember: boolean, brain: "claude" | "local",
  * }}
@@ -109,6 +125,7 @@ const state = {
   listening: false,
   transcribing: false,
   phase: "idle",
+  lastContext: undefined,
   pending: null,
   conversation: load("jarvis.conversation") !== "false",
   voiceSession: false,
@@ -229,7 +246,9 @@ const renderVoiceNote = () => {
   voiceNote.textContent = voiceChoice.note;
   voiceNote.hidden = voiceChoice.note === "" || state.muted;
 };
+let voiceChecked = false;
 const refreshVoice = async () => {
+  voiceChecked = true;
   try {
     const res = await fetch("/tts");
     voiceChoice = chooseVoice(res.ok ? await res.json() : null);
@@ -237,16 +256,18 @@ const refreshVoice = async () => {
     voiceChoice = chooseVoice(null);
   }
   renderVoiceNote();
+  void prepareFillers(); // in the voice now in use (#86)
 };
 
 /** The reply being spoken now. @type {ReturnType<typeof makeSpeaker> | undefined} */
 let speaker;
 /**
- * Stops Jarvis's voice. `reason` goes into the playback report and the
- * server log (#89), so it's clear what stopped him.
+ * Stops Jarvis's voice, and any filler. `reason` goes into the playback
+ * report and the server log (#89), so it's clear what stopped him.
  * @param {"new-question" | "barge-in" | "push-interrupt" | "stop" | "typed" | "muted" | "new-conversation" | "answer-cancelled"} reason
  */
 const stopSpeaking = (reason) => {
+  stopFiller();
   speaker?.stop(reason);
   speaker = undefined;
   synth?.cancel();
@@ -255,6 +276,95 @@ const stopSpeaking = (reason) => {
 let firstAudioAt = 0;
 /** The barge-in that stopped the last answer: Silero's reading then. @type {{ prob: number } | undefined} */
 let lastBargeIn;
+
+// ---- fillers (#86) ----
+//
+// "One moment." when Jarvis's first sentence is slow to start. Pre-rendered
+// in the configured voice when the page loads, so they play at once. They're
+// never part of the answer: not in the history, the playback report or memory.
+
+/** The pre-rendered clips, for one voice. @type {{ key: string, clips: Map<string, { samples: Float32Array, sampleRate: number }> }} */
+let fillerClips = { key: "", clips: new Map() };
+let lastFiller = "";
+let lastTurnHadFiller = false;
+/** The filler playing now: `done` resolves when it ends or is stopped. @type {{ stop: () => void, done: Promise<void> } | undefined} */
+let filler;
+
+const stopFiller = () => {
+  filler?.stop();
+  filler = undefined;
+};
+
+/** Renders every filler once in the configured voice (again if the voice changes). */
+const prepareFillers = async () => {
+  const server = voiceChoice.server;
+  const key = server ? `${server.provider}:${server.voice}` : "";
+  if (!server || fillerClips.key === key) return;
+  /** @type {Map<string, { samples: Float32Array, sampleRate: number }>} */
+  const clips = new Map();
+  fillerClips = { key, clips };
+  for (const text of FILLERS) {
+    try {
+      const res = await fetch("/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
+      });
+      const format = res.ok ? readAudioFormat(res.headers) : null;
+      if (!format) continue;
+      clips.set(text, { samples: pcm16ToFloat32(new Uint8Array(await res.arrayBuffer())), sampleRate: format.sampleRate });
+    } catch {
+      /* that one just isn't available */
+    }
+  }
+};
+
+/**
+ * Plays a filler now, with the configured voice's clip if it's ready, else
+ * the browser voice. Returns false when there's nothing to play it with.
+ */
+const playFiller = () => {
+  const text = pickFiller(lastFiller, Math.random);
+  const clip = state.language === "en" && voiceChoice.server ? fillerClips.clips.get(text) : undefined;
+  if (clip && audioCtx) {
+    const ctx = audioCtx;
+    const buffer = ctx.createBuffer(1, clip.samples.length, clip.sampleRate);
+    buffer.getChannelData(0).set(clip.samples);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    /** @type {() => void} */
+    let end = () => {};
+    const done = new Promise((resolve) => {
+      end = () => resolve(undefined);
+      source.onended = end;
+    });
+    source.start();
+    filler = {
+      stop: () => {
+        try {
+          source.stop();
+        } catch {
+          /* already ended */
+        }
+        end();
+      },
+      done: /** @type {Promise<void>} */ (done),
+    };
+  } else if (synth && state.language === "en") {
+    const controller = new AbortController();
+    const done = speakBrowser(text, controller.signal, { fraction: () => 0 }).then(() => undefined);
+    filler = { stop: () => controller.abort(), done };
+  } else {
+    return false;
+  }
+  lastFiller = text;
+  const mine = filler;
+  void mine.done.then(() => {
+    if (filler === mine) filler = undefined;
+  });
+  return true;
+};
 const isSpeaking = () => speaker?.active() === true;
 
 const voices = () => (synth ? synth.getVoices() : []);
@@ -339,24 +449,41 @@ const speakBrowser = (text, signal, tracker) =>
 
 /**
  * Starts speaking a reply; add sentences with say(), then finish().
+ * `timing` gets when the first sentence was asked for and first heard (#76).
  * @param {(result: import("./speaker.js").PlaybackResult) => void} onDone
+ * @param {import("./turn-lib.js").TurnTiming} timing @param {() => void} onFirstSound
  */
-const startSpeaker = (onDone) => {
-  stopSpeaking("new-question");
+const startSpeaker = (onDone, timing, onFirstSound) => {
+  // A previous answer stops; a filler playing for this one finishes (the first sentence waits for it).
+  speaker?.stop("new-question");
+  speaker = undefined;
+  if (!filler) synth?.cancel();
   firstAudioAt = 0;
   lastBargeIn = undefined;
   const server = state.language === "en" ? voiceChoice.server : null;
   const ctx = server ? audio() : undefined;
+  timing.voice = server ? server.provider : "browser";
+  const firstSound = (/** @type {number} */ at) => {
+    if (timing.firstSoundAt !== undefined) return;
+    timing.firstSoundAt = at;
+    bargeInGraceUntil = Math.max(bargeInGraceUntil, at + BARGE_IN_GRACE_MS);
+    echo.peak = 0;
+    echo.run = 0;
+    echo.longest = 0;
+    onFirstSound();
+  };
   const sp = makeSpeaker({
     fetchSpeech:
       server && ctx
-        ? (text, signal) =>
-            fetch("/speak", {
+        ? (text, signal) => {
+            timing.speakAt ??= performance.now();
+            return fetch("/speak", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
               signal,
-            })
+            });
+          }
         : null,
     play: (response, signal, tracker) => {
       if (!ctx) throw new Error("no audio");
@@ -367,16 +494,27 @@ const startSpeaker = (onDone) => {
         tracker,
         onFirstAudio: (at) => {
           if (firstAudioAt === 0) firstAudioAt = at;
+          firstSound(at);
         },
       });
     },
-    speakBrowser,
+    speakBrowser: (text, signal, tracker) => {
+      timing.speakAt ??= performance.now();
+      const done = speakBrowser(text, signal, tracker);
+      // The browser voice has no first-audio callback here; its start is close enough.
+      void Promise.resolve().then(() => firstSound(performance.now()));
+      return done;
+    },
     muted: state.muted || (!server && !synth),
     onFallback: (why) => {
       voiceChoice = { server: null, note: `${why}, so Jarvis is using the browser voice.` };
       renderVoiceNote();
     },
     onSpeaking: () => setPhase("speaking"),
+    beforeFirst: () => {
+      timing.voiceCommitted = true; // from here on, no filler starts: Daniel is about to speak
+      return filler?.done ?? Promise.resolve();
+    },
     onDone: (result) => {
       if (speaker === sp) speaker = undefined;
       onDone(result);
@@ -396,6 +534,68 @@ const retirePending = () => {
 
 /** The answer being streamed now, so barge-in can cancel it. @type {AbortController | undefined} */
 let answering;
+
+// ---- latency (#76) ----
+
+/** Development only (GET /voice-settings): a timing line under each answer. */
+let devTimings = false;
+/** A spoken turn's timings so far, handed from the mic to ask(). @type {import("./turn-lib.js").TurnTiming | undefined} */
+let nextTiming;
+/** Recent totals, for the median. @type {number[]} */
+const recentTotals = [];
+/** @param {Record<string, unknown>} o */
+const withoutUndefined = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+/**
+ * Echo (#76): while Jarvis talks, how speech-like the mic is (Silero's
+ * probability), so you can tell whether he could interrupt himself through
+ * the speakers. Reset for each answer.
+ */
+const echo = { peak: 0, run: 0, longest: 0 };
+/** No barge-in this soon after his voice (or a filler) starts: echo cancellation needs a moment. */
+const BARGE_IN_GRACE_MS = 600;
+let bargeInGraceUntil = 0;
+const startBargeInGrace = () => {
+  bargeInGraceUntil = performance.now() + BARGE_IN_GRACE_MS;
+};
+
+/**
+ * Shows (development) and reports a turn's timings: once when the first
+ * sound plays, and again when the answer has finished streaming, which adds
+ * the server's numbers. Numbers only, never what was said.
+ * @param {HTMLElement | undefined} item @param {import("./turn-lib.js").TurnTiming} timing @param {boolean} streamDone
+ */
+const showTiming = (item, timing, streamDone) => {
+  // Reported once both are over, in whichever order: the stream (the
+  // server's numbers) and the playback (the first sound and the echo).
+  if (streamDone) timing.streamDone = true;
+  const stages = timingStages(timing);
+  if (timing.streamDone && timing.playbackDone && !timing.reported) {
+    timing.reported = true;
+    if (stages.totalMs !== undefined) {
+      recentTotals.push(stages.totalMs);
+      if (recentTotals.length > 20) recentTotals.shift();
+    }
+    void fetch("/latency", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        browser: browserLabel(navigator.userAgent),
+        spoken: timing.spoken,
+        voice: timing.voice ?? "none",
+        ...withoutUndefined(stages),
+      }),
+    }).catch(() => undefined);
+  }
+  if (!devTimings || !item) return;
+  let line = /** @type {HTMLElement | null} */ (item.querySelector(".timing"));
+  if (!line) {
+    line = document.createElement("p");
+    line.className = "timing";
+    item.append(line);
+  }
+  line.textContent = formatTiming(stages, timing.voice, { median: medianOf(recentTotals), count: recentTotals.length });
+};
 
 /**
  * Tells the server how a streamed answer's playback ended (#72), so it can
@@ -435,13 +635,19 @@ const playbackDetails = (result, streamComplete) => ({
 const ask = async (question, context) => {
   const text = question.trim();
   if (text === "" || state.busy) return;
+  // Latency (#76): this turn's timings; spoken turns bring theirs from the mic.
+  /** @type {import("./turn-lib.js").TurnTiming} */
+  const timing = nextTiming ?? { spoken: false };
+  nextTiming = undefined;
+  timing.brain = state.brain;
   stopSpeaking("new-question");
   state.busy = true;
   setPhase("thinking");
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
-  const voiceReady = refreshVoice();
+  // The voice is checked again only when it isn't the configured one (it may be back up).
+  const voiceReady = voiceChecked && voiceChoice.server ? Promise.resolve() : refreshVoice();
 
   /** @type {unknown} */
   let final = null;
@@ -461,6 +667,9 @@ const ask = async (question, context) => {
   /** How the reply was actually spoken: the history, the report, then listening again. */
   /** @param {import("./speaker.js").PlaybackResult} result */
   const onPlayback = (result) => {
+    if (timing.spoken && timing.firstSoundAt !== undefined) timing.echo = { peak: Math.round(echo.peak * 100), longestMs: echo.longest };
+    timing.playbackDone = true;
+    showTiming(item, timing, false);
     // You carried on talking before he answered: this question is replaced by the whole one.
     if (controller.signal.reason === "continue") {
       userItem?.remove();
@@ -489,11 +698,33 @@ const ask = async (question, context) => {
     if (!sp) {
       await voiceReady;
       if (controller.signal.aborted) return;
-      sp = startSpeaker(onPlayback);
+      sp = startSpeaker(onPlayback, timing, () => showTiming(item, timing, false));
     }
     sp.say(sentence);
   };
 
+  const askStarted = performance.now();
+  timing.askAt = askStarted;
+  // A filler if the first sentence is slow (#86): spoken turns, not two in a row.
+  let usedFiller = false;
+  const fillerTimer = fillerAllowed({ spoken: timing.spoken, muted: state.muted, previousHadFiller: lastTurnHadFiller })
+    ? setTimeout(
+        () => {
+          // Not once the first sentence is here: its audio is moments away, and a filler would only delay it.
+          if (controller.signal.aborted || timing.firstSentenceAt !== undefined || timing.voiceCommitted || filler) return;
+          if (playFiller()) {
+            usedFiller = true;
+            timing.fillerAt = performance.now();
+            startBargeInGrace();
+          }
+        },
+        Math.max(0, (timing.speechEndedAt ?? askStarted) + FILLER_AFTER_MS - performance.now()),
+      )
+    : undefined;
+  const settleFiller = () => {
+    clearTimeout(fillerTimer);
+    if (timing.spoken) lastTurnHadFiller = usedFiller;
+  };
   try {
     const res = await fetch("/ask", {
       method: "POST",
@@ -505,6 +736,8 @@ const ask = async (question, context) => {
           history: state.history,
           conversationId: state.conversationId,
           remember: state.remember,
+          spoken: timing.spoken,
+          stickyContext: state.lastContext,
           brain: state.brain,
         }),
       ),
@@ -527,10 +760,13 @@ const ask = async (question, context) => {
           if (ev.event === "start") turnId = String(data.turnId ?? "");
           else if (ev.event === "sentence") {
             const sentence = String(data.text ?? "");
+            timing.firstSentenceAt ??= performance.now();
+            timing.firstChunkChars ??= sentence.length;
             if (!item) item = addMessage("answer", sentence);
             else appendToMessage(item, sentence);
             await say(sentence);
-          } else if (ev.event === "done" || ev.event === "reply") final = data;
+          } else if (ev.event === "timing") timing.server = data;
+          else if (ev.event === "done" || ev.event === "reply") final = data;
         }
       }
     }
@@ -538,6 +774,7 @@ const ask = async (question, context) => {
     reachable = controller.signal.aborted;
   }
   if (answering === controller) answering = undefined;
+  settleFiller();
 
   if (controller.signal.aborted) {
     // Interrupted (barge-in) while the answer was still coming: what was said is already recorded.
@@ -562,6 +799,9 @@ const ask = async (question, context) => {
     tag.textContent = brainLabels[brain] ?? brain;
     item.append(tag);
   }
+  // A spoken conversation remembers where it was answered, for sticky context (#76).
+  if (view.kind === "answer" && final && typeof final === "object" && "context" in final) state.lastContext = String(final.context);
+  showTiming(item, timing, true);
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";
@@ -780,9 +1020,14 @@ const voiceSettings = async () => {
 
 /**
  * Sends an utterance to Whisper, then its text as a spoken question.
- * @param {Float32Array} samples 16 kHz @param {{ final?: boolean }} [how] final: the conversation ended with it (Stop)
+ * @param {Float32Array} samples 16 kHz
+ * @param {{ final?: boolean, speechEndedAt?: number, endOfTurnMs?: number }} [how]
+ *   final: the conversation ended with it (Stop); the rest are for the timing line (#76)
  */
 const transcribeAndSend = async (samples, how = {}) => {
+  /** @type {import("./turn-lib.js").TurnTiming} */
+  const timing = { spoken: true, speechEndedAt: how.speechEndedAt ?? performance.now(), ...(how.endOfTurnMs !== undefined ? { endOfTurnMs: how.endOfTurnMs } : {}) };
+  const whisperStarted = performance.now();
   const controller = new AbortController();
   transcribing = controller;
   state.transcribing = true;
@@ -798,6 +1043,9 @@ const transcribeAndSend = async (samples, how = {}) => {
       signal: controller.signal,
     });
     const body = await res.json().catch(() => null);
+    timing.whisperMs = Math.round(performance.now() - whisperStarted);
+    const serverMs = Number(/whisper;dur=(\d+)/.exec(res.headers.get("server-timing") ?? "")?.[1]);
+    if (Number.isFinite(serverMs)) timing.whisperServerMs = serverMs;
     if (res.ok && typeof body?.text === "string") text = body.text;
     else problem = typeof body?.message === "string" ? body.message : `Listening failed (status ${res.status}).`;
   } catch {
@@ -820,7 +1068,9 @@ const transcribeAndSend = async (samples, how = {}) => {
     return;
   }
   input.value = text;
+  nextTiming = timing;
   submit(text, { spoken: true, keepVoice: how.final !== true });
+  nextTiming = undefined; // used by ask(), or not needed (a stop phrase)
 };
 
 /**
@@ -837,6 +1087,7 @@ const interrupt = (how) => {
   const stillThinking = !isSpeaking() && (state.busy || state.transcribing);
   if (stillThinking && last && performance.now() - last.endedAt < CONTINUE_WITHIN_MS) {
     transcribing?.abort();
+    stopFiller();
     answering?.abort("continue");
     open.detector.continueFrom(last.from);
   } else {
@@ -855,7 +1106,13 @@ const onProbability = (p) => {
   const open = session;
   if (!open || performance.now() < open.ignoreUntil) return;
   const talking = isSpeaking() || state.busy || state.transcribing;
-  const event = open.detector.feed(p, talking);
+  if (isSpeaking() || filler) {
+    echo.peak = Math.max(echo.peak, p);
+    echo.run = p >= 0.5 ? echo.run + TURN.frameMs : 0;
+    echo.longest = Math.max(echo.longest, echo.run);
+  }
+  // Right after his voice starts, the mic is ignored for barge-in (frames still counted).
+  const event = open.detector.feed(talking && performance.now() < bargeInGraceUntil ? 0 : p, talking);
   if (event === "start") {
     open.heard = true;
   } else if (event === "barge-in") {
@@ -864,7 +1121,8 @@ const onProbability = (p) => {
     const { from, to } = open.detector.span();
     open.lastTurn = { from, endedAt: performance.now() };
     open.heard = false;
-    void transcribeAndSend(open.store.slice(from, to));
+    const quiet = open.detector.quietMs();
+    void transcribeAndSend(open.store.slice(from, to), { speechEndedAt: performance.now() - quiet, endOfTurnMs: quiet });
   } else if (event === "no-speech") {
     endVoice(state.conversation ? "silence" : "done");
     if (!state.conversation) setStatus("I didn't hear anything.");
@@ -920,6 +1178,8 @@ const startVoice = async () => {
     heard: false,
     lastTurn: null,
   };
+  // Warm the server's model connection while you start talking (#76).
+  void fetch("/warm", { method: "POST" }).catch(() => undefined);
   state.voiceSession = true;
   state.autoBlocked = false;
   state.listening = true;
@@ -1175,6 +1435,7 @@ newButton.addEventListener("click", () => {
   retirePending();
   state.history = [];
   state.conversationId = newConversationId(randomBytes);
+  state.lastContext = undefined;
   state.remember = true;
   transcript.replaceChildren();
   setStatus("New conversation.");
@@ -1189,6 +1450,12 @@ renderControls();
 renderVoices();
 void refreshVoice();
 void refreshBadge();
+void fetch("/voice-settings")
+  .then((res) => (res.ok ? res.json() : null))
+  .then((body) => {
+    devTimings = body?.dev === true;
+  })
+  .catch(() => undefined);
 input.focus();
 
 // ---- brain switch (#88) ----

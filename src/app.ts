@@ -30,7 +30,7 @@ export type AppInputs = {
   /** Overrides for tests. */
   readonly readTextFile?: (path: string) => Promise<string>;
   readonly profileFs?: ProfileFileSystem;
-  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys, urls?: ProviderUrls) => Result<LlmCall, string>;
+  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys, options?: ProviderUrls & { readonly log?: Logger }) => Result<LlmCall, string>;
   readonly now?: () => Date;
   /** Where memories live. Defaults to an in-memory store until the SQLite store (#60). */
   readonly memoryStore?: MemoryStore;
@@ -89,9 +89,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
 
   const buildLlm = inputs.makeLlm ?? makeLlm;
   const keys: ProviderKeys = { anthropic: key.value.key };
-  const classifierLlm = buildLlm(config.models.classifier, keys);
+  const classifierLlm = buildLlm(config.models.classifier, keys, { log });
   if (!classifierLlm.ok) return err(`CLASSIFIER_MODEL: ${classifierLlm.error}`);
-  const answerLlm = buildLlm(config.models.answer, keys);
+  const answerLlm = buildLlm(config.models.answer, keys, { log });
   if (!answerLlm.ok) return err(`ANSWER_MODEL: ${answerLlm.error}`);
   // The "Local" brain (#88): Ollama on this machine.
   const localLlm = buildLlm(config.models.local, keys, { ollama: config.ollamaUrl, ollamaThink: config.ollamaThink });
@@ -111,6 +111,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       timeZone: config.timeZone,
       capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
       log,
+      spokenThinking: config.turn.spokenThinking,
     }),
   });
   const answerers = personalWith(answerLlm.value);
@@ -120,7 +121,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   return ok({
     contexts: contexts.value,
     precheck: makePrecheck(contexts.value),
-    classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log }),
+    classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
+    stickyContext: config.turn.stickyContext,
+    speculativeAnswer: config.turn.speculativeAnswer,
     answer: makeBrainRouter({ claude: makeAnswerRouter(answerers), local: makeAnswerRouter(localAnswerers) }),
     ...(config.bareMode
       ? {

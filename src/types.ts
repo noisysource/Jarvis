@@ -69,6 +69,10 @@ export type AskRequest = {
   readonly conversationId?: string;
   /** false: "don't remember this". The answer still uses memories, but nothing is learned. */
   readonly remember?: boolean;
+  /** A spoken turn (#76): the answer is tuned for speed (see VOICE_THINKING). */
+  readonly spoken?: boolean;
+  /** The context this spoken conversation was last answered in; used only with STICKY_CONTEXT=on (#76). */
+  readonly stickyContext?: ContextId;
   /** Which brain answers (#88); Claude when not given. */
   readonly brain?: Brain;
 };
@@ -190,6 +194,8 @@ export type AnswerInput = {
   readonly onText?: (delta: string) => void;
   /** Cancels the answer (e.g. the user interrupted it). */
   readonly signal?: AbortSignal;
+  /** A spoken turn (#76): answered for speed. */
+  readonly spoken?: boolean;
   /** Which brain answers (#88). */
   readonly brain?: Brain;
 };
@@ -237,6 +243,10 @@ export type Deps = {
   readonly afterReply: AfterReply;
   readonly now: () => Date;
   readonly log: Logger;
+  /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
+  readonly stickyContext?: boolean;
+  /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */
+  readonly speculativeAnswer?: boolean;
   /**
    * BARE_MODE=on (#88): every turn gets only the local EC precheck, then this
    * answerer (history and a short persona). No classifier, contexts, profile

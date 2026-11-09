@@ -297,6 +297,126 @@ describe("local precheck always runs first", () => {
   });
 });
 
+describe("sticky context (#76, opt-in)", () => {
+  it("keeps a spoken follow-up in the last answered context, skipping the classifier, only when on", async () => {
+    const on = makeDeps();
+    const stages: unknown[] = [];
+    await handleAsk({ ...on.deps, stickyContext: true }, { question: "And when is it?", spoken: true, stickyContext: id("personal") }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(on.calls).not.toContain("classify");
+    expect(on.answerInputs[0]?.context.id).toBe("personal");
+    expect(on.answerInputs[0]?.spoken).toBe(true);
+    expect(stages[0]).toMatchObject({ s: "route", how: "sticky" });
+
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: "And when is it?", spoken: true, stickyContext: id("personal") });
+    expect(off.calls).toContain("classify");
+  });
+
+  it("never overrides the precheck: an EC question is still handed to Kiro, with no model", async () => {
+    const { deps, calls } = makeDeps();
+    const response = await handleAsk({ ...deps, stickyContext: true }, { question: "Summarise the UTP standup", spoken: true, stickyContext: id("personal") });
+    expect(response).toMatchObject({ type: "handoff", context: "ec-hrt" });
+    expect(calls).toEqual([]);
+  });
+
+  it("sticks only to an answered, non-handoff context", async () => {
+    const notAnswered = makeDeps({ answered: ["personal"] });
+    await handleAsk({ ...notAnswered.deps, stickyContext: true }, { question: "And when is it?", stickyContext: id("kidclub") });
+    expect(notAnswered.calls).toContain("classify");
+    const ec = makeDeps();
+    await handleAsk({ ...ec.deps, stickyContext: true }, { question: "And when is it?", stickyContext: id("ec-hrt") });
+    expect(ec.calls).toContain("classify");
+  });
+
+  it("reports how the context was decided, and how long that took", async () => {
+    const { deps } = makeDeps();
+    const stages: { s: string; how?: string; ms: number }[] = [];
+    await handleAsk(deps, { question: "When is my daughter's birthday?" }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(stages.map((x) => [x.s, x.how])).toEqual([["route", "classifier"], ["memories", undefined]]);
+    await handleAsk(deps, { question: "When is it?", context: id("personal") }, { onStage: (s, f) => stages.push({ s, ...f }) });
+    expect(stages.at(-2)).toMatchObject({ s: "route", how: "picked" });
+  });
+});
+
+describe("speculative answer (#76, opt-in)", () => {
+  const streamed = (deps: Deps, question: string) => {
+    const text: string[] = [];
+    const stages: unknown[] = [];
+    return {
+      text,
+      stages,
+      run: () => handleAsk(deps, { question }, { onText: (d) => text.push(d), onStage: (s, f) => stages.push({ s, ...f }) }),
+    };
+  };
+
+  it("starts the personal answer with the classifier, and sends it once the classifier agrees", async () => {
+    const order: string[] = [];
+    const { deps } = makeDeps();
+    const spec: Deps = {
+      ...deps,
+      speculativeAnswer: true,
+      classify: async () => {
+        order.push("classify start");
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("classify end");
+        return { kind: "context", contextId: id("personal") };
+      },
+      answer: async (input) => {
+        order.push("answer start");
+        input.onText?.("2 September.");
+        order.push("answer text");
+        return ok({ kind: "answer", text: "2 September." });
+      },
+    };
+    const s = streamed(spec, "When is my daughter's birthday?");
+    expect(await s.run()).toMatchObject({ type: "answer", answer: "2 September." });
+    expect(order.indexOf("answer start")).toBeLessThan(order.indexOf("classify end")); // in parallel
+    expect(s.text).toEqual(["2 September."]); // held, then sent once
+    expect(s.stages[0]).toMatchObject({ s: "route", how: "classifier", speculative: "used" });
+  });
+
+  it("throws the speculative answer away when the classifier picks another context: nothing is sent", async () => {
+    let cancelled = false;
+    const { deps, wrapUps, flush } = makeDeps({ classification: { kind: "context", contextId: id("kidclub") }, answered: ["personal"] });
+    const spec: Deps = {
+      ...deps,
+      speculativeAnswer: true,
+      answer: async (input) => {
+        if (input.context.id !== "personal") return ok({ kind: "unavailable", message: "KidClub isn't connected yet." });
+        input.onText?.("Something personal.");
+        await new Promise((r) => setTimeout(r, 30));
+        cancelled = input.signal?.aborted ?? false;
+        return ok({ kind: "answer", text: "Something personal." });
+      },
+    };
+    const s = streamed(spec, "Which invoices are unpaid?");
+    const response = await s.run();
+    await flush();
+    await new Promise((r) => setTimeout(r, 50)); // the discarded answer notices it was cancelled
+    expect(response.type).toBe("unavailable"); // kidclub isn't connected yet
+    expect(s.text).toEqual([]);
+    expect(cancelled).toBe(true);
+    expect(wrapUps).toEqual([]);
+    expect(s.stages[0]).toMatchObject({ speculative: "discarded" });
+  });
+
+  it("never runs before the precheck: an EC question is handed off with no model at all", async () => {
+    const { deps, calls } = makeDeps();
+    const response = await handleAsk({ ...deps, speculativeAnswer: true }, { question: "Summarise the UTP standup" });
+    expect(response).toMatchObject({ type: "handoff" });
+    expect(calls).toEqual([]);
+  });
+
+  it("is off by default, and never for a picked context", async () => {
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: "When is my daughter's birthday?" });
+    expect(off.calls).toEqual(["classify", "loadMemories", "answer", "after reply: memory wrap-up"]);
+    const picked = makeDeps();
+    await handleAsk({ ...picked.deps, speculativeAnswer: true }, { question: "When is it?", context: id("personal") });
+    expect(picked.calls.filter((c) => c === "answer")).toHaveLength(1);
+  });
+});
+
 describe("brains (#88)", () => {
   it("passes the chosen brain to the answerer and says which answered", async () => {
     const { deps, answerInputs } = makeDeps();

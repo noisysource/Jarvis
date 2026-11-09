@@ -76,13 +76,20 @@ describe("POST /ask, streamed", () => {
     const { ask } = setup();
     const res = await ask({ question: "Who's my doctor?" });
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    expect(parseSse(await res.text())).toEqual([
+    const events = parseSse(await res.text());
+    expect(events.filter((e) => e.event !== "timing")).toEqual([
       { event: "start", data: { turnId: "turn-0001" } },
       { event: "sentence", data: { index: 0, text: "Hello!" } },
       { event: "sentence", data: { index: 1, text: "Dr. Silva is your doctor." } },
       { event: "sentence", data: { index: 2, text: "She works on Mondays." } },
       { event: "done", data: { type: "answer", context: "personal", answer: "Hello! Dr. Silva is your doctor. She works on Mondays." } },
     ]);
+    // Just before done: how long each stage took (#76), numbers only.
+    expect(events.at(-2)?.event).toBe("timing");
+    const timing = events.at(-2)?.data as Record<string, unknown>;
+    expect(Object.keys(timing).sort()).toEqual(["firstSentenceMs", "firstTokenMs", "memoriesMs", "route", "routeMs", "totalMs"]);
+    expect(timing.route).toBe("classifier");
+    for (const [k, v] of Object.entries(timing)) if (k !== "route") expect(typeof v, k).toBe("number");
   });
 
   it.each([
@@ -99,8 +106,8 @@ describe("POST /ask, streamed", () => {
       },
     });
     const events = parseSse(await (await ask({ question })).text());
-    expect(events.map((e) => e.event)).toEqual(["start", "reply"]);
-    expect(events[1]?.data).toMatchObject({ type });
+    expect(events.map((e) => e.event)).toEqual(["start", "timing", "reply"]);
+    expect(events[2]?.data).toMatchObject({ type });
     expect(answered).toBe(false);
   });
 

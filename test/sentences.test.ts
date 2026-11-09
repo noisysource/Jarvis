@@ -59,6 +59,18 @@ describe("splitSentences (English)", () => {
     ]);
   });
 
+  it("cuts a long first sentence with no clause mark at a word, once it's twice the limit (#76)", () => {
+    const long = "Your passport expires in January next year so you have plenty of time to renew it before the summer trip to Porto. Anything else?";
+    const splitter = makeSentenceSplitter({ language: "en", firstClauseAfter: 40 });
+    const out: string[] = [];
+    for (let i = 0; i < long.length; i += 5) out.push(...splitter.push(long.slice(i, i + 5)));
+    out.push(...splitter.flush());
+    expect(out[0]?.length).toBeGreaterThanOrEqual(40);
+    expect(out[0]?.length).toBeLessThan(90);
+    expect(long.startsWith(`${out[0]} `)).toBe(true); // at a word boundary
+    expect(out.join(" ")).toBe(long);
+  });
+
   it("keeps a long first sentence whole when it has already ended", () => {
     const long = "Your daughter Inês was born on 2 September 2017, which makes her nine years old today. Anything else?";
     expect(splitSentences(long, { language: "en", firstClauseAfter: 40 })).toEqual([
