@@ -94,7 +94,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const answerLlm = buildLlm(config.models.answer, keys);
   if (!answerLlm.ok) return err(`ANSWER_MODEL: ${answerLlm.error}`);
   // The "Local" brain (#88): Ollama on this machine.
-  const localLlm = buildLlm(config.models.local, keys, { ollama: config.ollamaUrl });
+  const localLlm = buildLlm(config.models.local, keys, { ollama: config.ollamaUrl, ollamaThink: config.ollamaThink });
   if (!localLlm.ok) return err(`OLLAMA_MODEL: ${localLlm.error}`);
 
   if (!contexts.value.some((c) => c.id === "personal" && c.handling.kind === "answer")) {

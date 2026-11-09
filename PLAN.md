@@ -288,7 +288,9 @@ and no conversation content is logged.
 
 **Local brain (#88, first slice of #55).** `ollama:<model>` is a provider
 behind `LlmCall`, streaming only. `OLLAMA_URL` must be loopback (like the
-voice services), and `OLLAMA_MODEL` defaults to `llama3.1:8b`. Requests
+voice services), and `OLLAMA_MODEL` defaults to `qwen3:8b`, with
+`think: false` unless `OLLAMA_THINK=on` (a model that refuses the field is
+retried without it). Requests
 send `keep_alive: 30m`, and the model is loaded at startup. The chat page's
 **Claude / Local** switch (default Local) sends `brain: "claude" | "local"`.
 The request schema accepts only those two, and config says which model
@@ -310,6 +312,34 @@ persona (`src/answer/bare.ts`):
 No classifier, no contexts, no profile, no memory reads or writes, no held
 turn. With Local selected, nothing reaches Claude. `npm run eval:identity`
 checks who is who and the style on both brains.
+
+The bare persona lists what Jarvis can actually do: only talk. No calendar,
+reminders, notes, email, web or tools. It says so when asked, and never
+claims to have done one. `eval:identity` covers those cases too. It's
+informational: more than 4 sentences is a warning, and it exits 0 unless
+`--strict`.
+
+**Milestone "Conversation"** (now): talking to Jarvis should feel like
+talking to a person, tuned on the free local brain (`qwen3:8b`), keeping
+the current architecture.
+1. Bare mode on Ollama with `think: false`, and the real abilities in the
+   persona (#90).
+2. Rebase #85 (echo fixes, fillers, timing line) onto `main`, keeping bare
+   mode and the brain switch.
+3. A voice style for bare mode: written to be spoken (short, react first,
+   contractions, a question back when natural, no formatting, numbers in
+   words).
+4. Flow: bigger pieces to Kokoro (two sentences when ready) so the
+   intonation carries; easy barge-in where echo isn't a risk; the right
+   setting for the Mac's built-in mic.
+5. Done means a 10-minute free conversation on Local that feels natural,
+   with a median time to first sound under 1.5 s, then one check on
+   Claude.
+6. Chatterbox and Dia2 as voice providers on `/voices`, to compare with
+   Daniel.
+
+**Next milestone, "Trust":** an honesty guard in code (claimed actions
+blocked when no tool did them), then your data and tools.
 
 **Adding things back, one at a time, each behind its own switch:**
 1. the profile

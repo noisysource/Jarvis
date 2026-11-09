@@ -19,6 +19,10 @@ describe("bare mode prompt (#88)", () => {
     expect(p).toContain("Ask a short question back when it helps");
     expect(p).toContain("No lists, bullet points, headings, markdown or emoji");
     expect(p).toContain("You don't know anything about Alex's life");
+    // What it can actually do: only talk (#88).
+    expect(p).toContain("What you can do right now: only talk.");
+    expect(p).toContain("You can't see a calendar, set reminders or alarms, take or keep notes, read or send email");
+    expect(p).toContain("Never say or suggest you've done something you can't do");
     expect(barePrompt()).toContain("You are Jarvis, the personal assistant.");
   });
 

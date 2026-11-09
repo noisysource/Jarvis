@@ -23,10 +23,11 @@ describe("loadConfig", () => {
       models: {
         classifier: { provider: "anthropic", model: "claude-haiku-5-5" },
         answer: { provider: "anthropic", model: "claude-sonnet-5-5" },
-        local: { provider: "ollama", model: "llama3.1:8b" },
+        local: { provider: "ollama", model: "qwen3:8b" },
       },
       ollamaUrl: new URL("http://127.0.0.1:11434"),
       bareMode: false,
+      ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",
       profileSource: { kind: "file", path: "data/profile.md" },

@@ -199,14 +199,16 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    Local runs on [Ollama](https://ollama.com) on this computer:
 
    ```bash
-   ollama pull llama3.1:8b
+   ollama pull qwen3:8b
    ```
 
    ```bash
    ollama serve
    ```
 
-   - `OLLAMA_MODEL` (default `llama3.1:8b`) and `OLLAMA_URL` (default
+   - `OLLAMA_MODEL` (default `qwen3:8b`; `OLLAMA_THINK=off`, the default,
+     tells it to answer without thinking first, which is much quicker to
+     start talking) and `OLLAMA_URL` (default
      `http://127.0.0.1:11434`, and it must be on this machine).
    - Jarvis loads the model when it starts and asks Ollama to keep it loaded
      for 30 minutes, so turns don't wait for it to load. If Ollama isn't
@@ -227,9 +229,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        so it's never committed.
      - Profile, memory and contexts come back one at a time, each behind its
        own switch.
+   - In bare mode Jarvis knows it can **only talk** for now: no calendar,
+     reminders, notes, email, web or tools. Asked for one, it says so and
+     offers to talk it through. It never claims to have done it.
    - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
      who and the conversational style on both brains, in bare mode with a
-     made-up name: "Can you code?", "Who are you?" and a few more.
+     made-up name: "Can you code?", "Who are you?", the calendar, a
+     reminder, a note, an email, the weather and a few more. More than 4
+     sentences is a warning, not a failure. It's informational: it exits 0
+     unless you add `--strict`.
 
    **Why did he stop?** Each spoken answer's end is logged as one
    `playback` line. It gives the `reason` (`finished`, `barge-in`,

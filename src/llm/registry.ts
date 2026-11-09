@@ -10,8 +10,8 @@ import type { LlmCall } from "./types.js";
 /** API keys per provider, resolved at startup (see secrets.ts). */
 export type ProviderKeys = Readonly<Partial<Record<Provider, string>>>;
 
-/** Where local providers run (#88): always this machine (checked in config). */
-export type ProviderUrls = { readonly ollama?: URL };
+/** Where local providers run (#88): always this machine (checked in config). `ollamaThink`: Ollama's `think`. */
+export type ProviderUrls = { readonly ollama?: URL; readonly ollamaThink?: boolean };
 
 export const DEFAULT_OLLAMA_URL = new URL("http://127.0.0.1:11434");
 
@@ -22,6 +22,12 @@ export const makeLlm = (ref: ModelRef, keys: ProviderKeys, urls: ProviderUrls = 
       return apiKey ? ok(makeAnthropicLlm({ model: ref.model, apiKey })) : err("No API key for provider anthropic");
     }
     case "ollama":
-      return ok(makeOllamaLlm({ model: ref.model, baseUrl: urls.ollama ?? DEFAULT_OLLAMA_URL }));
+      return ok(
+        makeOllamaLlm({
+          model: ref.model,
+          baseUrl: urls.ollama ?? DEFAULT_OLLAMA_URL,
+          ...(urls.ollamaThink !== undefined ? { think: urls.ollamaThink } : {}),
+        }),
+      );
   }
 };

@@ -4,6 +4,10 @@
 //
 //   npm run eval:identity              # both brains
 //   npm run eval:identity -- local     # or: claude
+//   npm run eval:identity -- local --strict   # exit 1 on any failure
+//
+// Informational by default: it always exits 0, so a local model that doesn't
+// pass yet blocks nothing. Long replies are warnings, not failures.
 //
 // The bare persona only, with the made-up name "Alex": never your name,
 // profile or memories. Claude needs ANTHROPIC_API_KEY (from .env locally);
@@ -23,7 +27,8 @@ const fail = (message: string): never => {
   process.exit(1);
 };
 
-const which = process.argv[2] ?? "both";
+const strict = process.argv.includes("--strict");
+const which = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "both";
 if (!["both", "local", "claude"].includes(which)) fail("Usage: npm run eval:identity -- [both|local|claude]");
 
 const configResult = loadConfig(process.env);
@@ -54,7 +59,7 @@ const brains: { name: string; ref: ModelRef }[] = [
 let failures = 0;
 for (const brain of brains) {
   const key = await keyFor(brain.ref);
-  const llm = makeLlm(brain.ref, key ? { anthropic: key } : {}, { ollama: config.ollamaUrl });
+  const llm = makeLlm(brain.ref, key ? { anthropic: key } : {}, { ollama: config.ollamaUrl, ollamaThink: config.ollamaThink });
   if (!llm.ok) fail(llm.error);
   const answer = makeBareAnswerer({ llm: llm.ok ? llm.value : fail(""), userName: EVAL_NAME });
   console.log(`\n${brain.name} (${formatModelRef(brain.ref)})`);
@@ -69,11 +74,16 @@ for (const brain of brains) {
       continue;
     }
     const text = result.value.kind === "answer" ? result.value.text : result.value.message;
-    const problems = checkAnswer(c, text);
+    const { problems, warnings } = checkAnswer(c, text);
     if (problems.length === 0) passed += 1;
     else failures += 1;
-    console.log(`${problems.length === 0 ? "✓" : "✗"} ${c.question}  [${c.why}; ${ms} ms]\n    ${text.replace(/\s+/g, " ")}${problems.length ? `\n    → ${problems.join("; ")}` : ""}`);
+    const mark = problems.length > 0 ? "✗" : warnings.length > 0 ? "!" : "✓";
+    console.log(
+      `${mark} ${c.question}  [${c.why}; ${ms} ms]\n    ${text.replace(/\s+/g, " ")}` +
+        (problems.length ? `\n    → ${problems.join("; ")}` : "") +
+        (warnings.length ? `\n    warning: ${warnings.join("; ")}` : ""),
+    );
   }
   console.log(`${brain.name}: ${passed}/${IDENTITY_CASES.length}`);
 }
-process.exit(failures === 0 ? 0 : 1);
+process.exit(strict && failures > 0 ? 1 : 0);

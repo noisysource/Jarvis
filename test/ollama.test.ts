@@ -85,6 +85,24 @@ describe("Ollama provider (#88)", () => {
     expect(ollamaBody("m", request).keep_alive).toBe("30m");
   });
 
+  it("sends think: false when set, so a thinking model like qwen3 answers straight away; drops it if the model refuses it", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const base = await fakeOllama((_req, body, res) => {
+      bodies.push(body);
+      if ("think" in body && body.model === "llama3.1:8b") {
+        res.statusCode = 400;
+        return res.end('{"error":"\\"llama3.1:8b\\" does not support thinking"}');
+      }
+      streamChunks(res, ["Hi."]);
+    });
+    expect(await makeOllamaLlm({ model: "qwen3:8b", baseUrl: base, think: false })(request)).toMatchObject({ ok: true });
+    expect(bodies[0]?.think).toBe(false);
+    expect(await makeOllamaLlm({ model: "llama3.1:8b", baseUrl: base, think: false })(request)).toMatchObject({ ok: true, value: { text: "Hi." } });
+    expect(bodies.slice(1).map((b) => "think" in b)).toEqual([true, false]); // refused, then sent without it
+    await makeOllamaLlm({ model: "qwen3:8b", baseUrl: base })(request);
+    expect(bodies.at(-1)).not.toHaveProperty("think"); // not set: not sent
+  });
+
   it("works as a plain call too (the stream collected)", async () => {
     const base = await fakeOllama((_req, _b, res) => streamChunks(res, ["Hello ", "there."]));
     expect(await makeOllamaLlm({ model: "m", baseUrl: base })(request)).toMatchObject({ ok: true, value: { text: "Hello there." } });

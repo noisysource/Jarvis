@@ -70,6 +70,8 @@ export type Config = {
   readonly turn: TurnConfig;
   /** Ollama on this machine (#88). */
   readonly ollamaUrl: URL;
+  /** OLLAMA_THINK (default off): whether the local model thinks before answering; off answers sooner. */
+  readonly ollamaThink: boolean;
   /** BARE_MODE=on (#88): every turn gets only the local EC precheck, then the brain with the history and a short persona. */
   readonly bareMode: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
@@ -103,7 +105,7 @@ export const DEFAULTS = {
   sttProvider: "whisper",
   whisperUrl: "http://127.0.0.1:8178",
   ollamaUrl: "http://127.0.0.1:11434",
-  ollamaModel: "llama3.1:8b",
+  ollamaModel: "qwen3:8b",
   whisperHintsPath: "data/whisper-hints.txt",
   endOfTurnMs: 500,
   // Safari's echo cancellation is weaker than Chrome's (#75): it takes clearer speech to interrupt there.
@@ -170,7 +172,7 @@ const EnvSchema = z.object({
     z
       .string()
       .trim()
-      .regex(/^[A-Za-z0-9._:/-]{1,100}$/, { error: "must be an Ollama model name, e.g. llama3.1:8b" })
+      .regex(/^[A-Za-z0-9._:/-]{1,100}$/, { error: "must be an Ollama model name, e.g. qwen3:8b" })
       .optional(),
   ),
   JARVIS_USER_NAME: z.preprocess(
@@ -180,6 +182,10 @@ const EnvSchema = z.object({
       .trim()
       .regex(/^[\p{L}][\p{L}' .-]{0,39}$/u, { error: "must be a name (letters, up to 40 characters)" })
       .optional(),
+  ),
+  OLLAMA_THINK: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
   BARE_MODE: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -274,6 +280,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     ollamaUrl,
     bareMode: e.BARE_MODE === "on",
+    ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
     stt: { provider: e.STT_PROVIDER ?? DEFAULTS.sttProvider, whisperUrl, hintsPath: e.WHISPER_HINTS_PATH ?? DEFAULTS.whisperHintsPath },

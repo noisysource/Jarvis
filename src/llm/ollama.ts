@@ -33,11 +33,17 @@ export const toOllamaMessages = (request: LlmRequest): ChatMessage[] => [
   }),
 ];
 
-export const ollamaBody = (model: string, request: LlmRequest) => ({
+/**
+ * `think`: whether a thinking model (e.g. qwen3) thinks before answering.
+ * false answers sooner and is what a conversation wants; undefined leaves it
+ * to Ollama (for models with no thinking at all).
+ */
+export const ollamaBody = (model: string, request: LlmRequest, think?: boolean) => ({
   model,
   messages: toOllamaMessages(request),
   stream: true,
   keep_alive: OLLAMA_KEEP_ALIVE,
+  ...(think !== undefined ? { think } : {}),
   options: { num_predict: request.maxTokens },
 });
 
@@ -63,8 +69,16 @@ async function* ndjson(body: ReadableStream<Uint8Array>): AsyncIterable<Record<s
   }
 }
 
-export const makeOllamaLlm = (deps: { readonly model: string; readonly baseUrl: URL; readonly fetch?: typeof fetch }): LlmCall => {
+export const makeOllamaLlm = (deps: {
+  readonly model: string;
+  readonly baseUrl: URL;
+  readonly fetch?: typeof fetch;
+  /** Ollama's `think` (#88); undefined: not sent. */
+  readonly think?: boolean;
+}): LlmCall => {
   const doFetch = deps.fetch ?? fetch;
+  // A model with no thinking at all may refuse the `think` field: then it's dropped for good.
+  let think = deps.think;
 
   const stream = (request: LlmRequest, signal?: AbortSignal): LlmStreamed => {
     if (request.outputSchema || (request.tools && request.tools.length > 0)) {
@@ -75,14 +89,20 @@ export const makeOllamaLlm = (deps: { readonly model: string; readonly baseUrl: 
     let settle: (r: Result<LlmResponse, LlmError>) => void = () => {};
     const result = new Promise<Result<LlmResponse, LlmError>>((resolve) => (settle = resolve));
     const text = (async function* () {
-      let res: Response;
-      try {
-        res = await doFetch(new URL("/api/chat", deps.baseUrl), {
+      const post = () =>
+        doFetch(new URL("/api/chat", deps.baseUrl), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(ollamaBody(deps.model, request)),
+          body: JSON.stringify(ollamaBody(deps.model, request, think)),
           ...(signal ? { signal } : {}),
         });
+      let res: Response;
+      try {
+        res = await post();
+        if (res.status === 400 && think !== undefined && /think/i.test(await res.clone().text())) {
+          think = undefined;
+          res = await post();
+        }
       } catch {
         settle(err(signal?.aborted ? ABORTED : down(deps.baseUrl)));
         return;
