@@ -448,19 +448,44 @@ the current architecture.
 6. Chatterbox and Dia2 as voice providers on `/voices`, to compare with
    Daniel.
 
-**Next milestone, "Trust"** (#91):
-1. **An honesty guard in code, for every brain.**
-   - If a reply claims an action ("I've scheduled/created/sent/booked/
-     added…", "Done") and no tool ran in that turn, it isn't shown.
-   - It's replaced with an honest "I can't do that yet".
-   - The blocked claim is logged as numbers and a category only, no text.
-2. **Haiku as a brain option** (☁️ Claude Haiku), for cheap chat.
-3. **Bring back, one at a time, each behind its own switch and checked
-   with the evals:** the profile, then memory, then contexts and the
-   classifier.
-4. **The first real tool, behind your explicit OK:** the calendar, read
-   first and then create. The reply must come from the tool's result,
-   never the model's word.
+**Milestone "Trust"** (now, #91), one PR at a time:
+1. **The honesty guard (#96), in code, for every brain.** Done:
+   `src/answer/honesty.ts`, run by `handleAsk` on every answer.
+   - Each sentence (or first clause) is checked before it's shown or
+     spoken. It's dropped if it:
+     - claims an action ("I've scheduled/created/sent/added…", "Done.",
+       "Noted:", "Your reminder is set")
+     - promises one ("I'll remind you", "I'll remember", "I'll keep
+       track", "I can remember that for you")
+     - claims to perceive you ("you look tired", "I can see you're busy")
+   - The exception is a turn where a tool ran and succeeded
+     (`AnswerInput.onToolSucceeded`, for the tool loop to call).
+   - If nothing useful is left (only a short reaction), "I can't do that
+     yet." is added.
+   - It covers streamed and typed answers alike. The page, the voice,
+     history and memory all get the checked text.
+   - It logs `honesty guard` with counts per category and `replaced`,
+     never text.
+   - The test set is the replies from the identity eval's tests
+     (`test/fixtures/honesty-cases.ts`). Made-up facts ("you have a
+     meeting at ten") aren't the guard's job; the eval catches those.
+2. **The profile back** (`PROFILE=on`, otherwise still bare): "Tell me
+   about me" answers from `data/profile.md`. `eval:identity` runs on both
+   brains.
+3. **Google Calendar, the first real tool:**
+   - OAuth on the Mac, with tokens stored locally, gitignored and never
+     logged.
+   - Read first ("What's on tomorrow?"), personal calendar only.
+   - Create only after your explicit yes to an event (title, date, time,
+     calendar) built from the tool's result.
+   - The model asks through a structured tool request that code validates
+     (allowed tool, sensible date, Europe/Lisbon).
+   - EC-looking events reach the brain only as "EC work, handled by Kiro".
+   - It works with both brains; with Claude, a one-time note says event
+     titles go to Anthropic.
+4. Later: Haiku as a brain option (☁️ Claude Haiku), then memory, then
+   contexts and the classifier, each behind its own switch and checked
+   with the evals.
 
 **Adding things back, one at a time, each behind its own switch:**
 1. the profile
