@@ -1,11 +1,11 @@
 // @ts-check
 // The /voices audition page (#73, dev only): plays the same five sentences
 // in every voice, with time to first audio, and shows the .env lines for
-// the one you pick.
+// the one you pick. A box takes your own sentence too (#94).
 
 import { playSpeech } from "./audio.js";
 import { voicesFor } from "./chat.js";
-import { AUDITION_SENTENCES, browserEnglishVoices, envLines, formatMs, median } from "./voices-lib.js";
+import { AUDITION_SENTENCES, browserEnglishVoices, envLines, formatMs, median, OWN_SENTENCE_EXAMPLE, ownSentence } from "./voices-lib.js";
 
 /** @param {string} id */
 const byId = (id) => {
@@ -17,6 +17,23 @@ const status = byId("status");
 const head = byId("voices-head");
 const body = byId("voices-body");
 const browserBody = byId("browser-body");
+
+// Your own sentence (#94): kept in this browser only, for the next visit.
+const ownText = /** @type {HTMLTextAreaElement} */ (byId("own-text"));
+const ownAsJarvis = /** @type {HTMLInputElement} */ (byId("own-as-jarvis"));
+const OWN_KEY = "jarvis.voices.own";
+try {
+  ownText.value = localStorage.getItem(OWN_KEY) ?? OWN_SENTENCE_EXAMPLE;
+} catch {
+  ownText.value = OWN_SENTENCE_EXAMPLE;
+}
+ownText.addEventListener("input", () => {
+  try {
+    localStorage.setItem(OWN_KEY, ownText.value);
+  } catch {
+    /* private mode: it just isn't kept */
+  }
+});
 
 /** @type {AudioContext | undefined} */
 let ctx;
@@ -81,7 +98,7 @@ const addUnavailable = (provider, problem, starting) => {
   const name = document.createElement("td");
   name.textContent = provider;
   const message = document.createElement("td");
-  message.colSpan = AUDITION_SENTENCES.length + 2;
+  message.colSpan = AUDITION_SENTENCES.length + 3;
   message.textContent = starting ? `${problem}… this list refreshes when it's up.` : problem;
   tr.append(name, message);
   body.append(tr);
@@ -124,6 +141,32 @@ const addRow = (row, into = body) => {
     tr.append(td);
     cells.push(button);
   }
+  // Your own sentence (#94): not part of the median, since it's different text.
+  const own = document.createElement("td");
+  const ownButton = document.createElement("button");
+  ownButton.type = "button";
+  ownButton.textContent = "▶";
+  ownButton.disabled = !row.available;
+  ownButton.setAttribute("aria-label", `${row.label}: your sentence`);
+  const ownTime = document.createElement("span");
+  ownTime.className = "ttfa";
+  ownButton.addEventListener("click", async () => {
+    const text = ownSentence(ownText.value, { asJarvis: ownAsJarvis.checked });
+    if (text === "") {
+      status.textContent = "Type a sentence first.";
+      return;
+    }
+    status.textContent = `Playing ${row.label}…`;
+    try {
+      ownTime.textContent = formatMs(await play(row, text));
+      status.textContent = "";
+    } catch (e) {
+      ownTime.textContent = "failed";
+      status.textContent = `${row.label}: ${e instanceof Error ? e.message : "failed"}`;
+    }
+  });
+  own.append(ownButton, ownTime);
+  tr.append(own);
   const all = document.createElement("td");
   const playAll = document.createElement("button");
   playAll.type = "button";
@@ -181,7 +224,7 @@ const loadServerVoices = async () => {
 };
 
 const load = async () => {
-  const headCells = ["Voice", ...AUDITION_SENTENCES.map((s) => s.label), "All (median)", ""];
+  const headCells = ["Voice", ...AUDITION_SENTENCES.map((s) => s.label), "Your sentence", "All (median)", ""];
   head.replaceChildren(...headCells.map((t) => Object.assign(document.createElement("th"), { textContent: t })));
   status.textContent = "Loading voices…";
   await loadServerVoices();

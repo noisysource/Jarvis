@@ -392,11 +392,22 @@ informational: more than 4 sentences is a warning, and it exits 0 unless
 it's also the main latency fix: the reply opens with a reaction of one to
 three words as its own sentence ("Okay.", "Good question."), so the first
 piece Kokoro speaks is tiny and starts at once.
-- Then at most two or three short sentences (`VOICE_MAX_SENTENCES`, default
-  3, the reaction not counted), unless they ask for detail ("in detail",
+- Then at most one or two short sentences (`VOICE_MAX_SENTENCES`, default
+  2 since #94, the reaction not counted), unless they ask for detail ("in detail",
   "tell me more", "step by step"). "Explain like I'm five" stays short.
 - The limit is enforced in code too: the reply is cut after the last
   allowed sentence, the model is stopped, and only what was said is kept.
+- Pauses (#94, experiment): with `VOICE_PUNCTUATION_STYLE=on` the model may
+  use an ellipsis (...) or a dash (—) for a pause, now and then; off, it's
+  told not to. The sentence splitter never splits on an ellipsis or a dash
+  (they're pauses inside a piece; "...?" still ends one), and the first
+  sentence is cut early only at , ; or :.
+- No capitals for emphasis until they're tested. In Kokoro's phonemiser
+  (misaki 0.9.4), an all-caps word that's an ordinary word ("REALLY") is
+  said as that word with extra stress. But an all-caps word misaki knows as
+  an acronym ("IT", "US", "ME", "AM", "WHO"…), when tagged as a noun, and an
+  all-caps word it doesn't know, tagged as a proper noun, are spelled out
+  letter by letter. `/voices` takes your own sentence to try them.
 - The opening varies: each spoken turn's system suffix offers three
   reactions in a random order (never the one the last reply opened with),
   and about one turn in five asks for no reaction at all.

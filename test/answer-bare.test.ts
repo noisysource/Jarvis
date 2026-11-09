@@ -71,7 +71,8 @@ describe("spoken style in bare mode (#92)", () => {
   it("asks for a tiny, varied reaction first, a short reply, and words that read well aloud", () => {
     const p = barePrompt("Alex", { spoken: true });
     expect(p).toContain("Usually start with a very short reaction of one to three words, as its own sentence, and vary it");
-    expect(p).toContain("Then at most two or three short sentences, unless they ask for detail");
+    expect(p).toContain("Then at most one or two short sentences, unless they ask for detail"); // 1–2 by default (#94)
+    expect(barePrompt("Alex", { spoken: true, maxSentences: 3 })).toContain("Then at most two or three short sentences");
     expect(p).toContain("Even for 'explain like I'm five', keep it that short");
     expect(p).toContain("contractions");
     expect(p).toContain("No quotes, brackets, lists");
@@ -81,7 +82,16 @@ describe("spoken style in bare mode (#92)", () => {
     expect(barePrompt("Alex")).not.toContain("spoken aloud"); // typed keeps its own style
   });
 
-  it("promises nothing for later, even after a refusal", () => {
+  it("allows ellipses and dashes for pauses only when switched on, and never capitals for emphasis (#94)", () => {
+    const off = barePrompt("Alex", { spoken: true });
+    const on = barePrompt("Alex", { spoken: true, pauses: true });
+    expect(off).toContain("- No ellipses or dashes.");
+    expect(on).not.toContain("No ellipses or dashes");
+    expect(on).toContain("use an ellipsis (...) or a dash (—) inside a sentence. Not in every reply.");
+    for (const p of [off, on]) expect(p).toContain("Never write words in capitals for emphasis.");
+  });
+
+    it("promises nothing for later, even after a refusal", () => {
     for (const p of [barePrompt("Alex"), barePrompt("Alex", { spoken: true })]) {
       expect(p).toContain("And don't promise it for later either, even after saying you can't");
       expect(p).toContain("You won't remember anything after this conversation.");

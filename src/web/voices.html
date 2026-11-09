@@ -12,7 +12,7 @@
     <header>
       <h1>Jarvis voices</h1>
       <p class="note">
-        Dev only. Every voice reads the same five sentences; the number under each is the time from asking to the first
+        Dev only. Every voice reads the same five sentences, and your own if you type one; the number under each is the time from asking to the first
         sound. Pick one with “Use this voice”, put the two lines it shows in <code>.env</code>, and restart Jarvis.
       </p>
     </header>
@@ -23,6 +23,11 @@
         <p>Put these in <code>.env</code> and restart:</p>
         <pre id="choice-lines"></pre>
       </div>
+      <section id="own" aria-label="Your own sentence">
+        <label for="own-text">Your own sentence (play it in any voice with ▶ under “Your sentence”)</label>
+        <textarea id="own-text" rows="2" maxlength="1000"></textarea>
+        <label class="own-option"><input type="checkbox" id="own-as-jarvis" checked /> Numbers in words, the way Jarvis sends them</label>
+      </section>
       <div class="table-wrap">
         <table id="voices">
           <thead><tr id="voices-head"></tr></thead>

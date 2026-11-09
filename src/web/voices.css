@@ -59,3 +59,21 @@ pre#choice-lines {
   background: var(--surface);
   user-select: all;
 }
+
+#own {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+#own textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+}
+
+#own .own-option {
+  color: var(--muted);
+  font-size: 0.85rem;
+}

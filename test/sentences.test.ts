@@ -8,7 +8,7 @@ describe("splitSentences (English)", () => {
   it.each([
     ["Hello! How can I help today?", ["Hello!", "How can I help today?"]],
     ["It's 2 September. She'll be 9.", ["It's 2 September.", "She'll be 9."]],
-    ["Wait... really? Yes!", ["Wait...", "really?", "Yes!"]],
+    ["Wait... really? Yes!", ["Wait... really?", "Yes!"]],
     ["Dr. Marta Silva is your doctor. She's at the Centro de Saúde.", ["Dr. Marta Silva is your doctor.", "She's at the Centro de Saúde."]],
     ["Pack light, e.g. a jacket and shoes. Then go.", ["Pack light, e.g. a jacket and shoes.", "Then go."]],
     ["It costs 3.5 euros. Cheap.", ["It costs 3.5 euros.", "Cheap."]],
@@ -22,6 +22,44 @@ describe("splitSentences (English)", () => {
     ["No full stop at the end", ["No full stop at the end"]],
     ["", []],
   ])("%j", (text, expected) => expect(split(text)).toEqual(expected));
+
+  it.each([
+    // Pauses stay inside a piece (#94): an ellipsis or a dash never ends one.
+    ["Well... I'm not sure. Let's see.", ["Well... I'm not sure.", "Let's see."]],
+    ["Hmm… that's a tricky one. Maybe.", ["Hmm… that's a tricky one.", "Maybe."]],
+    ["It's big — really big. Huge.", ["It's big — really big.", "Huge."]],
+    ["It's big – really big. Huge.", ["It's big – really big.", "Huge."]],
+    ["It's big - really big. Huge.", ["It's big - really big.", "Huge."]],
+    ["Okay.. two dots too. Fine.", ["Okay.. two dots too.", "Fine."]],
+    ["You mean...? Yes.", ["You mean...?", "Yes."]],
+    ["Really…! Wow.", ["Really…!", "Wow."]],
+    ["And then...", ["And then..."]],
+    ["It's 3.5 degrees... roughly 3.5. Cold.", ["It's 3.5 degrees... roughly 3.5.", "Cold."]],
+    ["Pi is 3.14 — about. Close enough.", ["Pi is 3.14 — about.", "Close enough."]],
+  ])("pauses: %j", (text, expected) => expect(split(text)).toEqual(expected));
+
+  it("keeps pauses inside a piece however the text arrives (#94)", () => {
+    const text = "Well... I think — maybe — it's 3.5 km. Hmm… or 4.5? Wait...? Nope. And then...";
+    const whole = split(text);
+    expect(whole).toEqual(["Well... I think — maybe — it's 3.5 km.", "Hmm… or 4.5?", "Wait...?", "Nope.", "And then..."]);
+    for (const size of [1, 2, 3, 4, 5, 7]) {
+      const splitter = makeSentenceSplitter(en);
+      const out: string[] = [];
+      for (let i = 0; i < text.length; i += size) out.push(...splitter.push(text.slice(i, i + size)));
+      out.push(...splitter.flush());
+      expect(out, `chunk size ${size}`).toEqual(whole);
+    }
+  });
+
+  it("doesn't cut a long first sentence at a dash, only at , ; or : (#94)", () => {
+    const long = "A black hole is a place in space where gravity pulls so hard — really, really hard — that nothing gets out. Wow.";
+    const splitter = makeSentenceSplitter({ language: "en", firstClauseAfter: 40 });
+    const out: string[] = [];
+    for (let i = 0; i < long.length; i += 5) out.push(...splitter.push(long.slice(i, i + 5)));
+    out.push(...splitter.flush());
+    expect(out[0]).toBe("A black hole is a place in space where gravity pulls so hard — really,");
+    expect(out.join(" ")).toBe(long);
+  });
 
   it("gives the same sentences however the text arrives", () => {
     const text =

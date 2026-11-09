@@ -49,6 +49,8 @@ export type TurnConfig = {
   readonly firstChunkChars: number;
   /** Spoken bare replies (#92): sentences allowed after the opening reaction, unless detail is asked for. */
   readonly spokenSentences: number;
+  /** Spoken bare replies (#94, opt-in): ellipses and dashes for pauses (VOICE_PUNCTUATION_STYLE=on). */
+  readonly punctuationStyle: boolean;
   /** Interrupting Jarvis, per browser: "vad" (just talk), "strict" (talk clearly, for weaker echo cancellation) or "push" (tap Interrupt). */
   readonly bargeIn: { readonly chrome: BargeInMode; readonly safari: BargeInMode; readonly other: BargeInMode };
 };
@@ -224,6 +226,7 @@ const EnvSchema = z.object({
   CLASSIFIER_THINKING: onOff,
   STICKY_CONTEXT: onOff,
   SPECULATIVE_ANSWER: onOff,
+  VOICE_PUNCTUATION_STYLE: onOff,
   VOICE_MAX_SENTENCES: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.coerce
@@ -231,7 +234,7 @@ const EnvSchema = z.object({
       .int({ error: "must be a whole number from 1 to 10" })
       .min(1, { error: "must be a whole number from 1 to 10" })
       .max(10, { error: "must be a whole number from 1 to 10" })
-      .default(3),
+      .default(2),
   ),
   VOICE_FIRST_CHUNK_CHARS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -333,6 +336,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       speculativeAnswer: e.SPECULATIVE_ANSWER === "on",
       firstChunkChars: e.VOICE_FIRST_CHUNK_CHARS,
       spokenSentences: e.VOICE_MAX_SENTENCES,
+      punctuationStyle: e.VOICE_PUNCTUATION_STYLE === "on",
       bargeIn: {
         chrome: e.BARGE_IN_CHROME ?? DEFAULTS.bargeInChrome,
         safari: e.BARGE_IN_SAFARI ?? DEFAULTS.bargeInSafari,

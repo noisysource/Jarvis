@@ -2,11 +2,13 @@
 // start after the first one. Pure: feed text with `push`, get finished
 // sentences back; `flush` returns whatever is left at the end.
 //
-// A sentence ends at . ! ? or … followed by a space or a new line, except
+// A sentence ends at . ! or ? followed by a space or a new line, except
 // after an abbreviation ("Dr.", "e.g."), an initial ("J. Smith") or a list
 // number at the start of a line ("1. "). A blank line always ends one.
-// Closing quotes and brackets stay with their sentence. A long first
-// sentence is cut at a clause (, ; : —) so the first audio comes sooner.
+// Closing quotes and brackets stay with their sentence. An ellipsis ("..."
+// or "…") and a dash are pauses inside a piece, never an end (#94); "...?"
+// still ends. A long first sentence is cut at a clause (, ; :) so the first
+// audio comes sooner.
 
 import type { Language } from "./types.js";
 
@@ -82,6 +84,13 @@ export const makeSentenceSplitter = (options: SentenceSplitterOptions): Sentence
         continue;
       }
       if (".!?…".includes(ch)) {
+        // An ellipsis is a pause, not an end (#94): skip the whole run of dots.
+        if (ch !== "!" && ch !== "?" && (ch === "…" || buffer[i + 1] === "." || buffer[i - 1] === "." || buffer[i - 1] === "…")) {
+          let k = i;
+          while (k < buffer.length && ".…".includes(buffer[k] ?? "")) k += 1;
+          i = k - 1; // a ? or ! right after ("...?") still ends it, on the next step
+          continue;
+        }
         const end = endAfter(buffer, i, abbreviations);
         if (end === undefined) {
           // Undecided only if we've reached the end of what's arrived.
@@ -107,7 +116,7 @@ export const makeSentenceSplitter = (options: SentenceSplitterOptions): Sentence
    */
   const cutLongFirst = (): string[] => {
     if (emitted > 0 || buffer.length < firstClauseAfter) return [];
-    const match = [...buffer.matchAll(/[,;:—–](\s)/g)].filter((m) => (m.index ?? 0) >= firstClauseAfter / 2).at(-1);
+    const match = [...buffer.matchAll(/[,;:](\s)/g)].filter((m) => (m.index ?? 0) >= firstClauseAfter / 2).at(-1);
     if (match && match.index !== undefined) {
       const s = take(match.index + 1);
       return s ? [s] : [];

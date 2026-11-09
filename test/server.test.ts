@@ -380,6 +380,7 @@ describe("GET /voice-settings (#75)", () => {
       speculativeAnswer: false,
       firstChunkChars: 60,
       spokenSentences: 3,
+      punctuationStyle: false,
     } as const;
     const app = makeServer(deps, { allowedHosts: localHosts(8080), turn, dev: true });
     const res = await app.request("/voice-settings", { headers: { host: "127.0.0.1:8080" } });
