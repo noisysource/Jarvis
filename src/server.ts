@@ -20,7 +20,6 @@ import { handleAsk } from "./ask.js";
 import { withLogFields } from "./log.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
 import type { MemoryStore } from "./memory-store.js";
-import { makeSentenceSplitter } from "./sentences.js";
 import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
 import type { TtsConfig, TurnConfig } from "./config.js";
 import { registerSttRoutes } from "./stt-routes.js";
@@ -221,7 +220,6 @@ export const makeServer = (
         const controller = new AbortController();
         stream.onAbort(() => controller.abort());
         c.req.raw.signal.addEventListener("abort", () => controller.abort());
-        const splitter = makeSentenceSplitter({ language: "en", ...(options.turn ? { firstClauseAfter: options.turn.firstChunkChars } : {}) });
         let sentences = 0;
         let firstSentenceMs: number | undefined;
         // Latency (#76): numbers only, never content.
@@ -243,10 +241,12 @@ export const makeServer = (
         const response = await handleAsk(askDeps, request.value, {
           requestId,
           signal: controller.signal,
-          onText: (delta) => {
+          // Raw text only for the timing; what's sent is each sentence the honesty guard passed (#96).
+          onText: () => {
             firstTokenMs ??= Math.round(performance.now() - started);
-            sendSentences(splitter.push(delta));
           },
+          onSentence: (text) => sendSentences([text]),
+          ...(options.turn ? { firstClauseAfter: options.turn.firstChunkChars } : {}),
           deferWrapUp: (turn) => turns.hold(turnId, turn),
           onStage: (stage, fields) => {
             if (stage === "route") {
@@ -258,7 +258,6 @@ export const makeServer = (
             }
           },
         });
-        if (response.type === "answer") sendSentences(splitter.flush());
         const timing = {
           ...stages,
           ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),

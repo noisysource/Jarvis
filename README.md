@@ -261,6 +261,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    - In bare mode Jarvis knows it can **only talk** for now: no calendar,
      reminders, notes, email, web or tools. Asked for one, it says so and
      offers to talk it through. It never claims to have done it.
+   - **Honesty guard (#96), for every brain and every mode:** any sentence
+     that claims an action ("I've added it", "Done"), promises one ("I'll
+     remind you", "I'll remember") or claims to see or hear you ("you look
+     tired") is dropped before it's shown or spoken, unless a tool really
+     ran and succeeded in that turn. If nothing useful is left, Jarvis
+     says "I can't do that yet." The log line `honesty guard` has counts
+     only.
    - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
      who and the conversational style on both brains, in bare mode with a
      made-up name: "Can you code?", "Who are you?", the calendar, a

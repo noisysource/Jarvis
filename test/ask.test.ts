@@ -142,11 +142,14 @@ describe("answered contexts", () => {
   it("streaming: passes text on, and hands the wrap-up over instead of scheduling it", async () => {
     const { deps, calls, answerInputs } = makeDeps();
     const deferred: DeferredWrapUp[] = [];
-    const onText = () => undefined;
+    const raw: string[] = [];
+    const onText = (d: string) => void raw.push(d);
     const signal = new AbortController().signal;
     const response = await handleAsk(deps, { question: QUESTION }, { onText, signal, deferWrapUp: (t) => deferred.push(t) });
     expect(response.type).toBe("answer");
-    expect(answerInputs[0]?.onText).toBe(onText);
+    // The answerer's text goes through the honesty guard (#96), and still reaches the caller.
+    answerInputs[0]?.onText?.("Hi");
+    expect(raw).toEqual(["Hi"]);
     expect(answerInputs[0]?.signal).toBe(signal);
     expect(calls).not.toContain("after reply: memory wrap-up");
     expect(deferred).toHaveLength(1);
@@ -542,5 +545,53 @@ describe("clarifyMessage", () => {
   ])("lists %j", (names, ending) => {
     const options = names.map((name) => ({ id: id(name.toLowerCase()), name }));
     expect(clarifyMessage(options)).toBe(`I'm not sure which this is about. ${ending}`);
+  });
+});
+
+describe("honesty guard on every answer (#96)", () => {
+  /** An answerer that streams `text` in pieces, then returns it; with `tool`, a tool ran and succeeded first. */
+  const streamingAnswer =
+    (text: string, tool = false) =>
+    async (input: AnswerInput): Promise<Result<AnswerOutcome, AppError>> => {
+      if (tool) input.onToolSucceeded?.();
+      for (let i = 0; i < text.length; i += 5) input.onText?.(text.slice(i, i + 5));
+      return ok({ kind: "answer", text });
+    };
+
+  it("bare, streamed: only honest sentences are sent, and the reply says what's left", async () => {
+    const made = makeDeps();
+    const deps: Deps = { ...made.deps, bare: streamingAnswer("Sure. Done! I'll remind you at five.") };
+    const sentences: string[] = [];
+    const response = await handleAsk(deps, { question: "Remind me at five", brain: "local", spoken: true }, { onSentence: (s) => sentences.push(s) });
+    expect(sentences).toEqual(["Sure.", "I can't do that yet."]);
+    expect(response).toMatchObject({ type: "answer", answer: "Sure. I can't do that yet." });
+    expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, replaced: true } });
+  });
+
+  it("typed, not streamed: the whole answer is checked, and memory only gets the checked text", async () => {
+    const { deps, wrapUps, flush } = makeDeps({ answer: ok({ kind: "answer", text: "Your passport expires in January. I'll remind you in December." }) });
+    const response = await handleAsk(deps, { question: QUESTION });
+    expect(response).toMatchObject({ type: "answer", answer: "Your passport expires in January." });
+    await flush();
+    expect(wrapUps[0]).toMatchObject({ answer: "Your passport expires in January." });
+  });
+
+  it("streamed: the held wrap-up gets the checked text too", async () => {
+    const made = makeDeps();
+    const deps: Deps = { ...made.deps, answer: streamingAnswer("You look tired. Your passport expires in January.") };
+    const deferred: DeferredWrapUp[] = [];
+    const sentences: string[] = [];
+    await handleAsk(deps, { question: QUESTION }, { onSentence: (s) => sentences.push(s), deferWrapUp: (t) => deferred.push(t) });
+    expect(sentences).toEqual(["Your passport expires in January."]);
+    expect(deferred[0]?.answer).toBe("Your passport expires in January.");
+  });
+
+  it("lets claims through when a tool ran and succeeded this turn", async () => {
+    const made = makeDeps();
+    const deps: Deps = { ...made.deps, bare: streamingAnswer("Done. I've added it for Tuesday at ten.", true) };
+    const sentences: string[] = [];
+    const response = await handleAsk(deps, { question: "Add it", brain: "local" }, { onSentence: (s) => sentences.push(s) });
+    expect(sentences).toEqual(["Done.", "I've added it for Tuesday at ten."]);
+    expect(response).toMatchObject({ answer: "Done. I've added it for Tuesday at ten." });
   });
 });

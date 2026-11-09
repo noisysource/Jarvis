@@ -16,6 +16,7 @@
 //
 // Logs carry the context id and outcome only, never the question or answer.
 
+import { makeHonestyGuard } from "./answer/honesty.js";
 import { clarifyOptions, handoffMessage } from "./contexts.js";
 import type { AskRequest, AskResponse, Context, ContextOption, Deps, Turn } from "./types.js";
 
@@ -71,8 +72,12 @@ export type DeferredWrapUp = {
 
 export type AskMeta = {
   readonly requestId?: string;
-  /** Streaming (#72): each piece of the answer's text as it arrives. */
+  /** Streaming (#72): each raw piece of the answer's text as it arrives (for timing; not checked yet). */
   readonly onText?: (delta: string) => void;
+  /** Streaming: each sentence (or first clause) of the answer once the honesty guard has passed it (#96). */
+  readonly onSentence?: (sentence: string) => void;
+  /** Streaming: a long first sentence is cut at a clause once it's this long (VOICE_FIRST_CHUNK_CHARS). */
+  readonly firstClauseAfter?: number;
   /** Cancels the answer (the client went away, e.g. on barge-in). */
   readonly signal?: AbortSignal;
   /**
@@ -97,7 +102,7 @@ const SPECULATIVE_CONTEXT = "personal";
  * agrees, then sent on; if it picks anything else, the speculative answer is
  * cancelled and thrown away (no wrap-up, nothing sent).
  */
-const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Turn[], meta: AskMeta) => {
+const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Turn[], meta: AskMeta, onToolSucceeded: () => void) => {
   if (deps.speculativeAnswer !== true || request.context !== undefined || !deps.isAnswered(SPECULATIVE_CONTEXT as Context["id"])) return undefined;
   if (deps.precheck(request.question).kind !== "none") return undefined;
   const stickyWouldApply = deps.stickyContext === true && request.stickyContext !== undefined && deps.isAnswered(request.stickyContext);
@@ -125,6 +130,7 @@ const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Tur
       signal: controller.signal,
       ...(request.spoken === true ? { spoken: true } : {}),
       ...(request.brain ? { brain: request.brain } : {}),
+      onToolSucceeded,
     });
     return { memories, answer };
   })();
@@ -149,7 +155,7 @@ const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Tur
  * history and a short persona. No classifier, no contexts, no profile, no
  * memory reads or writes: with the Local brain, nothing reaches Claude.
  */
-const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest, meta: AskMeta): Promise<AskResponse> => {
+const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest, meta: AskMeta, guard: HonestyGuard): Promise<AskResponse> => {
   const local = deps.precheck(request.question);
   if (local.kind === "handoff") {
     deps.log.info("ask", { context: local.context.id, outcome: "handoff", bare: true });
@@ -172,21 +178,50 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(meta.signal ? { signal: meta.signal } : {}),
     ...(request.brain ? { brain: request.brain } : {}),
     ...(request.spoken === true ? { spoken: true } : {}),
+    onToolSucceeded: guard.toolSucceeded,
   });
   if (!answer.ok) {
     deps.log.info("ask", { outcome: answer.error.code === "cancelled" ? "cancelled" : "error", bare: true, brain: request.brain ?? "claude" });
     return { type: "error", message: answer.error.message };
   }
   if (answer.value.kind !== "answer") return { type: "unavailable", context: personal.id, message: answer.value.message };
+  const checked = guard.finish(answer.value.text);
   deps.log.info("ask", { outcome: "answer", bare: true, brain: request.brain ?? "claude" });
-  return { type: "answer", context: personal.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
+  return { type: "answer", context: personal.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}) };
 };
 
-export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
+type HonestyGuard = ReturnType<typeof makeHonestyGuard>;
+
+/**
+ * Every answer goes through the honesty guard (#96), whatever brain wrote it:
+ * streamed text is checked sentence by sentence before it's sent on, and the
+ * full text before it's returned, remembered or wrapped up.
+ */
+export const handleAsk = async (deps: Deps, request: AskRequest, outer: AskMeta = {}): Promise<AskResponse> => {
+  const guard = makeHonestyGuard({
+    ...(outer.onSentence ? { onSentence: outer.onSentence } : {}),
+    ...(outer.firstClauseAfter !== undefined ? { firstClauseAfter: outer.firstClauseAfter } : {}),
+    log: deps.log,
+  });
+  const streaming = outer.onText !== undefined || outer.onSentence !== undefined;
+  const { onText: rawText, ...rest } = outer;
+  const meta: AskMeta = streaming
+    ? {
+        ...rest,
+        onText: (delta: string) => {
+          rawText?.(delta);
+          guard.onText(delta);
+        },
+      }
+    : rest;
+  return answerChecked(deps, request, meta, guard);
+};
+
+const answerChecked = async (deps: Deps, request: AskRequest, meta: AskMeta, guard: HonestyGuard): Promise<AskResponse> => {
   const history = request.history ?? [];
   if (deps.bare) {
     try {
-      return await handleBare(deps, deps.bare, request, meta);
+      return await handleBare(deps, deps.bare, request, meta, guard);
     } catch (e) {
       deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });
       return { type: "error", message: GENERIC_ERROR };
@@ -194,7 +229,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
   }
   try {
     const routeStarted = performance.now();
-    const speculation = startSpeculation(deps, request, history, meta);
+    const speculation = startSpeculation(deps, request, history, meta, guard.toolSucceeded);
     const resolved = await resolveContext(deps, request, history);
     const useSpeculation = speculation !== undefined && resolved.kind === "context" && resolved.context.id === speculation.context.id;
     if (speculation && !useSpeculation) speculation.discard();
@@ -244,6 +279,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
               ...(meta.signal ? { signal: meta.signal } : {}),
               ...(request.spoken === true ? { spoken: true } : {}),
               ...(request.brain ? { brain: request.brain } : {}),
+              onToolSucceeded: guard.toolSucceeded,
             }),
           };
         })();
@@ -286,16 +322,18 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     // an answer. "Don't remember this": the answer used memories, but
     // nothing is learned. A streamed answer's wrap-up waits for the page to
     // say how playback ended.
+    // Only what the honesty guard kept is shown, spoken and remembered (#96).
+    const checked = guard.finish(answer.value.text);
     if (request.remember !== false) {
       if (meta.deferWrapUp) {
-        meta.deferWrapUp({ question: request.question, completed: true, answer: answer.value.text, run: runWrapUp });
+        meta.deferWrapUp({ question: request.question, completed: true, answer: checked.text, run: runWrapUp });
       } else {
-        runWrapUp(answer.value.text);
+        runWrapUp(checked.text);
       }
     }
 
     deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude" });
-    return { type: "answer", context: context.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
+    return { type: "answer", context: context.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}) };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.
     deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });
