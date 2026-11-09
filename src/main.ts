@@ -106,6 +106,7 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   stt,
   turn: cfg.turn,
   dev: cfg.env !== "production",
+  reactionFirst: cfg.bareMode,
   brains: {
     default: "local",
     labels: { local: `Local · ${cfg.models.local.model}`, claude: `Claude · ${cfg.models.answer.model}` },

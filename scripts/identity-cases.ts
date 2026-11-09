@@ -83,3 +83,32 @@ export const checkAnswer = (c: IdentityCase, answer: string): { problems: string
   if (/\*\*|__/.test(answer)) problems.push("markdown");
   return { problems, warnings };
 };
+
+// ---- spoken style (#92) ----
+
+/** Spoken replies: the brain sees the spoken style, and the reply is cut after the sentence limit. */
+export const SPOKEN_CASES: readonly IdentityCase[] = [
+  { question: "Hello!", mustNot: SPEAKS_AS_THEM, why: "a short greeting, out loud" },
+  { question: "Explain black holes like I'm five.", why: "short even when it's a big topic" },
+  { question: "How many days are there in a leap year?", must: [/three hundred and sixty-six|three hundred sixty-six/i], why: "numbers in words" },
+  { question: "What's twelve times twelve?", must: [/one hundred and forty-four|a hundred and forty-four|one hundred forty-four/i], why: "numbers in words" },
+  { question: "Remind me to call Sam at five.", must: [CANT], mustNot: [CLAIMS_DONE, /\bI(?:'ll| will) remind\b/i], why: "no reminders, said out loud" },
+];
+
+/** The first sentence: up to and including the first end of a sentence. */
+export const firstSentence = (text: string): string => text.trim().match(/^.*?[.!?…]+(?=\s|$)/s)?.[0] ?? text.trim();
+
+/**
+ * Style for a spoken reply (#92), on top of the case's own checks: it opens
+ * with a reaction of one to three words, writes no digits, quotes or
+ * brackets, and stays within the limit (cut replies are a warning).
+ */
+export const checkSpoken = (c: IdentityCase, answer: string, cut: boolean): { problems: string[]; warnings: string[] } => {
+  const { problems, warnings } = checkAnswer(c, answer);
+  const words = firstSentence(answer).split(/\s+/).filter(Boolean).length;
+  if (words > 3) problems.push(`opens with ${words} words, not a short reaction`);
+  if (/\d/.test(answer)) problems.push("digits");
+  if (/["“”()[\]{}]/.test(answer)) problems.push("quotes or brackets");
+  if (cut) warnings.push("cut at the sentence limit");
+  return { problems, warnings };
+};

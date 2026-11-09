@@ -337,6 +337,31 @@ export const FILLERS = ["Let me think.", "One moment.", "Hmm, good question.", "
 export const FILLER_AFTER_MS = 800;
 
 /**
+ * When replies open with their own short reaction (#92, bare mode), that
+ * reaction is the first thing to speak and usually arrives within this, so
+ * a filler waits longer and covers only a really slow start.
+ */
+export const FILLER_AFTER_REACTION_MS = 1600;
+
+/** How long to wait before a filler. @param {boolean} reactionFirst */
+export const fillerDelayMs = (reactionFirst) => (reactionFirst ? FILLER_AFTER_REACTION_MS : FILLER_AFTER_MS);
+
+/** An opening reaction: one to three words, as its own sentence ("Okay.", "Good question."). @param {string} sentence */
+export const isReaction = (sentence) => {
+  const trimmed = sentence.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= 3 && /[.!?…]$/.test(trimmed);
+};
+
+/**
+ * Whether to leave a sentence unspoken (#92): a filler already played, so
+ * the reply's own opening reaction would be a second one ("One moment. Okay.").
+ * It still shows in the chat.
+ * @param {{ usedFiller: boolean, first: boolean, sentence: string }} s
+ */
+export const skipSpokenReaction = ({ usedFiller, first, sentence }) => usedFiller && first && isReaction(sentence);
+
+/**
  * A filler, never the one used last time.
  * @param {string} previous @param {() => number} random 0..1 @param {readonly string[]} [fillers]
  */

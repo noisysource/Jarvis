@@ -388,6 +388,25 @@ claims to have done one. `eval:identity` covers those cases too. It's
 informational: more than 4 sentences is a warning, and it exits 0 unless
 `--strict`.
 
+**Spoken style in bare mode (#92).** Spoken turns get their own style, and
+it's also the main latency fix: the reply opens with a reaction of one to
+three words as its own sentence ("Okay.", "Good question."), so the first
+piece Kokoro speaks is tiny and starts at once.
+- Then at most two or three short sentences (`VOICE_MAX_SENTENCES`, default
+  3, the reaction not counted), unless they ask for detail ("in detail",
+  "tell me more", "step by step"). "Explain like I'm five" stays short.
+- The limit is enforced in code too: the reply is cut after the last
+  allowed sentence, the model is stopped, and only what was said is kept.
+- Contractions, plain words, numbers and times in words, no quotes,
+  brackets, lists or symbols.
+- Typed turns keep the typed style.
+- The page waits 1.6 s (not 0.8 s) before a filler when replies open with
+  their own reaction (`/voice-settings` → `reactionFirst`). If a filler did
+  play, the reply's own reaction isn't spoken (it still shows), so there's
+  never "One moment. Okay."
+- `eval:identity` adds spoken cases: a short reaction first, no digits, no
+  quotes or brackets, the limit, and how soon the first words came.
+
 **Milestone "Conversation"** (now): talking to Jarvis should feel like
 talking to a person, tuned on the free local brain (`qwen3:8b`), keeping
 the current architecture.
@@ -397,7 +416,7 @@ the current architecture.
    mode and the brain switch.
 3. A voice style for bare mode: written to be spoken (short, react first,
    contractions, a question back when natural, no formatting, numbers in
-   words).
+   words), and the sentence limit in code (#92).
 4. Flow: bigger pieces to Kokoro (two sentences when ready) so the
    intonation carries; easy barge-in where echo isn't a risk; the right
    setting for the Mac's built-in mic.

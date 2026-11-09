@@ -30,9 +30,10 @@ import {
   browserFamily,
   browserLabel,
   chooseVoice,
-  FILLER_AFTER_MS,
   FILLERS,
   fillerAllowed,
+  fillerDelayMs,
+  skipSpokenReaction,
   pickFiller,
   formatTiming,
   makeTurnDetector,
@@ -539,6 +540,8 @@ let answering;
 
 /** Development only (GET /voice-settings): a timing line under each answer. */
 let devTimings = false;
+/** Replies open with their own short reaction (#92, bare mode): see /voice-settings. */
+let reactionFirst = false;
 /** A spoken turn's timings so far, handed from the mic to ask(). @type {import("./turn-lib.js").TurnTiming | undefined} */
 let nextTiming;
 /** Recent totals, for the median. @type {number[]} */
@@ -718,7 +721,7 @@ const ask = async (question, context) => {
             startBargeInGrace();
           }
         },
-        Math.max(0, (timing.speechEndedAt ?? askStarted) + FILLER_AFTER_MS - performance.now()),
+        Math.max(0, (timing.speechEndedAt ?? askStarted) + fillerDelayMs(reactionFirst) - performance.now()),
       )
     : undefined;
   const settleFiller = () => {
@@ -760,11 +763,13 @@ const ask = async (question, context) => {
           if (ev.event === "start") turnId = String(data.turnId ?? "");
           else if (ev.event === "sentence") {
             const sentence = String(data.text ?? "");
+            const first = timing.firstSentenceAt === undefined;
             timing.firstSentenceAt ??= performance.now();
             timing.firstChunkChars ??= sentence.length;
             if (!item) item = addMessage("answer", sentence);
             else appendToMessage(item, sentence);
-            await say(sentence);
+            // A filler already reacted: don't add the reply's own reaction on top (#92).
+            if (!skipSpokenReaction({ usedFiller, first, sentence })) await say(sentence);
           } else if (ev.event === "timing") timing.server = data;
           else if (ev.event === "done" || ev.event === "reply") final = data;
         }
@@ -1454,6 +1459,7 @@ void fetch("/voice-settings")
   .then((res) => (res.ok ? res.json() : null))
   .then((body) => {
     devTimings = body?.dev === true;
+    reactionFirst = body?.reactionFirst === true;
   })
   .catch(() => undefined);
 input.focus();

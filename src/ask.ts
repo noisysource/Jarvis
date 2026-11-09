@@ -171,6 +171,7 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(meta.onText ? { onText: meta.onText } : {}),
     ...(meta.signal ? { signal: meta.signal } : {}),
     ...(request.brain ? { brain: request.brain } : {}),
+    ...(request.spoken === true ? { spoken: true } : {}),
   });
   if (!answer.ok) {
     deps.log.info("ask", { outcome: answer.error.code === "cancelled" ? "cancelled" : "error", bare: true, brain: request.brain ?? "claude" });

@@ -460,6 +460,13 @@ describe("bare mode (#88)", () => {
     }
   });
 
+  it("tells the brain when the reply will be spoken, for the spoken style (#92)", async () => {
+    const { deps, bareInputs } = bareDeps();
+    await handleAsk(deps, { question: "Hi", brain: "local", spoken: true });
+    await handleAsk(deps, { question: "Hi", brain: "local" });
+    expect(bareInputs.map((i) => i.spoken)).toEqual([true, undefined]);
+  });
+
   it("still runs the local EC precheck first: handed to Kiro, with no model at all", async () => {
     const { deps, calls } = bareDeps();
     const response = await handleAsk(deps, { question: "Summarise the UTP standup", brain: "local" });

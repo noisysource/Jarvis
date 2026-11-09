@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkAnswer, IDENTITY_CASES, SENTENCE_LIMIT, sentenceCount } from "../scripts/identity-cases.js";
+import { checkAnswer, checkSpoken, firstSentence, IDENTITY_CASES, SENTENCE_LIMIT, sentenceCount, SPOKEN_CASES } from "../scripts/identity-cases.js";
 
 const find = (q: string) => {
   const c = IDENTITY_CASES.find((x) => x.question === q);
@@ -44,5 +44,25 @@ describe("identity eval checks (#88)", () => {
     expect(checkAnswer(hello, "Hi **Alex**!").problems).toContain("markdown");
     expect(sentenceCount("Sure. Your passport expires in January… Want a reminder?")).toBe(3);
     expect(sentenceCount("No full stop at the end")).toBe(1);
+  });
+});
+
+describe("spoken eval checks (#92)", () => {
+  const spoken = (q: string) => {
+    const c = SPOKEN_CASES.find((x) => x.question === q);
+    if (!c) throw new Error(q);
+    return c;
+  };
+  it("wants a short reaction first, numbers in words, and no quotes or brackets", () => {
+    const leap = spoken("How many days are there in a leap year?");
+    expect(checkSpoken(leap, "Good question. There are three hundred and sixty-six.", false)).toEqual({ problems: [], warnings: [] });
+    expect(checkSpoken(leap, "A leap year has 366 days.", false).problems).toEqual(
+      expect.arrayContaining(["opens with 6 words, not a short reaction", "digits"]),
+    );
+    const five = spoken("Explain black holes like I'm five.");
+    expect(checkSpoken(five, "Okay. It's a \"hole\" (sort of) in space.", false).problems).toContain("quotes or brackets");
+    expect(checkSpoken(five, "Okay. It's a spot in space. It pulls everything in.", true).warnings).toContain("cut at the sentence limit");
+    expect(firstSentence("Hmm… Let me think.")).toBe("Hmm…");
+    expect(firstSentence("no end")).toBe("no end");
   });
 });

@@ -49,6 +49,7 @@ describe("loadConfig", () => {
         stickyContext: false,
         speculativeAnswer: false,
         firstChunkChars: 60,
+        spokenSentences: 3,
       },
       secrets: { gcpProject: undefined, anthropicSecretName: "anthropic-api-key", vendusSecretName: undefined },
     });
@@ -78,14 +79,16 @@ describe("loadConfig", () => {
       bargeIn: { chrome: "strict", safari: "push", other: "vad" },
     });
     expect(
-      loadOk({ VOICE_THINKING: "on", CLASSIFIER_THINKING: "on", STICKY_CONTEXT: "on", VOICE_FIRST_CHUNK_CHARS: "90" }).turn,
-    ).toMatchObject({ spokenThinking: "on", classifierThinking: "on", stickyContext: true, firstChunkChars: 90 });
+      loadOk({ VOICE_THINKING: "on", CLASSIFIER_THINKING: "on", STICKY_CONTEXT: "on", VOICE_FIRST_CHUNK_CHARS: "90", VOICE_MAX_SENTENCES: "2" }).turn,
+    ).toMatchObject({ spokenThinking: "on", classifierThinking: "on", stickyContext: true, firstChunkChars: 90, spokenSentences: 2 });
     for (const [name, value] of [
       ["VOICE_END_OF_TURN_MS", "100"],
       ["VOICE_END_OF_TURN_MS", "half a second"],
       ["BARGE_IN_CHROME", "always"],
       ["STICKY_CONTEXT", "yes"],
       ["VOICE_FIRST_CHUNK_CHARS", "10"],
+      ["VOICE_MAX_SENTENCES", "0"],
+      ["VOICE_MAX_SENTENCES", "eleven"],
     ] as const) {
       const bad = loadConfig({ [name]: value });
       expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);

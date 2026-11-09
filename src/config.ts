@@ -47,6 +47,8 @@ export type TurnConfig = {
   readonly speculativeAnswer: boolean;
   /** Latency (#76): a long first sentence is cut at a clause once it's this long (characters). */
   readonly firstChunkChars: number;
+  /** Spoken bare replies (#92): sentences allowed after the opening reaction, unless detail is asked for. */
+  readonly spokenSentences: number;
   /** Interrupting Jarvis, per browser: "vad" (just talk), "strict" (talk clearly, for weaker echo cancellation) or "push" (tap Interrupt). */
   readonly bargeIn: { readonly chrome: BargeInMode; readonly safari: BargeInMode; readonly other: BargeInMode };
 };
@@ -222,6 +224,15 @@ const EnvSchema = z.object({
   CLASSIFIER_THINKING: onOff,
   STICKY_CONTEXT: onOff,
   SPECULATIVE_ANSWER: onOff,
+  VOICE_MAX_SENTENCES: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: "must be a whole number from 1 to 10" })
+      .int({ error: "must be a whole number from 1 to 10" })
+      .min(1, { error: "must be a whole number from 1 to 10" })
+      .max(10, { error: "must be a whole number from 1 to 10" })
+      .default(3),
+  ),
   VOICE_FIRST_CHUNK_CHARS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.coerce
@@ -321,6 +332,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       stickyContext: e.STICKY_CONTEXT === "on",
       speculativeAnswer: e.SPECULATIVE_ANSWER === "on",
       firstChunkChars: e.VOICE_FIRST_CHUNK_CHARS,
+      spokenSentences: e.VOICE_MAX_SENTENCES,
       bargeIn: {
         chrome: e.BARGE_IN_CHROME ?? DEFAULTS.bargeInChrome,
         safari: e.BARGE_IN_SAFARI ?? DEFAULTS.bargeInSafari,
