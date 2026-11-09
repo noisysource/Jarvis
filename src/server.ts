@@ -126,6 +126,8 @@ export const makeServer = (
     readonly turn?: TurnConfig;
     /** Development: the page shows a timing line under each answer (#76). */
     readonly dev?: boolean;
+    /** Spoken replies open with a short reaction (bare mode, #92): the page's fillers step back. */
+    readonly reactionFirst?: boolean;
     /** Warms the model connection (#76): POST /warm, when a spoken conversation starts. */
     readonly warm?: () => void;
     /** The two brains the page can pick (#88): GET /brains. Ids and labels only. */
@@ -338,7 +340,13 @@ export const makeServer = (
   if (turnConfig) {
     app.get("/voice-settings", (c) => {
       c.header("Cache-Control", "no-store");
-      return c.json({ language: "en", endOfTurnMs: turnConfig.endOfTurnMs, bargeIn: turnConfig.bargeIn, dev: options.dev === true });
+      return c.json({
+        language: "en",
+        endOfTurnMs: turnConfig.endOfTurnMs,
+        bargeIn: turnConfig.bargeIn,
+        dev: options.dev === true,
+        reactionFirst: options.reactionFirst === true,
+      });
     });
   }
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });

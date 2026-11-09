@@ -5,6 +5,10 @@ import {
   browserLabel,
   chooseVoice,
   FILLER_AFTER_MS,
+  FILLER_AFTER_REACTION_MS,
+  fillerDelayMs,
+  isReaction,
+  skipSpokenReaction,
   FILLERS,
   fillerAllowed,
   formatTiming,
@@ -372,6 +376,18 @@ describe("fillers (#86)", () => {
     expect(fillerAllowed({ spoken: false, muted: false, previousHadFiller: false })).toBe(false);
     expect(fillerAllowed({ spoken: true, muted: true, previousHadFiller: false })).toBe(false);
     expect(FILLER_AFTER_MS).toBe(800);
+  });
+
+  it("waits longer when replies open with their own reaction, and doesn't speak that reaction after a filler (#92)", () => {
+    expect(fillerDelayMs(false)).toBe(FILLER_AFTER_MS);
+    expect(fillerDelayMs(true)).toBe(FILLER_AFTER_REACTION_MS);
+    expect(FILLER_AFTER_REACTION_MS).toBeGreaterThan(FILLER_AFTER_MS);
+    expect(isReaction("Good question.")).toBe(true);
+    expect(isReaction("Black holes are very heavy.")).toBe(false);
+    expect(skipSpokenReaction({ usedFiller: true, first: true, sentence: "Okay." })).toBe(true);
+    expect(skipSpokenReaction({ usedFiller: false, first: true, sentence: "Okay." })).toBe(false);
+    expect(skipSpokenReaction({ usedFiller: true, first: false, sentence: "Okay." })).toBe(false);
+    expect(skipSpokenReaction({ usedFiller: true, first: true, sentence: "Black holes are very heavy." })).toBe(false);
   });
 
   it("shows when the filler started; the total still counts to the answer's first sound", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkAnswer, IDENTITY_CASES, SENTENCE_LIMIT, sentenceCount } from "../scripts/identity-cases.js";
+import { checkAnswer, checkSpoken, FALSE_PROMISE, firstSentence, IDENTITY_CASES, openingVariety, SENTENCE_LIMIT, sentenceCount, SPOKEN_CASES } from "../scripts/identity-cases.js";
 
 const find = (q: string) => {
   const c = IDENTITY_CASES.find((x) => x.question === q);
@@ -44,5 +44,43 @@ describe("identity eval checks (#88)", () => {
     expect(checkAnswer(hello, "Hi **Alex**!").problems).toContain("markdown");
     expect(sentenceCount("Sure. Your passport expires in January… Want a reminder?")).toBe(3);
     expect(sentenceCount("No full stop at the end")).toBe(1);
+  });
+});
+
+describe("spoken eval checks (#92)", () => {
+  const spoken = (q: string) => {
+    const c = SPOKEN_CASES.find((x) => x.question === q);
+    if (!c) throw new Error(q);
+    return c;
+  };
+  it("wants no quotes or brackets; digits are fine, the voice reads them", () => {
+    const leap = spoken("How many days are there in a leap year?");
+    expect(checkSpoken(leap, "Good question. There are 366.", false)).toEqual({ problems: [], warnings: [] });
+    expect(checkSpoken(leap, "A leap year has 366 days.", false)).toEqual({ problems: [], warnings: [] }); // no reaction is fine too
+    const five = spoken("Explain black holes like I'm five.");
+    expect(checkSpoken(five, "Okay. It's a \"hole\" (sort of) in space.", false).problems).toContain("quotes or brackets");
+    expect(checkSpoken(five, "Okay. It's a spot in space. It pulls everything in.", true).warnings).toContain("cut at the sentence limit");
+    expect(firstSentence("Hmm… Let me think.")).toBe("Hmm…");
+    expect(firstSentence("no end")).toBe("no end");
+  });
+
+  it("fails when one opening is used for most replies", () => {
+    expect(openingVariety(["Okay. A.", "Okay. B.", "Okay. C.", "Okay. D.", "Hmm. E."]).problem).toBe('4 of 5 open with "okay."');
+    expect(openingVariety(["Okay. A.", "Hmm. B.", "It's a long first sentence here.", "Right. D.", "Okay. E."]).problem).toBeUndefined();
+    expect(openingVariety(["Okay. A.", "Okay. B."]).problem).toBeUndefined(); // too few to tell
+  });
+});
+
+describe("false promises after a refusal (#92)", () => {
+  it("fails a promise for later, even after saying it can't", () => {
+    const remind = find("Remind me to call Sam at five.");
+    expect(problems(remind.question, "I can't set reminders yet, but I'll remember to tell you when it's five.")).not.toEqual([]);
+    expect(problems("Remember for next week that I parked on level three.", "I can remember that for you.")).not.toEqual([]);
+    expect(problems("Remember for next week that I parked on level three.", "I won't remember that after this chat, sorry. Maybe take a photo of the sign?")).toEqual([]);
+    expect(problems(remind.question, "I can't set reminders yet. Maybe set one on your phone?")).toEqual([]);
+    for (const ok of ["I can't remember things between chats.", "I can help you word it.", "I can't send email yet."]) expect(FALSE_PROMISE.test(ok), ok).toBe(false);
+    for (const bad of ["I'll let you know.", "I will keep that in mind.", "I'm going to remind you.", "I'll make sure to remind you."]) expect(FALSE_PROMISE.test(bad), bad).toBe(true);
+    const spokenRemind = SPOKEN_CASES.find((c) => c.question === remind.question);
+    expect(spokenRemind && checkSpoken(spokenRemind, "Hmm. I can't set reminders, but I'll remember to tell you.", false).problems).not.toEqual([]);
   });
 });

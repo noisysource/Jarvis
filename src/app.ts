@@ -128,8 +128,18 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(config.bareMode
       ? {
           bare: makeBrainRouter({
-            claude: makeBareAnswerer({ llm: answerLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
-            local: makeBareAnswerer({ llm: localLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
+            claude: makeBareAnswerer({
+              llm: answerLlm.value,
+              ...(config.userName ? { userName: config.userName } : {}),
+              spokenSentences: config.turn.spokenSentences,
+              log,
+            }),
+            local: makeBareAnswerer({
+              llm: localLlm.value,
+              ...(config.userName ? { userName: config.userName } : {}),
+              spokenSentences: config.turn.spokenSentences,
+              log,
+            }),
           }),
         }
       : {}),

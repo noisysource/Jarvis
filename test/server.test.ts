@@ -379,11 +379,15 @@ describe("GET /voice-settings (#75)", () => {
       stickyContext: false,
       speculativeAnswer: false,
       firstChunkChars: 60,
+      spokenSentences: 3,
     } as const;
     const app = makeServer(deps, { allowedHosts: localHosts(8080), turn, dev: true });
     const res = await app.request("/voice-settings", { headers: { host: "127.0.0.1:8080" } });
     // Only what the page needs; the server-side tuning stays on the server.
-    expect(await res.json()).toEqual({ language: "en", endOfTurnMs: 650, bargeIn: turn.bargeIn, dev: true });
+    expect(await res.json()).toEqual({ language: "en", endOfTurnMs: 650, bargeIn: turn.bargeIn, dev: true, reactionFirst: false });
+    // Bare mode: replies open with their own short reaction (#92), so the page waits longer before a filler.
+    const bare = makeServer(deps, { allowedHosts: localHosts(8080), turn, reactionFirst: true });
+    expect(await (await bare.request("/voice-settings", { headers: { host: "127.0.0.1:8080" } })).json()).toMatchObject({ reactionFirst: true });
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect((await app.request("/voice-settings", { headers: { host: "evil.example" } })).status).toBe(403);
   });

@@ -9,6 +9,9 @@
 // Informational by default: it always exits 0, so a local model that doesn't
 // pass yet blocks nothing. Long replies are warnings, not failures.
 //
+// Then the spoken cases (#92): the spoken style and the sentence limit, as
+// the voice gets them. Each shows how soon the first words came.
+//
 // The bare persona only, with the made-up name "Alex": never your name,
 // profile or memories. Claude needs ANTHROPIC_API_KEY (from .env locally);
 // Local needs Ollama running with the model pulled.
@@ -20,7 +23,7 @@ import { loadContexts } from "../src/contexts.js";
 import { formatModelRef, type ModelRef } from "../src/llm/model-ref.js";
 import { makeLlm } from "../src/llm/registry.js";
 import { makeGcpSecretAccess, makeSecretGetter, resolveAnthropicKey } from "../src/secrets.js";
-import { checkAnswer, IDENTITY_CASES } from "./identity-cases.js";
+import { checkAnswer, checkSpoken, IDENTITY_CASES, openingVariety, SPOKEN_CASES } from "./identity-cases.js";
 
 const fail = (message: string): never => {
   console.error(`✗ ${message}`);
@@ -85,5 +88,49 @@ for (const brain of brains) {
     );
   }
   console.log(`${brain.name}: ${passed}/${IDENTITY_CASES.length}`);
+
+  console.log(`\n${brain.name}, spoken (at most ${config.turn.spokenSentences} sentences after the reaction)`);
+  let cuts = 0;
+  const log = { info: (message: string) => void (message.includes("cut at the sentence limit") && (cuts += 1)), warn: () => undefined, error: () => undefined };
+  const spokenAnswer = makeBareAnswerer({ llm: llm.ok ? llm.value : fail(""), userName: EVAL_NAME, log, spokenSentences: config.turn.spokenSentences });
+  let spokenPassed = 0;
+  const spokenAnswers: string[] = [];
+  for (const c of SPOKEN_CASES) {
+    const started = performance.now();
+    let firstAt: number | undefined;
+    const before = cuts;
+    const result = await spokenAnswer({
+      context: personal,
+      question: c.question,
+      history: [],
+      memories: [],
+      now: new Date(),
+      spoken: true,
+      onText: () => (firstAt ??= performance.now()),
+    });
+    const ms = Math.round(performance.now() - started);
+    const firstMs = firstAt === undefined ? "–" : `${Math.round(firstAt - started)} ms`;
+    if (!result.ok) {
+      failures += 1;
+      console.log(`✗ ${c.question}  (${result.error.message})`);
+      continue;
+    }
+    const text = result.value.kind === "answer" ? result.value.text : result.value.message;
+    spokenAnswers.push(text);
+    const { problems, warnings } = checkSpoken(c, text, cuts > before);
+    if (problems.length === 0) spokenPassed += 1;
+    else failures += 1;
+    const mark = problems.length > 0 ? "✗" : warnings.length > 0 ? "!" : "✓";
+    console.log(
+      `${mark} ${c.question}  [${c.why}; first words ${firstMs}, all ${ms} ms]\n    ${text.replace(/\s+/g, " ")}` +
+        (problems.length ? `\n    → ${problems.join("; ")}` : "") +
+        (warnings.length ? `\n    warning: ${warnings.join("; ")}` : ""),
+    );
+  }
+  const variety = openingVariety(spokenAnswers);
+  const openings = Object.entries(variety.counts).map(([o, n]) => `${o} ×${n}`).join(", ");
+  if (variety.problem) failures += 1;
+  console.log(`${variety.problem ? "✗" : "✓"} openings: ${openings}${variety.problem ? `\n    → ${variety.problem}` : ""}`);
+    console.log(`${brain.name}, spoken: ${spokenPassed}/${SPOKEN_CASES.length}`);
 }
 process.exit(strict && failures > 0 ? 1 : 0);
