@@ -28,6 +28,37 @@ export const isReaction = (sentence: string): boolean => {
   return words.length > 0 && words.length <= 3 && /[.!?…]$/.test(sentence.trim());
 };
 
+/** Openings to choose from (#92), so it isn't "Okay." every time. */
+export const REACTIONS = ["Okay.", "Right.", "Hmm.", "Good question.", "Oh, nice.", "Sure.", "Ah.", "Well.", "Got it.", "Oh.", "Let's see.", "Fair enough."];
+
+/** About one spoken reply in this many opens with no reaction at all. */
+export const NO_REACTION_ONE_IN = 5;
+
+/** How the last reply opened, if it opened with a reaction. */
+const lastOpening = (history: AnswerInput["history"]): string | undefined => {
+  const last = [...history].reverse().find((t) => t.role === "assistant");
+  const first = last?.text.trim().match(/^.*?[.!?…]+(?=\s|$)/s)?.[0];
+  return first && isReaction(first) ? first : undefined;
+};
+
+/**
+ * This turn's opening (#92), for the end of the system prompt: a few
+ * reactions in a random order to pick from (never the last one used), or,
+ * now and then, none at all.
+ */
+export const openingHint = (history: AnswerInput["history"], random: () => number): string => {
+  if (random() < 1 / NO_REACTION_ONE_IN) return "This time, no opening reaction: start straight with the answer.";
+  const previous = lastOpening(history);
+  const pool = REACTIONS.filter((r) => r.toLowerCase() !== previous?.toLowerCase());
+  const picked: string[] = [];
+  while (picked.length < 3 && pool.length > 0) {
+    const [r] = pool.splice(Math.min(pool.length - 1, Math.floor(random() * pool.length)), 1);
+    if (r) picked.push(r);
+  }
+  const avoid = previous ? ` Not ${previous.replace(/[.!?…]+$/, "")} again.` : "";
+  return `This time, open with whichever of these fits best: ${picked.join(" ")} Or another short one that fits better.${avoid}`;
+};
+
 /**
  * Stops a reply after `max` sentences (#92); an opening reaction doesn't
  * count. Text is passed on as it arrives; when the limit is reached, exactly
@@ -76,10 +107,9 @@ export const makeSentenceCap = (max: number) => {
  */
 const SPOKEN_STYLE = (max: number) => [
   "How to talk (your reply is spoken aloud):",
-  "- Start with a very short reaction of one to three words, as its own sentence: \"Okay.\", \"Good question.\", \"Hmm.\", \"Right.\", \"Oh, nice.\"",
+  "- Usually start with a very short reaction of one to three words, as its own sentence, and vary it: the note at the end says which fit this time.",
   `- Then at most ${max === 1 ? "one sentence" : `${max === 2 ? "two" : max === 3 ? "two or three" : String(max)} short sentences`}, unless they ask for detail. Even for 'explain like I'm five', keep it that short.`,
   "- Talk the way people talk: contractions (it's, you're, don't), plain everyday words.",
-  "- Write numbers and times in words (twenty-five, half past six, two thousand and twenty-six).",
   "- No quotes, brackets, lists, bullet points, headings, symbols, markdown or emoji.",
   "- Ask a short question back when it's natural, not every time.",
   "- Reply in the language they use.",
@@ -104,6 +134,7 @@ export const barePrompt = (userName?: string, options: { readonly spoken?: boole
     "What you can do right now: only talk. You can chat, answer questions from what you know, and think things through together.",
     "You can't see a calendar, set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use any tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
     "Never say or suggest you've done something you can't do (\"I've added it\", \"done\", \"I'll remind you\").",
+    "And don't promise it for later either, even after saying you can't: no \"but I'll remember\", \"I'll tell you\", \"I'll keep it in mind\" or \"I can remember that for you\". You won't remember anything after this conversation.",
     "",
     ...(options.spoken ? SPOKEN_STYLE(options.maxSentences ?? DEFAULT_SPOKEN_SENTENCES) : TYPED_STYLE),
   ].join("\n");
@@ -120,8 +151,11 @@ export const makeBareAnswerer = (deps: {
   readonly log?: Logger;
   /** Spoken replies: sentences allowed after the opening reaction (VOICE_MAX_SENTENCES). */
   readonly spokenSentences?: number;
+  /** For choosing this turn's opening (tests pass their own). */
+  readonly random?: () => number;
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
+  const random = deps.random ?? Math.random;
   const typedSystem = barePrompt(deps.userName);
   const spokenSystem = barePrompt(deps.userName, { spoken: true, maxSentences: max });
   return async ({ question, history, onText, signal, spoken }) => {
@@ -130,6 +164,8 @@ export const makeBareAnswerer = (deps: {
     const request: LlmRequest = {
       system: spoken === true ? spokenSystem : typedSystem,
       cacheSystem: true,
+      // Changes every turn, so it's after the cached part.
+      ...(spoken === true ? { systemSuffix: openingHint(history, random) } : {}),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "low",
       // A conversation: answer without thinking first (Claude; Ollama has its own think setting).

@@ -26,6 +26,7 @@ const FILES: readonly { path: string; file: string; contentType: string }[] = [
   { path: "/mic-lib.js", file: "mic-lib.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/mic-worklet.js", file: "mic-worklet.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/speaker.js", file: "speaker.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/spoken-numbers.js", file: "spoken-numbers.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/turn-lib.js", file: "turn-lib.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/silero.js", file: "silero.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/vad.js", file: "vad.js", contentType: "text/javascript; charset=utf-8" },

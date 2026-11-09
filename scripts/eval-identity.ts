@@ -23,7 +23,7 @@ import { loadContexts } from "../src/contexts.js";
 import { formatModelRef, type ModelRef } from "../src/llm/model-ref.js";
 import { makeLlm } from "../src/llm/registry.js";
 import { makeGcpSecretAccess, makeSecretGetter, resolveAnthropicKey } from "../src/secrets.js";
-import { checkAnswer, checkSpoken, IDENTITY_CASES, SPOKEN_CASES } from "./identity-cases.js";
+import { checkAnswer, checkSpoken, IDENTITY_CASES, openingVariety, SPOKEN_CASES } from "./identity-cases.js";
 
 const fail = (message: string): never => {
   console.error(`✗ ${message}`);
@@ -94,6 +94,7 @@ for (const brain of brains) {
   const log = { info: (message: string) => void (message.includes("cut at the sentence limit") && (cuts += 1)), warn: () => undefined, error: () => undefined };
   const spokenAnswer = makeBareAnswerer({ llm: llm.ok ? llm.value : fail(""), userName: EVAL_NAME, log, spokenSentences: config.turn.spokenSentences });
   let spokenPassed = 0;
+  const spokenAnswers: string[] = [];
   for (const c of SPOKEN_CASES) {
     const started = performance.now();
     let firstAt: number | undefined;
@@ -115,6 +116,7 @@ for (const brain of brains) {
       continue;
     }
     const text = result.value.kind === "answer" ? result.value.text : result.value.message;
+    spokenAnswers.push(text);
     const { problems, warnings } = checkSpoken(c, text, cuts > before);
     if (problems.length === 0) spokenPassed += 1;
     else failures += 1;
@@ -125,6 +127,10 @@ for (const brain of brains) {
         (warnings.length ? `\n    warning: ${warnings.join("; ")}` : ""),
     );
   }
-  console.log(`${brain.name}, spoken: ${spokenPassed}/${SPOKEN_CASES.length}`);
+  const variety = openingVariety(spokenAnswers);
+  const openings = Object.entries(variety.counts).map(([o, n]) => `${o} ×${n}`).join(", ");
+  if (variety.problem) failures += 1;
+  console.log(`${variety.problem ? "✗" : "✓"} openings: ${openings}${variety.problem ? `\n    → ${variety.problem}` : ""}`);
+    console.log(`${brain.name}, spoken: ${spokenPassed}/${SPOKEN_CASES.length}`);
 }
 process.exit(strict && failures > 0 ? 1 : 0);

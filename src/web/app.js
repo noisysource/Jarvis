@@ -26,6 +26,7 @@ import {
 import { playSpeech } from "./audio.js";
 import { pcm16ToFloat32, readAudioFormat } from "./pcm-lib.js";
 import { makeSpeaker } from "./speaker.js";
+import { speakableNumbers } from "./spoken-numbers.js";
 import {
   browserFamily,
   browserLabel,
@@ -481,7 +482,8 @@ const startSpeaker = (onDone, timing, onFirstSound) => {
             return fetch("/speak", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ text, provider: server.provider, voice: server.voice }),
+              // Numbers in words for the voice (#92); the chat keeps the digits.
+              body: JSON.stringify({ text: speakableNumbers(text, state.language), provider: server.provider, voice: server.voice }),
               signal,
             });
           }
@@ -501,7 +503,7 @@ const startSpeaker = (onDone, timing, onFirstSound) => {
     },
     speakBrowser: (text, signal, tracker) => {
       timing.speakAt ??= performance.now();
-      const done = speakBrowser(text, signal, tracker);
+      const done = speakBrowser(speakableNumbers(text, state.language), signal, tracker);
       // The browser voice has no first-audio callback here; its start is close enough.
       void Promise.resolve().then(() => firstSound(performance.now()));
       return done;

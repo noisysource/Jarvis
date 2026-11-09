@@ -247,8 +247,9 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    - **Spoken replies in bare mode** open with a tiny reaction ("Okay.",
      "Good question.") so the voice starts at once, then at most two or
      three short sentences (`VOICE_MAX_SENTENCES=3`), unless you ask for
-     detail ("in detail", "tell me more"). Numbers come out in words, with
-     no quotes or brackets. A filler only plays if nothing has started
+     detail ("in detail", "tell me more"). The opening varies, and is sometimes
+     left out. The voice reads numbers in words ("366" → "three hundred
+     sixty-six"), while the chat keeps the digits. No quotes or brackets. A filler only plays if nothing has started
      after 1.6 s, and then the reply's own reaction isn't spoken twice.
    - In bare mode Jarvis knows it can **only talk** for now: no calendar,
      reminders, notes, email, web or tools. Asked for one, it says so and

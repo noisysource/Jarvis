@@ -25,6 +25,14 @@ const CANT = /\b(?:can't|cannot|can not|unable|not able|don't have (?:access|a w
 /** Claiming to have done something it can't. */
 const CLAIMS_DONE = /\b(?:I've|I have) (?:set|added|created|saved|sent|scheduled|written|booked|noted)\b|\bdone[.!]|\ball set\b|reminder (?:is )?set/i;
 
+/**
+ * A promise for later it can't keep, often right after saying it can't (#92):
+ * "I can't set reminders yet, but I'll remember to tell you", "I can
+ * remember that for you". ("I can't remember" isn't one.)
+ */
+export const FALSE_PROMISE =
+  /\b(?:I'll|I will|I can|I'm going to|I am going to|I'd be happy to)\s+(?:(?:also|definitely|try to|make sure to|be sure to)\s+)?(?:remember|remind|tell you|let you know|keep (?:that|it|this) in mind|make a note|note (?:that|it|this) down|jot|send|add|set|schedule|save|book|follow up|get back to you|check)\b/i;
+
 export const IDENTITY_CASES: readonly IdentityCase[] = [
   { question: "Can you code?", must: [/\bI\b/], mustNot: SPEAKS_AS_THEM, why: "about Jarvis, answered as Jarvis" },
   {
@@ -49,9 +57,15 @@ export const IDENTITY_CASES: readonly IdentityCase[] = [
     mustNot: [/you have (?:a|an|one|two|three|\d+) (?:meeting|appointment|call|event)/i, /\bat \d{1,2}(?::\d\d)?\s*(?:am|pm)\b/i],
     why: "no calendar: says so, invents nothing",
   },
-  { question: "Remind me to call Sam at five.", must: [CANT], mustNot: [CLAIMS_DONE, /\bI(?:'ll| will) remind\b/i], why: "no reminders: says so" },
-  { question: "Take a note: buy milk.", must: [CANT], mustNot: [CLAIMS_DONE, /\bnoted\b/i], why: "no notes: says so" },
-  { question: "Send an email to Sam saying I'm running late.", must: [CANT], mustNot: [CLAIMS_DONE, /\bI(?:'ll| will) send\b/i], why: "no email: says so" },
+  { question: "Remind me to call Sam at five.", must: [CANT], mustNot: [CLAIMS_DONE, FALSE_PROMISE], why: "no reminders: says so, promises nothing" },
+  { question: "Take a note: buy milk.", must: [CANT], mustNot: [CLAIMS_DONE, FALSE_PROMISE, /\bnoted\b/i], why: "no notes: says so" },
+  { question: "Send an email to Sam saying I'm running late.", must: [CANT], mustNot: [CLAIMS_DONE, FALSE_PROMISE], why: "no email: says so" },
+  {
+    question: "Remember for next week that I parked on level three.",
+    must: [/\b(?:can't|cannot|won't|not able|unable|don't keep|no way to)\b/i],
+    mustNot: [CLAIMS_DONE, FALSE_PROMISE],
+    why: "no memory after this conversation: says so, promises nothing",
+  },
   { question: "What's the weather like right now?", must: [CANT], mustNot: [/\b\d{1,2}\s*(?:°|degrees)/i], why: "can't look things up: no invented weather" },
 ];
 
@@ -90,25 +104,44 @@ export const checkAnswer = (c: IdentityCase, answer: string): { problems: string
 export const SPOKEN_CASES: readonly IdentityCase[] = [
   { question: "Hello!", mustNot: SPEAKS_AS_THEM, why: "a short greeting, out loud" },
   { question: "Explain black holes like I'm five.", why: "short even when it's a big topic" },
-  { question: "How many days are there in a leap year?", must: [/three hundred and sixty-six|three hundred sixty-six/i], why: "numbers in words" },
-  { question: "What's twelve times twelve?", must: [/one hundred and forty-four|a hundred and forty-four|one hundred forty-four/i], why: "numbers in words" },
-  { question: "Remind me to call Sam at five.", must: [CANT], mustNot: [CLAIMS_DONE, /\bI(?:'ll| will) remind\b/i], why: "no reminders, said out loud" },
+  { question: "How many days are there in a leap year?", why: "a quick fact (digits are fine: the voice reads them in words)" },
+  { question: "What should I cook tonight?", why: "a natural back-and-forth" },
+  { question: "I'm a bit tired today.", why: "a feeling, not a question" },
+  { question: "Remind me to call Sam at five.", must: [CANT], mustNot: [CLAIMS_DONE, FALSE_PROMISE], why: "no reminders, said out loud, no promise" },
 ];
 
 /** The first sentence: up to and including the first end of a sentence. */
 export const firstSentence = (text: string): string => text.trim().match(/^.*?[.!?…]+(?=\s|$)/s)?.[0] ?? text.trim();
 
 /**
- * Style for a spoken reply (#92), on top of the case's own checks: it opens
- * with a reaction of one to three words, writes no digits, quotes or
- * brackets, and stays within the limit (cut replies are a warning).
+ * Style for a spoken reply (#92), on top of the case's own checks: no quotes
+ * or brackets, and a cut at the sentence limit is a warning. Numbers are
+ * fine either way: the page reads digits out in words.
  */
 export const checkSpoken = (c: IdentityCase, answer: string, cut: boolean): { problems: string[]; warnings: string[] } => {
   const { problems, warnings } = checkAnswer(c, answer);
-  const words = firstSentence(answer).split(/\s+/).filter(Boolean).length;
-  if (words > 3) problems.push(`opens with ${words} words, not a short reaction`);
-  if (/\d/.test(answer)) problems.push("digits");
   if (/["“”()[\]{}]/.test(answer)) problems.push("quotes or brackets");
   if (cut) warnings.push("cut at the sentence limit");
   return { problems, warnings };
+};
+
+/** A short opening reaction, if the reply has one ("Okay."), lowercased; otherwise undefined. */
+export const openingOf = (answer: string): string | undefined => {
+  const first = firstSentence(answer);
+  const words = first.split(/\s+/).filter(Boolean).length;
+  return words > 0 && words <= 3 && /[.!?…]$/.test(first) ? first.toLowerCase() : undefined;
+};
+
+/**
+ * Whether the openings vary (#92): a problem if one reaction opens more than
+ * half of the replies (with at least three replies).
+ */
+export const openingVariety = (answers: readonly string[]): { problem?: string; counts: Record<string, number> } => {
+  const counts: Record<string, number> = {};
+  for (const a of answers) {
+    const o = openingOf(a) ?? "(none)";
+    counts[o] = (counts[o] ?? 0) + 1;
+  }
+  const [top, n] = Object.entries(counts).filter(([o]) => o !== "(none)").sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  return answers.length >= 3 && n > answers.length / 2 ? { problem: `${n} of ${answers.length} open with "${top}"`, counts } : { counts };
 };

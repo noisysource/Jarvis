@@ -397,15 +397,26 @@ piece Kokoro speaks is tiny and starts at once.
   "tell me more", "step by step"). "Explain like I'm five" stays short.
 - The limit is enforced in code too: the reply is cut after the last
   allowed sentence, the model is stopped, and only what was said is kept.
-- Contractions, plain words, numbers and times in words, no quotes,
-  brackets, lists or symbols.
+- The opening varies: each spoken turn's system suffix offers three
+  reactions in a random order (never the one the last reply opened with),
+  and about one turn in five asks for no reaction at all.
+- Contractions, plain words, no quotes, brackets, lists or symbols.
+- Numbers are read out in words in code, just before the voice, for any
+  brain (`src/web/spoken-numbers.js`: "366" → "three hundred sixty-six",
+  years, times, money, ordinals, percentages). The chat keeps the digits.
+  English only for now.
+- Never a promise for later, even after a refusal ("but I'll remember to
+  tell you", "I can remember that for you"): it remembers nothing after
+  the conversation.
 - Typed turns keep the typed style.
 - The page waits 1.6 s (not 0.8 s) before a filler when replies open with
   their own reaction (`/voice-settings` → `reactionFirst`). If a filler did
   play, the reply's own reaction isn't spoken (it still shows), so there's
   never "One moment. Okay."
-- `eval:identity` adds spoken cases: a short reaction first, no digits, no
-  quotes or brackets, the limit, and how soon the first words came.
+- `eval:identity` adds spoken cases: no quotes or brackets, the limit, how
+  soon the first words came, and whether the openings vary (one reaction
+  opening more than half the replies fails). False promises after a
+  refusal fail every ability case.
 
 **Milestone "Conversation"** (now): talking to Jarvis should feel like
 talking to a person, tuned on the free local brain (`qwen3:8b`), keeping
