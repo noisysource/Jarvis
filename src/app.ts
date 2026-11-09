@@ -133,6 +133,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(config.userName ? { userName: config.userName } : {}),
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,
+              ...(config.bareProfile ? { profile } : {}),
               log,
             }),
             local: makeBareAnswerer({
@@ -140,6 +141,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(config.userName ? { userName: config.userName } : {}),
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,
+              ...(config.bareProfile ? { profile } : {}),
               log,
             }),
           }),

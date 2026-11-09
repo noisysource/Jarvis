@@ -199,6 +199,7 @@ type HonestyGuard = ReturnType<typeof makeHonestyGuard>;
  */
 export const handleAsk = async (deps: Deps, request: AskRequest, outer: AskMeta = {}): Promise<AskResponse> => {
   const guard = makeHonestyGuard({
+    question: request.question,
     ...(outer.onSentence ? { onSentence: outer.onSentence } : {}),
     ...(outer.firstClauseAfter !== undefined ? { firstClauseAfter: outer.firstClauseAfter } : {}),
     log: deps.log,

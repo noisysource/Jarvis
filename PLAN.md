@@ -462,6 +462,13 @@ the current architecture.
      (`AnswerInput.onToolSucceeded`, for the tool loop to call).
    - If nothing useful is left (only a short reaction), "I can't do that
      yet." is added.
+   - Never yes-then-no (#98): when the question asks for an action
+     (remind, add, send, book…), an affirmative opening ("Sure.", "Okay.")
+     is held until the next sentence passes. If nothing useful passes, it's
+     never said and the reply is "Actually, I can't do that yet." (also
+     after a non-affirmative opening like "Hmm."). Typed replies always
+     hold it, since there's no cost. Streamed replies to other questions
+     keep the fast opening.
    - It covers streamed and typed answers alike. The page, the voice,
      history and memory all get the checked text.
    - It logs `honesty guard` with counts per category and `replaced`,
@@ -469,9 +476,15 @@ the current architecture.
    - The test set is the replies from the identity eval's tests
      (`test/fixtures/honesty-cases.ts`). Made-up facts ("you have a
      meeting at ten") aren't the guard's job; the eval catches those.
-2. **The profile back** (`PROFILE=on`, otherwise still bare): "Tell me
-   about me" answers from `data/profile.md`. `eval:identity` runs on both
-   brains.
+2. **The profile back (#98)** (`PROFILE=on`, otherwise still bare): the
+   bare persona also gets `data/profile.md`, re-read when it changes.
+   - It has the personal answerer's who-is-who rules, and says so when the
+     profile doesn't say (never guesses).
+   - The name comes from `JARVIS_USER_NAME`, or else the profile's
+     `Name:` line.
+   - Still no memory, contexts or classifier.
+   - `eval:identity --profile` uses the made-up example profile, never
+     yours. `--guarded` checks what you'd actually get, after the guard.
 3. **Google Calendar, the first real tool:**
    - OAuth on the Mac, with tokens stored locally, gitignored and never
      logged.

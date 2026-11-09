@@ -16,6 +16,20 @@ export type HonestyCategory = "claimed_action" | "promise" | "perception";
 /** What's said when the guard leaves nothing useful. */
 export const CANT_YET = "I can't do that yet.";
 
+/** The same, after an opening reaction: it flows on from it, and never as yes-then-no (#98). */
+export const ACTUALLY_CANT_YET = "Actually, I can't do that yet.";
+
+/** An opening that sounds like yes ("Sure.", "Okay.", "Of course."). */
+const AFFIRMATIVE = /^(?:sure|okay|ok|of course|absolutely|certainly|got it|will do|no problem|right|alright|all right|yes|yeah|yep|definitely|on it|happy to|consider it)\b/i;
+
+/**
+ * The question asks Jarvis to do something (#98): an affirmative opening is
+ * then held until the next sentence passes, so it's never "Sure." followed
+ * by "I can't". Other questions keep the opening's speed.
+ */
+export const asksForAction = (question: string): boolean =>
+  /\b(?:remind|remember|add|put|schedule|book|set|create|make|send|email|e-mail|text|message|call|ring|note|jot|write (?:down|it|that)|save|cancel|delete|remove|move|reschedule|order|buy|pay|track|keep track|let me know|tell me when|wake me|alarm|timer|calendar|reminder|invite|reply|forward|turn (?:on|off)|switch (?:on|off)|play)\b/i.test(question);
+
 const ACTION_VERBS =
   "scheduled|created|sent|added|set(?: up)?|booked|saved|noted|written(?: (?:it|that) )?down|jotted|put|emailed|messaged|texted|reminded|cancell?ed|updated|deleted|removed|moved|ordered|paid|called|logged|recorded|stored|filed|shared|forwarded|replied|turned (?:on|off)|switched (?:on|off)|started|stopped|blocked|reserved|registered|signed (?:you )?up|made (?:a note|an? (?:event|appointment|reminder|note))|taken (?:a )?note|noted (?:it|that) down|got (?:it|that) (?:down|noted)";
 
@@ -76,26 +90,54 @@ export const makeHonestyGuard = (deps: {
   readonly onSentence?: (sentence: string) => void;
   /** Cut a long first sentence at a clause once it's this long, as the voice does. */
   readonly firstClauseAfter?: number;
+  /** The question: if it asks for an action, an affirmative opening waits for the next sentence (#98). */
+  readonly question?: string;
   readonly log?: Logger;
 }) => {
+  const holdYes = deps.question !== undefined && asksForAction(deps.question);
   const splitter = makeSentenceSplitter({ language: "en", ...(deps.firstClauseAfter !== undefined ? { firstClauseAfter: deps.firstClauseAfter } : {}) });
   const dropped: Record<HonestyCategory, number> = { claimed_action: 0, promise: 0, perception: 0 };
   const droppedText: string[] = [];
   let kept = 0;
+  let seen = 0;
   let useful = false;
   let pushed = false;
   let toolSucceeded = false;
+  /** An affirmative opening, held until something useful passes (#98). */
+  let held: string | undefined;
+  /** The reply opened with a reaction (held or said). */
+  let reacted = false;
+
+  const release = (): void => {
+    if (held === undefined) return;
+    kept += 1;
+    deps.onSentence?.(held);
+    held = undefined;
+  };
 
   const check = (sentences: readonly string[]): void => {
     for (const sentence of sentences) {
+      const first = seen === 0;
+      seen += 1;
       const category = toolSucceeded ? undefined : honestyCategory(sentence);
       if (category) {
         dropped[category] += 1;
         droppedText.push(sentence);
         continue;
       }
+      if (first && isOnlyReaction(sentence)) {
+        reacted = true;
+        // Not streamed, holding costs nothing, so it's always held; streamed, only when asked to do something.
+        if ((holdYes || !pushed) && !toolSucceeded && AFFIRMATIVE.test(sentence.trim())) {
+          held = sentence;
+          continue;
+        }
+      }
+      if (!isOnlyReaction(sentence)) {
+        useful = true;
+        release();
+      }
       kept += 1;
-      if (!isOnlyReaction(sentence)) useful = true;
       deps.onSentence?.(sentence);
     }
   };
@@ -114,6 +156,14 @@ export const makeHonestyGuard = (deps: {
     finish: (fullText: string): HonestyResult => {
       check(pushed ? splitter.flush() : [...splitter.push(fullText), ...splitter.flush()]);
       const total = dropped.claimed_action + dropped.promise + dropped.perception;
+      const replaced = total > 0 && !useful;
+      // A held "Sure." is said after all, unless the reply turned into "I can't" (#98).
+      if (replaced && held !== undefined) {
+        droppedText.unshift(held);
+        held = undefined;
+      } else {
+        release();
+      }
       if (total === 0) return { text: fullText, dropped, replaced: false };
       let text = fullText;
       for (const sentence of droppedText) text = text.replace(sentence, "");
@@ -123,10 +173,11 @@ export const makeHonestyGuard = (deps: {
         .replace(/\n[ \t]+/g, "\n")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      const replaced = !useful;
       if (replaced) {
-        deps.onSentence?.(CANT_YET);
-        text = kept > 0 && text !== "" ? `${text} ${CANT_YET}` : CANT_YET;
+        // After an opening reaction it flows on ("Hmm. Actually, I can't…"); a held yes is never said.
+        const line = reacted ? ACTUALLY_CANT_YET : CANT_YET;
+        deps.onSentence?.(line);
+        text = kept > 0 && text !== "" ? `${text} ${line}` : line;
       }
       // Categories and counts only: never the text.
       deps.log?.info("honesty guard", { claimedAction: dropped.claimed_action, promise: dropped.promise, perception: dropped.perception, replaced });

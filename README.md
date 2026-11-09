@@ -266,14 +266,26 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      remind you", "I'll remember") or claims to see or hear you ("you look
      tired") is dropped before it's shown or spoken, unless a tool really
      ran and succeeded in that turn. If nothing useful is left, Jarvis
-     says "I can't do that yet." The log line `honesty guard` has counts
-     only.
+     says "I can't do that yet." It never says yes then no: when you ask
+     it to do something, an opening "Sure." waits until the next sentence
+     passes, so you get "Actually, I can't do that yet." instead. The log
+     line `honesty guard` has counts only.
+   - **`PROFILE=on` (with `BARE_MODE=on`): the profile back.** The brain
+     also gets `data/profile.md`, so "Tell me about me" or "When is my
+     daughter's birthday?" is answered from it. If it isn't in the profile,
+     Jarvis says so. Everything else is still bare: no memory, contexts or
+     classifier. With Claude selected, the profile goes to Anthropic; with
+     Local, it stays on your Mac.
    - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
      who and the conversational style on both brains, in bare mode with a
      made-up name: "Can you code?", "Who are you?", the calendar, a
      reminder, a note, an email, the weather and a few more. More than 4
      sentences is a warning, not a failure. It's informational: it exits 0
-     unless you add `--strict`.
+     unless you add `--strict`. `--guarded` shows what you'd actually get,
+     after the honesty guard, and what it dropped. `--profile` (or
+     `PROFILE=on`) adds the made-up example profile, never yours, and its
+     cases ("Tell me about me", your work, your daughter's birthday, an
+     allergy, a blood type it doesn't have).
 
    **Why did he stop?** Each spoken answer's end is logged as one
    `playback` line. It gives the `reason` (`finished`, `barge-in`,
