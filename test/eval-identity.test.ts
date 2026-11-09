@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkAnswer, checkSpoken, FALSE_PROMISE, firstSentence, IDENTITY_CASES, openingVariety, SENTENCE_LIMIT, sentenceCount, SPOKEN_CASES } from "../scripts/identity-cases.js";
+import { checkAnswer, checkSpoken, FALSE_PROMISE, firstSentence, IDENTITY_CASES, openingVariety, PROFILE_CASES, SENTENCE_LIMIT, sentenceCount, SPOKEN_CASES } from "../scripts/identity-cases.js";
 
 const find = (q: string) => {
   const c = IDENTITY_CASES.find((x) => x.question === q);
@@ -84,5 +84,26 @@ describe("false promises after a refusal (#92)", () => {
     for (const bad of ["I'll let you know.", "I will keep that in mind.", "I'm going to remind you.", "I'll make sure to remind you."]) expect(FALSE_PROMISE.test(bad), bad).toBe(true);
     const spokenRemind = SPOKEN_CASES.find((c) => c.question === remind.question);
     expect(spokenRemind && checkSpoken(spokenRemind, "Hmm. I can't set reminders, but I'll remember to tell you.", false).problems).not.toEqual([]);
+  });
+});
+
+describe("profile eval checks (#98)", () => {
+  const profileCase = (q: string) => {
+    const c = PROFILE_CASES.find((x) => x.question === q);
+    if (!c) throw new Error(q);
+    return c;
+  };
+  it("wants answers from the example profile, as \"you\", and no invented facts", () => {
+    expect(checkAnswer(profileCase("What do I do for work?"), "You run KidClub and Noisy Source.").problems).toEqual([]);
+    expect(checkAnswer(profileCase("What do I do for work?"), "I run KidClub and Noisy Source.").problems).not.toEqual([]);
+    expect(checkAnswer(profileCase("When is my daughter's birthday?"), "Inês was born on 2 September 2017.").problems).toEqual([]);
+    expect(checkAnswer(profileCase("Am I allergic to anything?"), "Yes, to penicillin.").problems).toEqual([]);
+    expect(checkAnswer(profileCase("What's my blood type?"), "Your profile doesn't say, I'm afraid.").problems).toEqual([]);
+    expect(checkAnswer(profileCase("What's my blood type?"), "You're O positive.").problems).not.toEqual([]);
+    expect(checkAnswer(profileCase("Tell me about me."), "You live in Lisbon and run KidClub.").problems).toEqual([]);
+  });
+
+  it("drops the no-profile \"don't know your work\" case when the profile is on", () => {
+    expect(IDENTITY_CASES.filter((c) => c.withoutProfileOnly).map((c) => c.question)).toEqual(["What do I do for work?"]);
   });
 });

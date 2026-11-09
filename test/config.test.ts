@@ -27,6 +27,7 @@ describe("loadConfig", () => {
       },
       ollamaUrl: new URL("http://127.0.0.1:11434"),
       bareMode: false,
+      bareProfile: false,
       ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",
@@ -98,16 +99,18 @@ describe("loadConfig", () => {
   });
 
   it("runs the local brain on Ollama on this machine only (#88)", () => {
-    const c = loadOk({ OLLAMA_MODEL: "qwen3:8b", OLLAMA_URL: "http://localhost:11500", BARE_MODE: "on", JARVIS_USER_NAME: "Alex" });
+    const c = loadOk({ OLLAMA_MODEL: "qwen3:8b", OLLAMA_URL: "http://localhost:11500", BARE_MODE: "on", PROFILE: "on", JARVIS_USER_NAME: "Alex" });
     expect(c.models.local).toEqual({ provider: "ollama", model: "qwen3:8b" });
     expect(c.ollamaUrl).toEqual(new URL("http://localhost:11500"));
     expect(c.bareMode).toBe(true);
+    expect(c.bareProfile).toBe(true); // the profile back in bare mode (#98)
     expect(c.userName).toBe("Alex");
     for (const [name, value] of [
       ["OLLAMA_URL", "http://192.168.1.5:11434"],
       ["OLLAMA_URL", "https://ollama.example.com"],
       ["OLLAMA_MODEL", "llama 3"],
       ["BARE_MODE", "yes"],
+      ["PROFILE", "yes"],
       ["JARVIS_USER_NAME", "<script>"],
     ] as const) {
       const bad = loadConfig({ [name]: value });

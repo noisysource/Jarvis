@@ -563,8 +563,9 @@ describe("honesty guard on every answer (#96)", () => {
     const deps: Deps = { ...made.deps, bare: streamingAnswer("Sure. Done! I'll remind you at five.") };
     const sentences: string[] = [];
     const response = await handleAsk(deps, { question: "Remind me at five", brain: "local", spoken: true }, { onSentence: (s) => sentences.push(s) });
-    expect(sentences).toEqual(["Sure.", "I can't do that yet."]);
-    expect(response).toMatchObject({ type: "answer", answer: "Sure. I can't do that yet." });
+    // Asked to do something: the "Sure." is held, and never said before the refusal (#98).
+    expect(sentences).toEqual(["Actually, I can't do that yet."]);
+    expect(response).toMatchObject({ type: "answer", answer: "Actually, I can't do that yet." });
     expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, replaced: true } });
   });
 

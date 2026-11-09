@@ -88,6 +88,8 @@ export type Config = {
   readonly ollamaThink: boolean;
   /** BARE_MODE=on (#88): every turn gets only the local EC precheck, then the brain with the history and a short persona. */
   readonly bareMode: boolean;
+  /** PROFILE=on (#98): in bare mode, the brain also gets data/profile.md. Otherwise still bare. */
+  readonly bareProfile: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
   readonly userName: string | undefined;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
@@ -212,6 +214,10 @@ const EnvSchema = z.object({
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
+  PROFILE: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
+  ),
   WHISPER_HINTS_PATH: optionalString,
   VOICE_END_OF_TURN_MS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -324,6 +330,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     neverRememberPath: e.NEVER_REMEMBER_PATH ?? DEFAULTS.neverRememberPath,
     ollamaUrl,
     bareMode: e.BARE_MODE === "on",
+    bareProfile: e.PROFILE === "on",
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

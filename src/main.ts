@@ -124,6 +124,8 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     answer: formatModelRef(cfg.models.answer),
     voice: cfg.tts.voice ? `${cfg.tts.provider}:${cfg.tts.voice}` : cfg.tts.provider,
     memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
+    // Fixed words only, never the profile itself.
+    bare: cfg.bareMode ? (cfg.bareProfile ? "on, with the profile" : "on") : "off",
   });
   warm(); // listening now: warm the model connection before the first question
 });

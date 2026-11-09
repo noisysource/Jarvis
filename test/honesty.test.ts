@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CANT_YET, honestyCategory, makeHonestyGuard } from "../src/answer/honesty.js";
+import { ACTUALLY_CANT_YET, asksForAction, CANT_YET, honestyCategory, makeHonestyGuard } from "../src/answer/honesty.js";
 import type { Logger } from "../src/types.js";
 import { DROPPED, KEPT, NOT_THE_GUARDS_JOB } from "./fixtures/honesty-cases.js";
 
@@ -14,10 +14,10 @@ const spyLog = () => {
 };
 
 /** Streams `text` in small pieces; returns the sentences sent on and the result. */
-const stream = (text: string, opts: { tool?: "before" | "after" } = {}) => {
+const stream = (text: string, opts: { tool?: "before" | "after"; question?: string } = {}) => {
   const sent: string[] = [];
   const { log, lines } = spyLog();
-  const guard = makeHonestyGuard({ onSentence: (s) => sent.push(s), log });
+  const guard = makeHonestyGuard({ onSentence: (s) => sent.push(s), log, ...(opts.question ? { question: opts.question } : {}) });
   if (opts.tool === "before") guard.toolSucceeded();
   for (let i = 0; i < text.length; i += 4) guard.onText(text.slice(i, i + 4));
   const result = guard.finish(text);
@@ -43,11 +43,46 @@ describe("honesty guard: a turn (#96)", () => {
 
   it('says "I can\'t do that yet." when nothing useful is left', () => {
     expect(stream("Done! I'll remind you at five.")).toMatchObject({ sent: [CANT_YET], result: { text: CANT_YET, replaced: true } });
-    // A reaction already spoken stays; the honest line follows it.
-    expect(stream("Sure. I've added it to your calendar.")).toMatchObject({
-      sent: ["Sure.", CANT_YET],
-      result: { text: `Sure. ${CANT_YET}`, replaced: true },
+  });
+
+  it("never says yes then no: asked to do something, a held \"Sure.\" becomes \"Actually, I can't…\" (#98)", () => {
+    const remind = { question: "Remind me to call Sam at five" };
+    expect(stream("Sure. I'll remind you at five.", remind)).toMatchObject({
+      sent: [ACTUALLY_CANT_YET],
+      result: { text: ACTUALLY_CANT_YET, replaced: true },
     });
+    // The held opening is said once something useful passes.
+    expect(stream("Okay. I can't set reminders yet. Want to set one on your phone?", remind).sent).toEqual([
+      "Okay.",
+      "I can't set reminders yet.",
+      "Want to set one on your phone?",
+    ]);
+    // Or at the end, when it was the whole (honest) reply.
+    expect(stream("Sure.", remind)).toMatchObject({ sent: ["Sure."], result: { text: "Sure.", replaced: false } });
+    // Not affirmative: said at once, and the refusal flows on from it.
+    expect(stream("Hmm. I'll remind you at five.", remind)).toMatchObject({
+      sent: ["Hmm.", ACTUALLY_CANT_YET],
+      result: { text: `Hmm. ${ACTUALLY_CANT_YET}`, replaced: true },
+    });
+    // A tool succeeded: nothing is held or dropped.
+    expect(stream("Sure. I've added it.", { ...remind, tool: "before" }).sent).toEqual(["Sure.", "I've added it."]);
+  });
+
+  it("not streamed (typed), an affirmative opening is always held: never yes then no", () => {
+    const guard = makeHonestyGuard({ question: "Can you code?" });
+    expect(guard.finish("Sure. Done! You look tired.")).toMatchObject({ text: ACTUALLY_CANT_YET, replaced: true });
+    expect(makeHonestyGuard({ question: "Can you code?" }).finish("Sure. I can explain code.")).toMatchObject({ text: "Sure. I can explain code.", replaced: false });
+  });
+
+  it("keeps the opening's speed when nothing was asked of it", () => {
+    const sent: string[] = [];
+    const guard = makeHonestyGuard({ onSentence: (s) => sent.push(s), question: "What's a black hole?" });
+    guard.onText("Okay. A black");
+    expect(sent).toEqual(["Okay."]); // straight away, not held
+    expect(asksForAction("Remind me to call Sam")).toBe(true);
+    expect(asksForAction("Add the dentist to my calendar")).toBe(true);
+    expect(asksForAction("What's a black hole?")).toBe(false);
+    expect(asksForAction("Tell me about me")).toBe(false);
   });
 
   it("lets claims through when a tool ran and succeeded this turn", () => {

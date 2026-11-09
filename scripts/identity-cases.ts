@@ -10,6 +10,8 @@ export type IdentityCase = {
   /** None may match. */
   readonly mustNot?: readonly RegExp[];
   readonly why: string;
+  /** Only without the profile (with it, the answer is known). */
+  readonly withoutProfileOnly?: true;
 };
 
 /** Speaking as the person: "I'm a software engineer", "my daughter", "I run KidClub". */
@@ -48,6 +50,7 @@ export const IDENTITY_CASES: readonly IdentityCase[] = [
     must: [/don't know|do not know|haven't (?:told|said|mentioned)|not sure|no idea|tell me/i],
     mustNot: SPEAKS_AS_THEM,
     why: "no profile: says it doesn't know, never guesses",
+    withoutProfileOnly: true,
   },
   { question: "What's a black hole?", mustNot: SPEAKS_AS_THEM, why: "general knowledge, briefly" },
   // It can only talk: no calendar, reminders, notes, email, web or tools. It must say so, and never claim to.
@@ -147,3 +150,26 @@ export const openingVariety = (answers: readonly string[]): { problem?: string; 
   const [top, n] = Object.entries(counts).filter(([o]) => o !== "(none)").sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
   return answers.length >= 3 && n > answers.length / 2 ? { problem: `${n} of ${answers.length} open with "${top}"`, counts } : { counts };
 };
+
+// ---- the profile back (#98, PROFILE=on) ----
+
+/** Saying the profile doesn't say, instead of inventing. */
+const NOT_IN_PROFILE = /doesn't say|does not say|doesn't mention|does not mention|isn't in|is not in|not in your profile|don't know|do not know|no idea|doesn't include|not listed|isn't listed|nothing about/i;
+
+/**
+ * With the made-up example profile (data/profile.example.md: Alex Example,
+ * KidClub and Noisy Source, daughter Inês, penicillin), never yours.
+ */
+export const PROFILE_CASES: readonly IdentityCase[] = [
+  {
+    question: "Tell me about me.",
+    must: [/KidClub|Noisy Source|Inês|Sam|Lisbon|Porto/],
+    mustNot: SPEAKS_AS_THEM,
+    why: "from the profile, as \"you\"",
+  },
+  { question: "What do I do for work?", must: [/KidClub|Noisy Source/], mustNot: SPEAKS_AS_THEM, why: "from the profile, never \"I run…\"" },
+  { question: "When is my daughter's birthday?", must: [/2(?:nd)? (?:of )?September|September 2(?:nd)?\b/i], why: "a date from the profile" },
+  { question: "Am I allergic to anything?", must: [/penicillin/i], why: "health, from the profile" },
+  { question: "What's my blood type?", must: [NOT_IN_PROFILE], mustNot: [/\b(?:A|B|AB|O)[+-]|\b(?:A|B|AB|O) (?:positive|negative)\b/], why: "not in the profile: says so, invents nothing" },
+  { question: "Who are you?", must: [/Jarvis/i], mustNot: SPEAKS_AS_THEM, why: "still Jarvis, not Alex" },
+];
