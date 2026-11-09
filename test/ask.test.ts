@@ -417,6 +417,66 @@ describe("speculative answer (#76, opt-in)", () => {
   });
 });
 
+describe("brains (#88)", () => {
+  it("passes the chosen brain to the answerer and says which answered", async () => {
+    const { deps, answerInputs } = makeDeps();
+    expect(await handleAsk(deps, { question: QUESTION, brain: "local" })).toMatchObject({ type: "answer", brain: "local" });
+    expect(answerInputs[0]?.brain).toBe("local");
+    const plain = await handleAsk(deps, { question: QUESTION });
+    expect(plain).not.toHaveProperty("brain"); // older clients see no change
+  });
+});
+
+describe("bare mode (#88)", () => {
+  const bareDeps = () => {
+    const made = makeDeps();
+    const bareInputs: AnswerInput[] = [];
+    const deps: Deps = {
+      ...made.deps,
+      bare: async (input) => {
+        made.calls.push("bare answer");
+        bareInputs.push(input);
+        return ok({ kind: "answer", text: "Hi! What can I do for you?" });
+      },
+    };
+    return { ...made, deps, bareInputs };
+  };
+
+  it("sends every question, typed or spoken, straight to the brain with only the history", async () => {
+    for (const question of ["what are we doing?", "When is my daughter's birthday?", "Which invoices are unpaid?"]) {
+      const { deps, calls, bareInputs, flush } = bareDeps();
+      const history = [
+        { role: "user" as const, text: "Hello" },
+        { role: "assistant" as const, text: "Hi!" },
+      ];
+      const response = await handleAsk(deps, { question, history, brain: "local" });
+      await flush();
+      expect(response, question).toEqual({ type: "answer", context: "personal", answer: "Hi! What can I do for you?", brain: "local" });
+      // No classifier (so no context picker), no other context, no memory reads or writes.
+      expect(calls, question).toEqual(["bare answer"]);
+      expect(bareInputs[0]?.history).toEqual(history);
+      expect(bareInputs[0]?.memories).toEqual([]);
+      expect(bareInputs[0]?.brain).toBe("local");
+    }
+  });
+
+  it("still runs the local EC precheck first: handed to Kiro, with no model at all", async () => {
+    const { deps, calls } = bareDeps();
+    const response = await handleAsk(deps, { question: "Summarise the UTP standup", brain: "local" });
+    expect(response).toMatchObject({ type: "handoff", context: "ec-hrt" });
+    expect(calls).toEqual([]);
+  });
+
+  it("passes an Ollama-down message through, and is off by default", async () => {
+    const { deps } = bareDeps();
+    const down: Deps = { ...deps, bare: async () => err({ code: "llm_failed", message: "The local brain (Ollama) isn't running." }) };
+    expect(await handleAsk(down, { question: "Hi" })).toEqual({ type: "error", message: "The local brain (Ollama) isn't running." });
+    const off = makeDeps();
+    await handleAsk(off.deps, { question: QUESTION });
+    expect(off.calls).toContain("classify");
+  });
+});
+
 describe("failures", () => {
   it("rejects an unknown explicit context", async () => {
     const { deps, calls } = makeDeps();

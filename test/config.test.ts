@@ -23,7 +23,12 @@ describe("loadConfig", () => {
       models: {
         classifier: { provider: "anthropic", model: "claude-haiku-5-5" },
         answer: { provider: "anthropic", model: "claude-sonnet-5-5" },
+        local: { provider: "ollama", model: "qwen3:8b" },
       },
+      ollamaUrl: new URL("http://127.0.0.1:11434"),
+      bareMode: false,
+      ollamaThink: false,
+      userName: undefined,
       contextsPath: "contexts.md",
       profileSource: { kind: "file", path: "data/profile.md" },
       timeZone: "Europe/Lisbon",
@@ -81,6 +86,24 @@ describe("loadConfig", () => {
       ["BARGE_IN_CHROME", "always"],
       ["STICKY_CONTEXT", "yes"],
       ["VOICE_FIRST_CHUNK_CHARS", "10"],
+    ] as const) {
+      const bad = loadConfig({ [name]: value });
+      expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);
+    }
+  });
+
+  it("runs the local brain on Ollama on this machine only (#88)", () => {
+    const c = loadOk({ OLLAMA_MODEL: "qwen3:8b", OLLAMA_URL: "http://localhost:11500", BARE_MODE: "on", JARVIS_USER_NAME: "Alex" });
+    expect(c.models.local).toEqual({ provider: "ollama", model: "qwen3:8b" });
+    expect(c.ollamaUrl).toEqual(new URL("http://localhost:11500"));
+    expect(c.bareMode).toBe(true);
+    expect(c.userName).toBe("Alex");
+    for (const [name, value] of [
+      ["OLLAMA_URL", "http://192.168.1.5:11434"],
+      ["OLLAMA_URL", "https://ollama.example.com"],
+      ["OLLAMA_MODEL", "llama 3"],
+      ["BARE_MODE", "yes"],
+      ["JARVIS_USER_NAME", "<script>"],
     ] as const) {
       const bad = loadConfig({ [name]: value });
       expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);

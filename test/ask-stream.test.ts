@@ -180,6 +180,30 @@ describe("POST /ask, streamed", () => {
     expect(form.status).toBe(415);
   });
 
+  it("logs why playback stopped, as numbers and fixed words, never what was said (#89)", async () => {
+    const { ask, spoken, lines } = setup();
+    await (await ask({ question: "Who's my doctor?" })).text();
+    const report = {
+      turnId: "turn-0001",
+      interrupted: true,
+      spoken: "Hello!—",
+      reason: "barge-in",
+      played: 1,
+      total: 3,
+      voiceErrors: 0,
+      streamComplete: true,
+      bargeProb: 74,
+      msAfterFirstAudio: 420,
+    };
+    expect((await spoken(report)).status).toBe(200);
+    const line = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.message === "playback");
+    expect(line).toMatchObject({ interrupted: true, reason: "barge-in", played: 1, total: 3, bargeProb: 74, msAfterFirstAudio: 420, streamComplete: true });
+    expect(JSON.stringify(line)).not.toContain("Hello");
+    // Only known reasons, only numbers.
+    expect((await spoken({ ...report, reason: "the user said something rude" })).status).toBe(400);
+    expect((await spoken({ ...report, bargeProb: 0.74 })).status).toBe(400);
+  });
+
   it("logs counts and timings, never the answer", async () => {
     const { ask, lines } = setup();
     await (await ask({ question: "Who's my doctor?" })).text();

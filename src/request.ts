@@ -49,6 +49,8 @@ const AskRequestSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]*$/, { error: "stickyContext must be a context id" })
       .optional(),
+    // Only the two configured brains (#88); never a model name.
+    brain: z.enum(["claude", "local"], { error: 'brain must be "claude" or "local"' }).optional(),
   })
   .strict();
 
@@ -62,7 +64,7 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
         .join("; "),
     );
   }
-  const { question, context, history, conversationId, remember, spoken, stickyContext } = parsed.data;
+  const { question, context, history, conversationId, remember, spoken, stickyContext, brain } = parsed.data;
   return ok({
     question,
     ...(context !== undefined ? { context: context as ContextId } : {}),
@@ -71,5 +73,6 @@ export const parseAskRequest = (body: unknown): Result<AskRequest, string> => {
     ...(remember !== undefined ? { remember } : {}),
     ...(spoken !== undefined ? { spoken } : {}),
     ...(stickyContext !== undefined ? { stickyContext: stickyContext as ContextId } : {}),
+    ...(brain !== undefined ? { brain } : {}),
   });
 };

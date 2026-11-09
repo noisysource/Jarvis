@@ -247,7 +247,7 @@ export const makeTurnDetector = (options = {}) => {
  *   askAt?: number, firstSentenceAt?: number,
  *   server?: { route?: string, speculative?: string, routeMs?: number, memoriesMs?: number, firstTokenMs?: number, firstSentenceMs?: number, totalMs?: number },
  *   speakAt?: number, firstSoundAt?: number, voice?: string, reported?: boolean, fillerAt?: number, voiceCommitted?: boolean,
- *   streamDone?: boolean, playbackDone?: boolean, firstChunkChars?: number, echo?: { peak: number, longestMs: number },
+ *   streamDone?: boolean, playbackDone?: boolean, firstChunkChars?: number, brain?: "claude" | "local", echo?: { peak: number, longestMs: number },
  * }} TurnTiming
  */
 
@@ -264,6 +264,7 @@ export const timingStages = (t) => {
     endOfTurnMs: t.spoken ? t.endOfTurnMs : undefined,
     whisperMs: t.whisperMs,
     whisperServerMs: t.whisperServerMs,
+    brain: t.brain,
     route: t.server?.route,
     speculative: t.server?.speculative,
     routeMs: t.server?.routeMs,
@@ -299,7 +300,7 @@ export const formatTiming = (s, voice, median) => {
   }
   if (s.memoriesMs !== undefined && s.memoriesMs >= 20) parts.push(`memories ${showMs(s.memoriesMs)}`);
   if (s.firstSentenceMs !== undefined) {
-    parts.push(`Claude first sentence ${showMs(s.firstSentenceMs)}${s.firstTokenMs !== undefined ? ` (first token ${showMs(s.firstTokenMs)})` : ""}`);
+    parts.push(`${s.brain === "local" ? "Local" : "Claude"} first sentence ${showMs(s.firstSentenceMs)}${s.firstTokenMs !== undefined ? ` (first token ${showMs(s.firstTokenMs)})` : ""}`);
   }
   if (s.voiceFirstAudioMs !== undefined) {
     parts.push(`${voice ?? "voice"} first audio ${showMs(s.voiceFirstAudioMs)}${s.firstChunkChars !== undefined ? ` (${s.firstChunkChars} chars)` : ""}`);

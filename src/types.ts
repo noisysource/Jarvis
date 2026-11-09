@@ -57,6 +57,9 @@ export type Turn = {
   readonly text: string;
 };
 
+/** Which model answers (#88): only these two, from config; the page never names a model. */
+export type Brain = "claude" | "local";
+
 export type AskRequest = {
   readonly question: string;
   /** Set when the user picked a context after a clarify response. Skips classification. */
@@ -70,6 +73,8 @@ export type AskRequest = {
   readonly spoken?: boolean;
   /** The context this spoken conversation was last answered in; used only with STICKY_CONTEXT=on (#76). */
   readonly stickyContext?: ContextId;
+  /** Which brain answers (#88); Claude when not given. */
+  readonly brain?: Brain;
 };
 
 export type Classification =
@@ -93,7 +98,7 @@ export type ContextOption = {
 };
 
 export type AskResponse =
-  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string }
+  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain }
   | {
       readonly type: "clarify";
       readonly message: string;
@@ -191,6 +196,8 @@ export type AnswerInput = {
   readonly signal?: AbortSignal;
   /** A spoken turn (#76): answered for speed. */
   readonly spoken?: boolean;
+  /** Which brain answers (#88). */
+  readonly brain?: Brain;
 };
 
 /**
@@ -240,4 +247,10 @@ export type Deps = {
   readonly stickyContext?: boolean;
   /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */
   readonly speculativeAnswer?: boolean;
+  /**
+   * BARE_MODE=on (#88): every turn gets only the local EC precheck, then this
+   * answerer (history and a short persona). No classifier, contexts, profile
+   * or memory.
+   */
+  readonly bare?: Deps["answer"];
 };

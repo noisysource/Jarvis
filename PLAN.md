@@ -113,6 +113,7 @@ question, and after a clarify response it re-sends the question with
 | `src/llm/types.ts` | Provider-neutral `LlmCall`, `LlmRequest`, `LlmResponse`, `ModelRef` | #10 |
 | `src/llm/anthropic.ts` | Anthropic provider: effort, refusal handling, error mapping | #10 |
 | `src/llm/registry.ts` | `makeLlm(config)`: picks the provider from `provider:model` config | #10 |
+| `src/llm/ollama.ts` | Ollama provider: `/api/chat` streamed (NDJSON), `keep_alive` 30 m, startup warm-up; no JSON output or tools yet | #88 |
 | `src/classify.ts` | `makeClassifier`: local precheck, then the classifier model → context id or `unclear` | #11 |
 | `src/answer/personal.ts` | Answer model: instructions + profile (cached), then Lisbon date/time and memories (uncached), history, no tools | #13 |
 | `src/time.ts` | `formatNow(now, timeZone)` for prompts | #13 |
@@ -353,6 +354,87 @@ and no conversation content is logged.
   before Jarvis has started speaking, cancels that question and sends the
   whole utterance instead. The phase line (Listening / Thinking / Speaking,
   text plus colour, read out) says how to interrupt.
+
+**Local brain (#88, first slice of #55).** `ollama:<model>` is a provider
+behind `LlmCall`, streaming only. `OLLAMA_URL` must be loopback (like the
+voice services), and `OLLAMA_MODEL` defaults to `qwen3:8b`, with
+`think: false` unless `OLLAMA_THINK=on` (a model that refuses the field is
+retried without it). Requests
+send `keep_alive: 30m`, and the model is loaded at startup. The chat page's
+**Claude / Local** switch (default Local) sends `brain: "claude" | "local"`.
+The request schema accepts only those two, and config says which model
+each is. The answer carries `brain`, which the page shows; `GET /brains`
+gives the labels. An Ollama error carries a message the page can show
+("isn't running", "isn't installed").
+
+**Bare conversation mode (#88, `BARE_MODE=on`).** Every turn, typed or
+spoken, gets the local EC precheck (a handoff goes to Kiro with no model
+call), then the selected brain with **only** the history and a short
+persona (`src/answer/bare.ts`):
+- "You are Jarvis, (`JARVIS_USER_NAME`)'s personal assistant": "I" is
+  Jarvis, the person is "you". The name comes from the gitignored `.env`,
+  never the code.
+- It knows nothing of their life beyond the conversation.
+- The conversational style: 1–3 sentences unless asked, react first, a
+  question back when it helps, no lists or headings, plain words.
+
+No classifier, no contexts, no profile, no memory reads or writes, no held
+turn. With Local selected, nothing reaches Claude. `npm run eval:identity`
+checks who is who and the style on both brains.
+
+The bare persona lists what Jarvis can actually do: only talk. No calendar,
+reminders, notes, email, web or tools. It says so when asked, and never
+claims to have done one. `eval:identity` covers those cases too. It's
+informational: more than 4 sentences is a warning, and it exits 0 unless
+`--strict`.
+
+**Milestone "Conversation"** (now): talking to Jarvis should feel like
+talking to a person, tuned on the free local brain (`qwen3:8b`), keeping
+the current architecture.
+1. Bare mode on Ollama with `think: false`, and the real abilities in the
+   persona (#90).
+2. Rebase #85 (echo fixes, fillers, timing line) onto `main`, keeping bare
+   mode and the brain switch.
+3. A voice style for bare mode: written to be spoken (short, react first,
+   contractions, a question back when natural, no formatting, numbers in
+   words).
+4. Flow: bigger pieces to Kokoro (two sentences when ready) so the
+   intonation carries; easy barge-in where echo isn't a risk; the right
+   setting for the Mac's built-in mic.
+5. Done means a 10-minute free conversation on Local that feels natural,
+   with a median time to first sound under 1.5 s, then one check on
+   Claude.
+6. Chatterbox and Dia2 as voice providers on `/voices`, to compare with
+   Daniel.
+
+**Next milestone, "Trust"** (#91):
+1. **An honesty guard in code, for every brain.**
+   - If a reply claims an action ("I've scheduled/created/sent/booked/
+     added…", "Done") and no tool ran in that turn, it isn't shown.
+   - It's replaced with an honest "I can't do that yet".
+   - The blocked claim is logged as numbers and a category only, no text.
+2. **Haiku as a brain option** (☁️ Claude Haiku), for cheap chat.
+3. **Bring back, one at a time, each behind its own switch and checked
+   with the evals:** the profile, then memory, then contexts and the
+   classifier.
+4. **The first real tool, behind your explicit OK:** the calendar, read
+   first and then create. The reply must come from the tool's result,
+   never the model's word.
+
+**Adding things back, one at a time, each behind its own switch:**
+1. the profile
+2. memory
+3. contexts and the classifier
+
+The personal answerer's prompt already has the who-is-who rules (the name
+from the profile's `Name:` line) and the conversational style, ready for
+the profile step.
+**Playback reasons (#89):** the page's `/ask/spoken` report carries why
+playback ended, and the server logs it as a `playback` line (numbers and
+fixed words). In a stand-in test, a barge-in after the text has fully
+arrived reproduces the "Sure, then silence" symptom (text complete,
+`played: 0`). That's the self-interruption #85 addresses; the log on the
+Mac will confirm or rule it out.
 
 **Memory (#59–#62, #24).** Memories belong to one context and are only
 loaded for it. Three kinds: **facts** (lasting things you said, preferences

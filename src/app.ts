@@ -3,13 +3,14 @@
 // if contexts.md, the profile or the API key is missing or invalid.
 
 import { readFile } from "node:fs/promises";
+import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
-import { makeAnswerRouter } from "./answer/router.js";
+import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
 import { loadContexts } from "./contexts.js";
 import type { ModelRef } from "./llm/model-ref.js";
-import { makeLlm, type ProviderKeys } from "./llm/registry.js";
+import { makeLlm, type ProviderKeys, type ProviderUrls } from "./llm/registry.js";
 import type { LlmCall } from "./llm/types.js";
 import { makeBackgroundTasks, type BackgroundTasks } from "./background.js";
 import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
@@ -29,7 +30,7 @@ export type AppInputs = {
   /** Overrides for tests. */
   readonly readTextFile?: (path: string) => Promise<string>;
   readonly profileFs?: ProfileFileSystem;
-  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys, options?: { readonly log?: Logger }) => Result<LlmCall, string>;
+  readonly makeLlm?: (ref: ModelRef, keys: ProviderKeys, options?: ProviderUrls & { readonly log?: Logger }) => Result<LlmCall, string>;
   readonly now?: () => Date;
   /** Where memories live. Defaults to an in-memory store until the SQLite store (#60). */
   readonly memoryStore?: MemoryStore;
@@ -92,6 +93,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   if (!classifierLlm.ok) return err(`CLASSIFIER_MODEL: ${classifierLlm.error}`);
   const answerLlm = buildLlm(config.models.answer, keys, { log });
   if (!answerLlm.ok) return err(`ANSWER_MODEL: ${answerLlm.error}`);
+  // The "Local" brain (#88): Ollama on this machine.
+  const localLlm = buildLlm(config.models.local, keys, { ollama: config.ollamaUrl, ollamaThink: config.ollamaThink });
+  if (!localLlm.ok) return err(`OLLAMA_MODEL: ${localLlm.error}`);
 
   if (!contexts.value.some((c) => c.id === "personal" && c.handling.kind === "answer")) {
     return err(`${config.contextsPath} needs an answered "personal" context`);
@@ -100,16 +104,18 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const now = inputs.now ?? (() => new Date());
   const memoryStore = inputs.memoryStore ?? makeMemoryStoreInMemory({ now });
 
-  const answerers: Record<string, Deps["answer"]> = {
+  const personalWith = (llm: LlmCall): Record<string, Deps["answer"]> => ({
     personal: makePersonalAnswerer({
-      llm: answerLlm.value,
+      llm,
       profile,
       timeZone: config.timeZone,
       capabilities: capabilitiesText(contexts.value, new Set(ANSWERED_CONTEXT_IDS)),
       log,
       spokenThinking: config.turn.spokenThinking,
     }),
-  };
+  });
+  const answerers = personalWith(answerLlm.value);
+  const localAnswerers = personalWith(localLlm.value);
   const background = inputs.background ?? makeBackgroundTasks({ log });
 
   return ok({
@@ -118,7 +124,15 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
-    answer: makeAnswerRouter(answerers),
+    answer: makeBrainRouter({ claude: makeAnswerRouter(answerers), local: makeAnswerRouter(localAnswerers) }),
+    ...(config.bareMode
+      ? {
+          bare: makeBrainRouter({
+            claude: makeBareAnswerer({ llm: answerLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
+            local: makeBareAnswerer({ llm: localLlm.value, ...(config.userName ? { userName: config.userName } : {}), log }),
+          }),
+        }
+      : {}),
     isAnswered: (id) => Object.hasOwn(answerers, id),
     afterReply: background.run,
     memory: makeSafeMemoryHooks(

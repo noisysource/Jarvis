@@ -11,6 +11,7 @@ import { makeJsonLogger } from "./log.js";
 import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
+import { warmOllama } from "./llm/ollama.js";
 import { makeTurnRegistry } from "./turns.js";
 import { DEFAULT_RUN_DIR, makeIsStarting } from "./service-starting.js";
 import { makeProfileSource } from "./profile.js";
@@ -88,7 +89,8 @@ const stt = makeSttProvider(cfg.stt, { isStarting, hints });
 const WARM_UP_QUESTION = "Warm-up check: which context is a question about the weather?";
 let lastWarm = 0;
 const warm = (): void => {
-  if (!deps.ok || Date.now() - lastWarm < 20_000) return;
+  // Bare mode doesn't use the classifier, and with Local nothing may go to Claude (#88).
+  if (cfg.bareMode || !deps.ok || Date.now() - lastWarm < 20_000) return;
   lastWarm = Date.now();
   const started = performance.now();
   void deps.value
@@ -104,6 +106,10 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   stt,
   turn: cfg.turn,
   dev: cfg.env !== "production",
+  brains: {
+    default: "local",
+    labels: { local: `Local · ${cfg.models.local.model}`, claude: `Claude · ${cfg.models.answer.model}` },
+  },
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok && vendor.ok ? { ...web.value, ...vendor.value } : refuse("unreachable"),
   memories: memoryStore,
@@ -120,6 +126,14 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
   });
   warm(); // listening now: warm the model connection before the first question
 });
+
+// The local brain (#88): load the model now, so the first Local answer doesn't wait for it.
+const ollamaStarted = performance.now();
+void warmOllama({ model: cfg.models.local.model, baseUrl: cfg.ollamaUrl }).then((loaded) =>
+  loaded
+    ? log.info("ollama warmed up", { model: cfg.models.local.model, ms: Math.round(performance.now() - ollamaStarted) })
+    : log.warn("ollama isn't available", { url: cfg.ollamaUrl.origin, model: cfg.models.local.model }),
+);
 
 const shutdown = (signal: string): void => {
   log.info("shutting down", { signal });

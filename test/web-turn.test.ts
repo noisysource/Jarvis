@@ -127,7 +127,7 @@ describe("makeSpeaker (#82)", () => {
     sp.say("Three.");
     expect(r.fetches).toEqual(["One.", "Two."]); // the third waits for playback to reach it
     sp.finish();
-    expect(await r.done).toEqual({ interrupted: false, spoken: "One. Two. Three.", sentences: 3, fellBack: false });
+    expect(await r.done).toEqual({ interrupted: false, spoken: "One. Two. Three.", sentences: 3, fellBack: false, reason: "finished", played: 3, voiceErrors: 0 });
     expect(r.log).toEqual(["play One.", "play Two.", "play Three."]);
     expect(r.fetches).toEqual(["One.", "Two.", "Three."]);
   });
@@ -178,8 +178,8 @@ describe("makeSpeaker (#82)", () => {
   it("counts a stop before anything played as interrupted with nothing said", () => {
     const r = run();
     r.speaker().say("Hello there.");
-    r.speaker().stop();
-    expect(r.result()).toEqual({ interrupted: true, spoken: "", sentences: 1, fellBack: false });
+    r.speaker().stop("barge-in");
+    expect(r.result()).toEqual({ interrupted: true, spoken: "", sentences: 1, fellBack: false, reason: "barge-in", played: 0, voiceErrors: 0 });
   });
 });
 
@@ -301,6 +301,7 @@ describe("turn timings (#76)", () => {
 
   it("derives each stage, the total running from the end of your speech to the first sound", () => {
     expect(timingStages(spoken)).toEqual({
+      brain: undefined,
       endOfTurnMs: 512,
       whisperMs: 310,
       whisperServerMs: 290,
@@ -322,6 +323,7 @@ describe("turn timings (#76)", () => {
       "end of turn 512 ms · Whisper 310 ms · classifier 280 ms · Claude first sentence 670 ms (first token 640 ms) · kokoro first audio 255 ms · total 1.76 s · median 1.90 s (4)",
     );
     expect(formatTiming(timingStages({ ...spoken, server: { route: "precheck", routeMs: 0 } }), "kokoro")).toContain("precheck (no classifier)");
+    expect(formatTiming(timingStages({ ...spoken, brain: "local" }), "kokoro")).toContain("Local first sentence 670 ms");
   });
 
   it("labels the browser with its major version, and takes medians", () => {
@@ -393,5 +395,21 @@ describe("fillers (#86)", () => {
     expect(order).toEqual(["waiting for filler", "filler ended"]);
     expect(r.log).toEqual(["play Your passport expires in January."]);
     expect(result.spoken).toBe("Your passport expires in January."); // no filler in the report or history
+  });
+});
+
+describe("why playback stopped (#89)", () => {
+  it("says finished, or what stopped it, with the sentences played and voice errors", async () => {
+    const failing = run({ fetchSpeech: async () => new Response("{}", { status: 503 }) });
+    failing.speaker().say("One.");
+    failing.speaker().finish();
+    expect(await failing.done).toMatchObject({ reason: "finished", played: 1, voiceErrors: 1, fellBack: true });
+
+    const cut = run({}, 200);
+    cut.speaker().say("One.");
+    cut.speaker().say("Two.");
+    await new Promise((x) => setTimeout(x, 300));
+    cut.speaker().stop("new-question");
+    expect(cut.result()).toMatchObject({ interrupted: true, reason: "new-question", played: 1, sentences: 2 });
   });
 });

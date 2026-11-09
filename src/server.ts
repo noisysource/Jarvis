@@ -45,11 +45,34 @@ export const localHosts = (port: number): readonly string[] => [`127.0.0.1:${por
 const wantsStream = (accept: string | undefined): boolean =>
   (accept ?? "").split(",").some((part) => part.split(";")[0]?.trim().toLowerCase() === "text/event-stream");
 
+/** Why playback stopped (#89): fixed words only. */
+const STOP_REASONS = [
+  "finished",
+  "barge-in",
+  "push-interrupt",
+  "new-question",
+  "stop",
+  "typed",
+  "muted",
+  "new-conversation",
+  "answer-cancelled",
+  "stopped",
+] as const;
+const count = z.number().int().min(0).max(10_000).optional();
+
 const SpokenReport = z
   .object({
     turnId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/),
     interrupted: z.boolean(),
     spoken: z.string().max(4_000),
+    // How playback ended (#89): logged as numbers and fixed words, never the text.
+    reason: z.enum(STOP_REASONS).optional(),
+    played: count,
+    total: count,
+    voiceErrors: count,
+    streamComplete: z.boolean().optional(),
+    bargeProb: z.number().int().min(0).max(100).optional(),
+    msAfterFirstAudio: z.number().int().min(0).max(600_000).optional(),
   })
   .strict();
 
@@ -61,6 +84,7 @@ const LatencyReport = z
     spoken: z.boolean(),
     voice: z.enum(["kokoro", "piper", "browser", "none"]),
     route: z.enum(["precheck", "picked", "sticky", "classifier"]).optional(),
+    brain: z.enum(["claude", "local"]).optional(),
     speculative: z.enum(["used", "discarded"]).optional(),
     endOfTurnMs: ms,
     whisperMs: ms,
@@ -104,6 +128,8 @@ export const makeServer = (
     readonly dev?: boolean;
     /** Warms the model connection (#76): POST /warm, when a spoken conversation starts. */
     readonly warm?: () => void;
+    /** The two brains the page can pick (#88): GET /brains. Ids and labels only. */
+    readonly brains?: { readonly default: "claude" | "local"; readonly labels: { readonly claude: string; readonly local: string } };
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -259,7 +285,11 @@ export const makeServer = (
     async (c) => {
       const body = SpokenReport.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return c.json(errorBody("Send { turnId, interrupted, spoken }."), 400);
-      const known = turns.report(body.data.turnId, { interrupted: body.data.interrupted, spoken: body.data.spoken });
+      const { turnId, interrupted, spoken, ...how } = body.data;
+      if (how.reason !== undefined) deps.log.info("playback", { requestId: c.get("requestId"), interrupted, ...how });
+      const known = turns.report(turnId, { interrupted, spoken });
+      // A turn with nothing held (simple voice mode skips the wrap-up) still had its playback logged.
+      if (!known && how.reason !== undefined) return c.json({ ok: true, held: false });
       return known ? c.json({ ok: true }) : c.json(errorBody("No answer is waiting for that turn."), 404);
     },
   );
@@ -291,6 +321,19 @@ export const makeServer = (
 
   if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
   if (options.stt) registerSttRoutes(app, { provider: options.stt, language: "en", log: deps.log });
+  const brains = options.brains;
+  if (brains) {
+    app.get("/brains", (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({
+        default: brains.default,
+        brains: [
+          { id: "local", label: brains.labels.local },
+          { id: "claude", label: brains.labels.claude },
+        ],
+      });
+    });
+  }
   const turnConfig = options.turn;
   if (turnConfig) {
     app.get("/voice-settings", (c) => {

@@ -12,7 +12,9 @@ import { spokenText } from "./turn-lib.js";
 /**
  * @typedef {{ playedSeconds: number, totalSeconds: number, stopped: boolean }} Played
  * @typedef {{ fraction: () => number }} Tracker the player sets `fraction`: the share of the sentence heard so far
- * @typedef {{ interrupted: boolean, spoken: string, sentences: number, fellBack: boolean }} PlaybackResult
+ * reason: why playback ended (#89): "finished", or what stopped it ("barge-in", "new-question", ...).
+ * played: sentences played in full; voiceErrors: /speak or playback failures.
+ * @typedef {{ interrupted: boolean, spoken: string, sentences: number, fellBack: boolean, reason: string, played: number, voiceErrors: number }} PlaybackResult
  * @typedef {{
  *   fetchSpeech: ((text: string, signal: AbortSignal) => Promise<Response>) | null,
  *   play: (response: Response, signal: AbortSignal, tracker: Tracker) => Promise<Played>,
@@ -55,8 +57,9 @@ export const makeSpeaker = (deps) => {
   /** @type {(() => void) | undefined} */
   let wake;
 
-  /** @param {boolean} interrupted */
-  const settle = (interrupted) => {
+  let voiceErrors = 0;
+  /** @param {boolean} interrupted @param {string} reason */
+  const settle = (interrupted, reason) => {
     if (settled) return;
     settled = true;
     deps.onDone({
@@ -64,6 +67,9 @@ export const makeSpeaker = (deps) => {
       spoken: interrupted ? spokenText(sentences, { full, cutFraction: currentFraction }) : sentences.join(" "),
       sentences: sentences.length,
       fellBack: fallback && deps.fetchSpeech !== null,
+      reason: interrupted ? reason : "finished",
+      played: full,
+      voiceErrors,
     });
   };
 
@@ -109,6 +115,7 @@ export const makeSpeaker = (deps) => {
           }
         } catch (e) {
           if (controller.signal.aborted) return;
+          voiceErrors += 1;
           fallback = true;
           deps.onFallback?.(e instanceof Error ? e.message : "the voice stopped");
           i -= 1; // say this sentence again with the browser voice
@@ -116,6 +123,7 @@ export const makeSpeaker = (deps) => {
         }
       } else {
         if (response instanceof Error && !fallback) {
+          voiceErrors += 1;
           fallback = true;
           deps.onFallback?.(response.message);
         }
@@ -129,7 +137,7 @@ export const makeSpeaker = (deps) => {
       full = i + 1;
       tracker = { fraction: () => 0 };
     }
-    settle(false);
+    settle(false, "finished");
   };
   void run();
 
@@ -148,13 +156,16 @@ export const makeSpeaker = (deps) => {
       finished = true;
       wake?.();
     },
-    /** Stops at once (barge-in, or a new question). */
-    stop: () => {
+    /**
+     * Stops at once (barge-in, or a new question). `reason` is logged (#89).
+     * @param {string} [reason]
+     */
+    stop: (reason = "stopped") => {
       if (settled) return;
       currentFraction = currentFraction || tracker.fraction();
       controller.abort();
       wake?.();
-      settle(full < sentences.length || !finished);
+      settle(full < sentences.length || !finished, reason);
     },
     /** Is anything still to be said or playing? */
     active: () => !settled,
