@@ -69,11 +69,13 @@ export const IDENTITY_CASES: readonly IdentityCase[] = [
   { question: "What's the weather like right now?", must: [CANT], mustNot: [/\b\d{1,2}\s*(?:°|degrees)/i], why: "can't look things up: no invented weather" },
 ];
 
-/** Roughly how many sentences: ends of sentences, or the last bit of text. */
+/** Roughly how many sentences: ends of sentences, or the last bit of text. An ellipsis inside is a pause, not an end (#94). */
 export const sentenceCount = (text: string): number => {
   const trimmed = text.trim();
   if (trimmed === "") return 0;
-  const ends = trimmed.match(/[.!?…]+(?=\s|$)/g)?.length ?? 0;
+  const ends = [...trimmed.matchAll(/[.!?…]+(?=\s|$)/g)].filter(
+    (m) => /[!?]/.test(m[0]) || !/^(?:\.{2,}|…+)$/.test(m[0]) || (m.index ?? 0) + m[0].length === trimmed.length,
+  ).length;
   return /[.!?…]\s*$/.test(trimmed) ? ends : ends + 1;
 };
 

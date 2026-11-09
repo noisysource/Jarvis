@@ -16,7 +16,7 @@ import { historyMessages } from "./personal.js";
 const BARE_MAX_TOKENS = 2000;
 
 /** Spoken replies (#92): at most this many sentences after the opening reaction, unless they ask for detail. */
-export const DEFAULT_SPOKEN_SENTENCES = 3;
+export const DEFAULT_SPOKEN_SENTENCES = 2;
 
 /** They asked for more than a quick answer. */
 export const asksForDetail = (question: string): boolean =>
@@ -105,11 +105,19 @@ export const makeSentenceCap = (max: number) => {
  * reaction (so the first thing to speak is a word or two and starts at
  * once), stays short, and reads well out loud.
  */
-const SPOKEN_STYLE = (max: number) => [
+/** "one sentence", "one or two short sentences", "two or three short sentences", "4 short sentences". */
+const howMany = (max: number): string =>
+  max === 1 ? "one sentence" : `${max === 2 ? "one or two" : max === 3 ? "two or three" : String(max)} short sentences`;
+
+const SPOKEN_STYLE = (max: number, pauses: boolean) => [
   "How to talk (your reply is spoken aloud):",
   "- Usually start with a very short reaction of one to three words, as its own sentence, and vary it: the note at the end says which fit this time.",
-  `- Then at most ${max === 1 ? "one sentence" : `${max === 2 ? "two" : max === 3 ? "two or three" : String(max)} short sentences`}, unless they ask for detail. Even for 'explain like I'm five', keep it that short.`,
+  `- Then at most ${howMany(max)}, unless they ask for detail. Even for 'explain like I'm five', keep it that short.`,
   "- Talk the way people talk: contractions (it's, you're, don't), plain everyday words.",
+  pauses
+    ? "- Now and then, where a person would pause, use an ellipsis (...) or a dash (—) inside a sentence. Not in every reply."
+    : "- No ellipses or dashes.",
+  "- Never write words in capitals for emphasis.",
   "- No quotes, brackets, lists, bullet points, headings, symbols, markdown or emoji.",
   "- Ask a short question back when it's natural, not every time.",
   "- Reply in the language they use.",
@@ -125,7 +133,10 @@ const TYPED_STYLE = [
 ];
 
 /** The whole system prompt in bare mode: who is who, what it can do, and how to talk (typed or spoken). */
-export const barePrompt = (userName?: string, options: { readonly spoken?: boolean; readonly maxSentences?: number } = {}): string => {
+export const barePrompt = (
+  userName?: string,
+  options: { readonly spoken?: boolean; readonly maxSentences?: number; readonly pauses?: boolean } = {},
+): string => {
   const you = userName ?? "the person you're talking to";
   return [
     `You are Jarvis, ${userName ? `${userName}'s` : "the"} personal assistant. You speak as "I"; ${userName ?? "they"} ${userName ? "is" : "are"} "you". Never speak as them.`,
@@ -136,7 +147,7 @@ export const barePrompt = (userName?: string, options: { readonly spoken?: boole
     "Never say or suggest you've done something you can't do (\"I've added it\", \"done\", \"I'll remind you\").",
     "And don't promise it for later either, even after saying you can't: no \"but I'll remember\", \"I'll tell you\", \"I'll keep it in mind\" or \"I can remember that for you\". You won't remember anything after this conversation.",
     "",
-    ...(options.spoken ? SPOKEN_STYLE(options.maxSentences ?? DEFAULT_SPOKEN_SENTENCES) : TYPED_STYLE),
+    ...(options.spoken ? SPOKEN_STYLE(options.maxSentences ?? DEFAULT_SPOKEN_SENTENCES, options.pauses === true) : TYPED_STYLE),
   ].join("\n");
 };
 
@@ -151,13 +162,15 @@ export const makeBareAnswerer = (deps: {
   readonly log?: Logger;
   /** Spoken replies: sentences allowed after the opening reaction (VOICE_MAX_SENTENCES). */
   readonly spokenSentences?: number;
+  /** Spoken replies may use ellipses and dashes for pauses (VOICE_PUNCTUATION_STYLE=on, #94). */
+  readonly pauses?: boolean;
   /** For choosing this turn's opening (tests pass their own). */
   readonly random?: () => number;
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
   const random = deps.random ?? Math.random;
   const typedSystem = barePrompt(deps.userName);
-  const spokenSystem = barePrompt(deps.userName, { spoken: true, maxSentences: max });
+  const spokenSystem = barePrompt(deps.userName, { spoken: true, maxSentences: max, pauses: deps.pauses === true });
   return async ({ question, history, onText, signal, spoken }) => {
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
     const cap = spoken === true && !asksForDetail(question) ? makeSentenceCap(max) : undefined;

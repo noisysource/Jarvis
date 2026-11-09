@@ -42,8 +42,10 @@ describe("identity eval checks (#88)", () => {
     expect(checkAnswer(hello, "Hi. One. Two. Three. Four.")).toEqual({ problems: [], warnings: [`5 sentences (more than ${SENTENCE_LIMIT})`] });
     expect(checkAnswer(hello, "Hi!\n- Option one\n- Option two").problems).toContain("a list or heading");
     expect(checkAnswer(hello, "Hi **Alex**!").problems).toContain("markdown");
-    expect(sentenceCount("Sure. Your passport expires in January… Want a reminder?")).toBe(3);
+    expect(sentenceCount("Sure. Your passport expires in January… Want a reminder?")).toBe(2); // the "…" is a pause (#94)
     expect(sentenceCount("No full stop at the end")).toBe(1);
+    expect(sentenceCount("Well... I'm not sure — maybe. Let's see...")).toBe(2); // pauses aren't ends (#94)
+    expect(sentenceCount("You mean...? Yes.")).toBe(2);
   });
 });
 

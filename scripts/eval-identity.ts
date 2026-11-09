@@ -89,10 +89,10 @@ for (const brain of brains) {
   }
   console.log(`${brain.name}: ${passed}/${IDENTITY_CASES.length}`);
 
-  console.log(`\n${brain.name}, spoken (at most ${config.turn.spokenSentences} sentences after the reaction)`);
+  console.log(`\n${brain.name}, spoken (at most ${config.turn.spokenSentences} sentences after the reaction${config.turn.punctuationStyle ? ", pauses on" : ""})`);
   let cuts = 0;
   const log = { info: (message: string) => void (message.includes("cut at the sentence limit") && (cuts += 1)), warn: () => undefined, error: () => undefined };
-  const spokenAnswer = makeBareAnswerer({ llm: llm.ok ? llm.value : fail(""), userName: EVAL_NAME, log, spokenSentences: config.turn.spokenSentences });
+  const spokenAnswer = makeBareAnswerer({ llm: llm.ok ? llm.value : fail(""), userName: EVAL_NAME, log, spokenSentences: config.turn.spokenSentences, pauses: config.turn.punctuationStyle });
   let spokenPassed = 0;
   const spokenAnswers: string[] = [];
   for (const c of SPOKEN_CASES) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pcm16ToFloat32, readAudioFormat } from "../src/web/pcm-lib.js";
-import { AUDITION_SENTENCES, browserEnglishVoices, envLines, formatMs, median } from "../src/web/voices-lib.js";
+import { AUDITION_SENTENCES, browserEnglishVoices, envLines, formatMs, median, OWN_SENTENCE_EXAMPLE, OWN_SENTENCE_MAX, ownSentence } from "../src/web/voices-lib.js";
+import { MAX_SPEAK_CHARS } from "../src/tts-routes.js";
 
 describe("pcm-lib", () => {
   it("turns 16-bit samples into floats", () => {
@@ -45,5 +46,22 @@ describe("voices-lib", () => {
     ];
     const rank = (vs: readonly { name: string; lang: string }[], lang: string) => vs.filter((v) => v.lang.startsWith(lang.slice(0, 2))).sort((a) => (a.lang === lang ? -1 : 1));
     expect(browserEnglishVoices(voices, rank).map((v) => v.name)).toEqual(["Daniel", "Samantha"]);
+  });
+});
+
+describe("your own sentence on /voices (#94)", () => {
+  it("plays what you typed, or with numbers in words the way Jarvis sends them", () => {
+    expect(ownSentence("  It's REALLY big... about 3.5 km — maybe.  ", { asJarvis: false })).toBe("It's REALLY big... about 3.5 km — maybe.");
+    expect(ownSentence("It's REALLY big... about 3.5 km — maybe.", { asJarvis: true })).toBe("It's REALLY big... about three point five km — maybe.");
+    expect(ownSentence("   ", { asJarvis: true })).toBe("");
+  });
+
+  it("never sends more than /speak takes, and starts with pauses, a dash, capitals and a decimal", () => {
+    expect(OWN_SENTENCE_MAX).toBe(MAX_SPEAK_CHARS);
+    expect(ownSentence("a".repeat(5000), { asJarvis: false })).toHaveLength(MAX_SPEAK_CHARS);
+    expect(OWN_SENTENCE_EXAMPLE).toMatch(/\.\.\./);
+    expect(OWN_SENTENCE_EXAMPLE).toContain("—");
+    expect(OWN_SENTENCE_EXAMPLE).toMatch(/\b[A-Z]{3,}\b/);
+    expect(OWN_SENTENCE_EXAMPLE).toContain("3.5");
   });
 });

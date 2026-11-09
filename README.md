@@ -143,7 +143,9 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
 
    Then, with `npm run dev` running, open **http://localhost:8080/voices**:
    every voice reads the same five sentences and shows its time to first
-   audio. "Use this voice" shows two lines to put in `.env` (`TTS_PROVIDER`,
+   audio. Type your own sentence in the box to hear it in any voice
+   (pauses, dashes, CAPITALS); "Numbers in words" sends it the way Jarvis
+   would. "Use this voice" shows two lines to put in `.env` (`TTS_PROVIDER`,
    `TTS_VOICE`); restart Jarvis to use it. Kokoro's first start takes a
    minute or two; until it's up, `/voices` says "Kokoro is starting" and
    refreshes by itself.
@@ -245,12 +247,17 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      - Profile, memory and contexts come back one at a time, each behind its
        own switch.
    - **Spoken replies in bare mode** open with a tiny reaction ("Okay.",
-     "Good question.") so the voice starts at once, then at most two or
-     three short sentences (`VOICE_MAX_SENTENCES=3`), unless you ask for
+     "Good question.") so the voice starts at once, then at most one or
+     two short sentences (`VOICE_MAX_SENTENCES=2`), unless you ask for
      detail ("in detail", "tell me more"). The opening varies, and is sometimes
      left out. The voice reads numbers in words ("366" → "three hundred
      sixty-six"), while the chat keeps the digits. No quotes or brackets. A filler only plays if nothing has started
      after 1.6 s, and then the reply's own reaction isn't spoken twice.
+   - `VOICE_PUNCTUATION_STYLE=on` (off by default, an experiment): spoken
+     replies may use an ellipsis (...) or a dash (—) for a pause. A pause
+     never splits a piece of speech. Capitals for emphasis aren't allowed
+     yet: Kokoro says most all-caps words with extra stress, but spells out
+     some short ones ("IT", "US"), so test them on `/voices` first.
    - In bare mode Jarvis knows it can **only talk** for now: no calendar,
      reminders, notes, email, web or tools. Asked for one, it says so and
      offers to talk it through. It never claims to have done it.

@@ -1,6 +1,8 @@
 // @ts-check
 // Pure helpers for the /voices audition page (#73).
 
+import { speakableNumbers } from "./spoken-numbers.js";
+
 /** The five sentences every voice reads, so they can be compared like for like. */
 export const AUDITION_SENTENCES = [
   { id: "greeting", label: "Greeting", text: "Hello! Good to hear from you. What can I do for you today?" },
@@ -14,6 +16,23 @@ export const AUDITION_SENTENCES = [
   },
   { id: "question", label: "Question back", text: "Would you like me to remind you about that tomorrow morning?" },
 ];
+
+/** What /speak accepts at most (MAX_SPEAK_CHARS on the server). */
+export const OWN_SENTENCE_MAX = 1000;
+
+/** A starting point for your own sentence (#94): pauses, a dash, CAPITALS and a decimal. */
+export const OWN_SENTENCE_EXAMPLE = "Well... I'm not sure — it's REALLY big. About 3.5 km, maybe more.";
+
+/**
+ * Your own sentence (#94), ready to play: trimmed and cut to what /speak
+ * takes. With `asJarvis`, numbers are in words, the way the chat page
+ * sends them to the voice; without it, exactly what you typed.
+ * @param {string} raw @param {{ asJarvis: boolean }} options @returns {string}
+ */
+export const ownSentence = (raw, { asJarvis }) => {
+  const text = raw.trim().slice(0, OWN_SENTENCE_MAX);
+  return asJarvis ? speakableNumbers(text, "en") : text;
+};
 
 /** The .env lines that select a voice. @param {string} provider @param {string} voice */
 export const envLines = (provider, voice) => [`TTS_PROVIDER=${provider}`, `TTS_VOICE=${voice}`].join("\n");
