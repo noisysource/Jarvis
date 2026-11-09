@@ -15,3 +15,7 @@ export const makeAnswerRouter = (answerers: Readonly<Record<string, Deps["answer
       ? answerer(input)
       : ok({ kind: "unavailable", message: notConnectedMessage(input.context) });
   };
+
+/** Picks the brain (#88), then the context's answerer. Claude unless "local" is asked for. */
+export const makeBrainRouter = (routers: { readonly claude: Deps["answer"]; readonly local?: Deps["answer"] }): Deps["answer"] =>
+  async (input) => (input.brain === "local" && routers.local ? routers.local(input) : routers.claude(input));

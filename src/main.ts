@@ -11,6 +11,7 @@ import { makeJsonLogger } from "./log.js";
 import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
+import { warmOllama } from "./llm/ollama.js";
 import { makeTurnRegistry } from "./turns.js";
 import { DEFAULT_RUN_DIR, makeIsStarting } from "./service-starting.js";
 import { makeProfileSource } from "./profile.js";
@@ -87,6 +88,10 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   tts,
   stt,
   turn: cfg.turn,
+  brains: {
+    default: "local",
+    labels: { local: `Local · ${cfg.models.local.model}`, claude: `Claude · ${cfg.models.answer.model}` },
+  },
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok && vendor.ok ? { ...web.value, ...vendor.value } : refuse("unreachable"),
   memories: memoryStore,
@@ -101,6 +106,14 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     voice: cfg.tts.voice ? `${cfg.tts.provider}:${cfg.tts.voice}` : cfg.tts.provider,
     memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
   });
+
+// The local brain (#88): load the model now, so the first Local answer doesn't wait for it.
+const ollamaStarted = performance.now();
+void warmOllama({ model: cfg.models.local.model, baseUrl: cfg.ollamaUrl }).then((loaded) =>
+  loaded
+    ? log.info("ollama warmed up", { model: cfg.models.local.model, ms: Math.round(performance.now() - ollamaStarted) })
+    : log.warn("ollama isn't available", { url: cfg.ollamaUrl.origin, model: cfg.models.local.model }),
+);
 });
 
 const shutdown = (signal: string): void => {

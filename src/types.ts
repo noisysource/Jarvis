@@ -57,6 +57,9 @@ export type Turn = {
   readonly text: string;
 };
 
+/** Which model answers (#88): only these two, from config; the page never names a model. */
+export type Brain = "claude" | "local";
+
 export type AskRequest = {
   readonly question: string;
   /** Set when the user picked a context after a clarify response. Skips classification. */
@@ -66,6 +69,8 @@ export type AskRequest = {
   readonly conversationId?: string;
   /** false: "don't remember this". The answer still uses memories, but nothing is learned. */
   readonly remember?: boolean;
+  /** Which brain answers (#88); Claude when not given. */
+  readonly brain?: Brain;
 };
 
 export type Classification =
@@ -89,7 +94,7 @@ export type ContextOption = {
 };
 
 export type AskResponse =
-  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string }
+  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain }
   | {
       readonly type: "clarify";
       readonly message: string;
@@ -185,6 +190,8 @@ export type AnswerInput = {
   readonly onText?: (delta: string) => void;
   /** Cancels the answer (e.g. the user interrupted it). */
   readonly signal?: AbortSignal;
+  /** Which brain answers (#88). */
+  readonly brain?: Brain;
 };
 
 /**
@@ -230,4 +237,10 @@ export type Deps = {
   readonly afterReply: AfterReply;
   readonly now: () => Date;
   readonly log: Logger;
+  /**
+   * BARE_MODE=on (#88): every turn gets only the local EC precheck, then this
+   * answerer (history and a short persona). No classifier, contexts, profile
+   * or memory.
+   */
+  readonly bare?: Deps["answer"];
 };

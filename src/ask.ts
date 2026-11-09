@@ -72,8 +72,54 @@ export type AskMeta = {
   readonly deferWrapUp?: (turn: DeferredWrapUp) => void;
 };
 
+/**
+ * Bare conversation mode (#88, BARE_MODE=on): the local EC precheck (EC/HRT
+ * still goes to Kiro, with no model), then the selected brain with only the
+ * history and a short persona. No classifier, no contexts, no profile, no
+ * memory reads or writes: with the Local brain, nothing reaches Claude.
+ */
+const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest, meta: AskMeta): Promise<AskResponse> => {
+  const local = deps.precheck(request.question);
+  if (local.kind === "handoff") {
+    deps.log.info("ask", { context: local.context.id, outcome: "handoff", bare: true });
+    return {
+      type: "handoff",
+      context: local.context.id,
+      to: local.context.handling.kind === "handoff" ? local.context.handling.to : "",
+      message: handoffMessage(local.context),
+    };
+  }
+  const personal = deps.contexts.find((c) => c.id === "personal");
+  if (!personal) return { type: "error", message: GENERIC_ERROR };
+  const answer = await bare({
+    context: personal,
+    question: request.question,
+    history: request.history ?? [],
+    memories: [],
+    now: deps.now(),
+    ...(meta.onText ? { onText: meta.onText } : {}),
+    ...(meta.signal ? { signal: meta.signal } : {}),
+    ...(request.brain ? { brain: request.brain } : {}),
+  });
+  if (!answer.ok) {
+    deps.log.info("ask", { outcome: answer.error.code === "cancelled" ? "cancelled" : "error", bare: true, brain: request.brain ?? "claude" });
+    return { type: "error", message: answer.error.message };
+  }
+  if (answer.value.kind !== "answer") return { type: "unavailable", context: personal.id, message: answer.value.message };
+  deps.log.info("ask", { outcome: "answer", bare: true, brain: request.brain ?? "claude" });
+  return { type: "answer", context: personal.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
+};
+
 export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta = {}): Promise<AskResponse> => {
   const history = request.history ?? [];
+  if (deps.bare) {
+    try {
+      return await handleBare(deps, deps.bare, request, meta);
+    } catch (e) {
+      deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });
+      return { type: "error", message: GENERIC_ERROR };
+    }
+  }
   try {
     const resolved = await resolveContext(deps, request, history);
 
@@ -97,9 +143,8 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
     }
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
-    const memories = deps.isAnswered(context.id)
-      ? await deps.memory.loadMemories({ question: request.question, contextId: context.id })
-      : [];
+    const memories =
+      deps.isAnswered(context.id) ? await deps.memory.loadMemories({ question: request.question, contextId: context.id }) : [];
     const answer = await deps.answer({
       context,
       question: request.question,
@@ -108,6 +153,7 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       now: deps.now(),
       ...(meta.onText ? { onText: meta.onText } : {}),
       ...(meta.signal ? { signal: meta.signal } : {}),
+      ...(request.brain ? { brain: request.brain } : {}),
     });
 
     /** The wrap-up, with the given text as the answer. Runs after the reply, in the background. */
@@ -156,8 +202,8 @@ export const handleAsk = async (deps: Deps, request: AskRequest, meta: AskMeta =
       }
     }
 
-    deps.log.info("ask", { context: context.id, outcome: "answer" });
-    return { type: "answer", context: context.id, answer: answer.value.text };
+    deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude" });
+    return { type: "answer", context: context.id, answer: answer.value.text, ...(request.brain ? { brain: request.brain } : {}) };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.
     deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });

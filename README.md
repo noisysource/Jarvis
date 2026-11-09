@@ -194,6 +194,59 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      profile, and the hints are never logged.
    - English only for now; in Portuguese, type (the browser voice answers).
 
+   **Local brain (#88).** The 🧠 Local / ☁️ Claude button picks who answers,
+   and each answer says which did. Local is the default and is remembered.
+   Local runs on [Ollama](https://ollama.com) on this computer:
+
+   ```bash
+   ollama pull qwen3:8b
+   ```
+
+   ```bash
+   ollama serve
+   ```
+
+   - `OLLAMA_MODEL` (default `qwen3:8b`; `OLLAMA_THINK=off`, the default,
+     tells it to answer without thinking first, which is much quicker to
+     start talking) and `OLLAMA_URL` (default
+     `http://127.0.0.1:11434`, and it must be on this machine).
+   - Jarvis loads the model when it starts and asks Ollama to keep it loaded
+     for 30 minutes, so turns don't wait for it to load. If Ollama isn't
+     running, the answer says so.
+   - The page only ever sends "local" or "claude": which model each one is
+     comes from config, never from the page.
+   - The classifier, memory and the EC rules are unchanged.
+   - **`BARE_MODE=on`: a bare conversation.** Every question, typed or
+     spoken, goes straight to the brain you picked with only the
+     conversation so far and a short persona: "You are Jarvis, (your
+     name)'s personal assistant", in the conversational style (1–3
+     sentences, react first, a question back when it helps, no lists).
+     - Only the local EC precheck runs first (EC still goes to Kiro, with
+       no model).
+     - No classifier, contexts, profile or memory, read or written. With
+       Local selected, nothing at all goes to Claude.
+     - Put your name in your `.env` as `JARVIS_USER_NAME`; it's gitignored,
+       so it's never committed.
+     - Profile, memory and contexts come back one at a time, each behind its
+       own switch.
+   - In bare mode Jarvis knows it can **only talk** for now: no calendar,
+     reminders, notes, email, web or tools. Asked for one, it says so and
+     offers to talk it through. It never claims to have done it.
+   - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
+     who and the conversational style on both brains, in bare mode with a
+     made-up name: "Can you code?", "Who are you?", the calendar, a
+     reminder, a note, an email, the weather and a few more. More than 4
+     sentences is a warning, not a failure. It's informational: it exits 0
+     unless you add `--strict`.
+
+   **Why did he stop?** Each spoken answer's end is logged as one
+   `playback` line. It gives the `reason` (`finished`, `barge-in`,
+   `new-question`, `stop`, `typed`, `muted`, `new-conversation`,
+   `answer-cancelled`), the sentences `played` of `total`, any
+   `voiceErrors`, whether the text had all arrived (`streamComplete`), and
+   for a barge-in the voice detector's reading (`bargeProb`, out of 100)
+   and `msAfterFirstAudio`. Numbers and fixed words only.
+
    It listens on `http://127.0.0.1:8080` only (there's no login locally).
    It also only accepts requests addressed to `127.0.0.1:8080` or
    `localhost:8080` (other Host headers get 403, which blocks DNS-rebinding

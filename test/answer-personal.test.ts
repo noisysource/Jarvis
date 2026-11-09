@@ -5,6 +5,7 @@ import {
   memorySection,
   PERSONAL_INSTRUCTIONS,
   personalSystemPrompt,
+  profileName,
 } from "../src/answer/personal.js";
 import { streamedFrom } from "../src/llm/stream.js";
 import type { LlmCall, LlmRequest, LlmResponse } from "../src/llm/types.js";
@@ -194,13 +195,31 @@ describe("makePersonalAnswerer", () => {
     expect(system).toContain("If it isn't among them, say you don't have that remembered");
   });
 
-  it("gives Jarvis a warm, conversational personality with natural spoken length", () => {
+  it("talks conversationally: 1–3 sentences, react first, a question back when it helps, no lists (#88)", () => {
     const system = personalSystemPrompt(PROFILE);
-    expect(system).toContain("Warm, natural and a little conversational");
-    expect(system).toContain("greet back or acknowledge, then add a sentence of context or an offer to help");
-    expect(system).toContain("use a natural spoken length, usually short");
-    expect(system).toContain("No markdown");
-    expect(system).not.toContain("one to three sentences");
+    expect(system).toContain("1 to 3 short sentences, unless they ask for detail");
+    expect(system).toContain("React first, in a few natural words, then answer");
+    expect(system).toContain("Ask a short question back when it helps");
+    expect(system).toContain("No lists, bullet points, headings, markdown or emoji");
+  });
+
+  it("makes who is who unmistakable: Jarvis is I, the person in the profile is you, by name (#88)", () => {
+    const named = personalSystemPrompt("# Profile\n## About me\n- Name: Alex Example\n- Job: architect");
+    expect(named.startsWith("Who is who (this matters most):")).toBe(true);
+    expect(named).toContain("You are Jarvis, an AI personal assistant. You are not the person in the profile");
+    expect(named).toContain('The profile below describes Alex Example, who is talking to you. Call them "you"');
+    expect(named).toContain('never "I run…" or "my daughter…"');
+    expect(named).toContain("Wrong: \"You know I'm a software engineer.\"");
+    expect(named).toContain("If they ask who you are, introduce yourself simply");
+    expect(personalSystemPrompt(PROFILE)).toContain("describes the person talking to you");
+  });
+
+  it("finds the name in the profile, and only a plausible one", () => {
+    expect(profileName("## About me\n- Name: Alex Example\n- Born: 1985")).toBe("Alex Example");
+    expect(profileName("**Name:** Sam")).toBe("Sam");
+    expect(profileName("Name: Sam\n")).toBe("Sam");
+    expect(profileName("- Lives in: Lisbon")).toBeUndefined();
+    expect(profileName(`Name: ${"x".repeat(100)}`)).toBeUndefined();
   });
 
   it("streams the answer's text when asked, and still returns the full answer", async () => {

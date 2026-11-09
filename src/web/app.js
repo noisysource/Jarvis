@@ -14,6 +14,7 @@ import {
   isStopPhrase,
   matchContextOption,
   newConversationId,
+  parseBrain,
   parseLanguage,
   pickVoice,
   shouldReopenMic,
@@ -46,6 +47,7 @@ const languageSelect = /** @type {HTMLSelectElement} */ (byId("language"));
 const voiceSelect = /** @type {HTMLSelectElement} */ (byId("voice"));
 const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
 const conversationButton = /** @type {HTMLButtonElement} */ (byId("conversation"));
+const brainButton = /** @type {HTMLButtonElement} */ (byId("brain"));
 const phaseBanner = byId("phase");
 const phaseText = byId("phase-text");
 const voiceNote = byId("voice-note");
@@ -96,7 +98,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
  *   phase: import("./turn-lib.js").Phase,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
- *   conversationId: string, remember: boolean,
+ *   conversationId: string, remember: boolean, brain: "claude" | "local",
  * }}
  */
 const state = {
@@ -114,7 +116,11 @@ const state = {
   conversationId: newConversationId(randomBytes),
   // "Don't remember this", for the current conversation only.
   remember: true,
+  // Which model answers (#88), remembered; Local by default.
+  brain: parseBrain(load("jarvis.brain")),
 };
+/** The brains' labels from GET /brains, e.g. "Local · llama3.1:8b". @type {Record<string, string>} */
+let brainLabels = { local: "Local", claude: "Claude" };
 
 // ---- rendering ----
 
@@ -183,6 +189,9 @@ const renderControls = () => {
   micNote.textContent = micSupported
     ? "Listening works in English only for now (Whisper on this computer). Type in Portuguese."
     : "This browser can't record the microphone. Typing works; for voice use Chrome or Safari.";
+  brainButton.setAttribute("aria-pressed", String(state.brain === "claude"));
+  brainButton.textContent = state.brain === "claude" ? "☁️ Claude" : "🧠 Local";
+  brainButton.title = `Answering: ${brainLabels[state.brain] ?? state.brain}. Tap to switch between Local (Ollama on this computer) and Claude.`;
   conversationButton.setAttribute("aria-pressed", String(state.conversation));
   conversationButton.textContent = state.conversation ? "💬 Conversation on" : "💬 Conversation off";
   autoNote.hidden = !(state.conversation && state.autoBlocked);
@@ -232,11 +241,20 @@ const refreshVoice = async () => {
 
 /** The reply being spoken now. @type {ReturnType<typeof makeSpeaker> | undefined} */
 let speaker;
-const stopSpeaking = () => {
-  speaker?.stop();
+/**
+ * Stops Jarvis's voice. `reason` goes into the playback report and the
+ * server log (#89), so it's clear what stopped him.
+ * @param {"new-question" | "barge-in" | "push-interrupt" | "stop" | "typed" | "muted" | "new-conversation" | "answer-cancelled"} reason
+ */
+const stopSpeaking = (reason) => {
+  speaker?.stop(reason);
   speaker = undefined;
   synth?.cancel();
 };
+/** When the current answer's first sound played, for the playback log (#89). */
+let firstAudioAt = 0;
+/** The barge-in that stopped the last answer: Silero's reading then. @type {{ prob: number } | undefined} */
+let lastBargeIn;
 const isSpeaking = () => speaker?.active() === true;
 
 const voices = () => (synth ? synth.getVoices() : []);
@@ -324,7 +342,9 @@ const speakBrowser = (text, signal, tracker) =>
  * @param {(result: import("./speaker.js").PlaybackResult) => void} onDone
  */
 const startSpeaker = (onDone) => {
-  stopSpeaking();
+  stopSpeaking("new-question");
+  firstAudioAt = 0;
+  lastBargeIn = undefined;
   const server = state.language === "en" ? voiceChoice.server : null;
   const ctx = server ? audio() : undefined;
   const sp = makeSpeaker({
@@ -340,7 +360,15 @@ const startSpeaker = (onDone) => {
         : null,
     play: (response, signal, tracker) => {
       if (!ctx) throw new Error("no audio");
-      return playSpeech({ ctx, response, signal, tracker });
+      return playSpeech({
+        ctx,
+        response,
+        signal,
+        tracker,
+        onFirstAudio: (at) => {
+          if (firstAudioAt === 0) firstAudioAt = at;
+        },
+      });
     },
     speakBrowser,
     muted: state.muted || (!server && !synth),
@@ -374,12 +402,29 @@ let answering;
  * decide the memory wrap-up: what Jarvis actually said, if he was cut off.
  * @param {string} turnId @param {boolean} interrupted @param {string} spoken
  */
-const reportPlayback = (turnId, interrupted, spoken) =>
+const reportPlayback = (turnId, interrupted, spoken, details = {}) =>
   fetch("/ask/spoken", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ turnId, interrupted, spoken: spoken.slice(0, 4000) }),
+    body: JSON.stringify({ turnId, interrupted, spoken: spoken.slice(0, 4000), ...details }),
   }).catch(() => undefined);
+
+/**
+ * Why playback ended (#89), as numbers and fixed words for the server log:
+ * the reason, sentences played of those received, voice errors, whether the
+ * answer's stream completed, and for a barge-in Silero's reading and how
+ * soon after his first sound it came.
+ * @param {import("./speaker.js").PlaybackResult} result @param {boolean} streamComplete
+ */
+const playbackDetails = (result, streamComplete) => ({
+  reason: result.reason,
+  played: result.played,
+  total: result.sentences,
+  voiceErrors: result.voiceErrors,
+  streamComplete,
+  ...(result.reason === "barge-in" && lastBargeIn ? { bargeProb: Math.round(lastBargeIn.prob * 100) } : {}),
+  ...(firstAudioAt > 0 && result.reason !== "finished" ? { msAfterFirstAudio: Math.round(performance.now() - firstAudioAt) } : {}),
+});
 
 /**
  * Sends one question and speaks the reply as it streams in. Only one request
@@ -390,7 +435,7 @@ const reportPlayback = (turnId, interrupted, spoken) =>
 const ask = async (question, context) => {
   const text = question.trim();
   if (text === "" || state.busy) return;
-  stopSpeaking();
+  stopSpeaking("new-question");
   state.busy = true;
   setPhase("thinking");
   renderControls();
@@ -430,7 +475,9 @@ const ask = async (question, context) => {
     }
     if (result.interrupted) item?.classList.add("interrupted");
     // The server holds a streamed answer's wrap-up until it hears how playback went (#72).
-    if (turnId !== "" && (!view || view.kind === "answer")) void reportPlayback(turnId, result.interrupted, result.spoken);
+    if (turnId !== "" && (!view || view.kind === "answer")) {
+      void reportPlayback(turnId, result.interrupted, result.spoken, playbackDetails(result, final !== null));
+    }
     if (!result.interrupted) {
       if (state.phase === "speaking") setPhase("idle");
       if (reopen) reopenMicSoon();
@@ -458,6 +505,7 @@ const ask = async (question, context) => {
           history: state.history,
           conversationId: state.conversationId,
           remember: state.remember,
+          brain: state.brain,
         }),
       ),
       signal: controller.signal,
@@ -493,8 +541,8 @@ const ask = async (question, context) => {
 
   if (controller.signal.aborted) {
     // Interrupted (barge-in) while the answer was still coming: what was said is already recorded.
-    sp?.stop();
-    if (!sp) onPlayback({ interrupted: true, spoken: "", sentences: 0, fellBack: false });
+    sp?.stop("answer-cancelled");
+    if (!sp) onPlayback({ interrupted: true, spoken: "", sentences: 0, fellBack: false, reason: "answer-cancelled", played: 0, voiceErrors: 0 });
     state.busy = false;
     renderControls();
     return;
@@ -505,6 +553,14 @@ const ask = async (question, context) => {
     setMessageText(item, view.text);
   } else {
     item = addMessage(view.kind, view.text);
+  }
+  // Which brain answered (#88).
+  const brain = final && typeof final === "object" && "brain" in final ? String(final.brain) : "";
+  if (view.kind === "answer" && (brain === "local" || brain === "claude")) {
+    const tag = document.createElement("span");
+    tag.className = "brain-tag";
+    tag.textContent = brainLabels[brain] ?? brain;
+    item.append(tag);
   }
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
@@ -537,7 +593,7 @@ const ask = async (question, context) => {
   // The wrap-up runs after the reply; check for new memories a little later.
   if (view.remember && state.remember) setTimeout(() => void refreshBadge(), 5000);
   if (sp) sp.finish();
-  else onPlayback({ interrupted: false, spoken: "", sentences: 0, fellBack: false });
+  else onPlayback({ interrupted: false, spoken: "", sentences: 0, fellBack: false, reason: "finished", played: 0, voiceErrors: 0 });
   if (!sp && state.phase === "thinking") setPhase("idle");
   if (!state.listening && !reopen) input.focus();
 };
@@ -676,7 +732,7 @@ const endVoice = (reason) => {
     open.mic.close();
   }
   if (reason === "user" || reason === "reset") {
-    stopSpeaking();
+    stopSpeaking(reason === "user" ? "stop" : "typed");
     answering?.abort();
   }
   if (state.phase === "listening" || (state.phase === "speaking" && !isSpeaking())) state.phase = "idle";
@@ -772,9 +828,11 @@ const transcribeAndSend = async (samples, how = {}) => {
  * If he hadn't started answering yet, you're carrying on with the same
  * question: it's cancelled and sent again, whole, when you finish.
  */
-const interrupt = () => {
+/** @param {{ by: "barge-in" | "push-interrupt", prob?: number }} how */
+const interrupt = (how) => {
   const open = session;
   if (!open) return;
+  if (how.by === "barge-in" && how.prob !== undefined) lastBargeIn = { prob: how.prob };
   const last = open.lastTurn;
   const stillThinking = !isSpeaking() && (state.busy || state.transcribing);
   if (stillThinking && last && performance.now() - last.endedAt < CONTINUE_WITHIN_MS) {
@@ -782,7 +840,7 @@ const interrupt = () => {
     answering?.abort("continue");
     open.detector.continueFrom(last.from);
   } else {
-    stopSpeaking(); // the playback report and history are settled right here
+    stopSpeaking(how.by); // the playback report and history are settled right here
     answering?.abort();
     synth?.cancel();
   }
@@ -801,7 +859,7 @@ const onProbability = (p) => {
   if (event === "start") {
     open.heard = true;
   } else if (event === "barge-in") {
-    interrupt();
+    interrupt({ by: "barge-in", prob: p });
   } else if (event === "end" || event === "max") {
     const { from, to } = open.detector.span();
     open.lastTurn = { from, endedAt: performance.now() };
@@ -888,14 +946,14 @@ const reopenMicSoon = () => {
 micButton.addEventListener("click", () => {
   if (session && session.bargeIn === "push" && (isSpeaking() || state.busy)) {
     session.detector.interrupt();
-    interrupt();
+    interrupt({ by: "push-interrupt" });
     return;
   }
   if (session) {
     endVoice("user");
     return;
   }
-  stopSpeaking();
+  stopSpeaking("stop");
   void startVoice();
 });
 
@@ -907,7 +965,7 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === " " && session.bargeIn === "push" && (isSpeaking() || state.busy)) {
     event.preventDefault();
     session.detector.interrupt();
-    interrupt();
+    interrupt({ by: "push-interrupt" });
   }
 });
 
@@ -1085,7 +1143,7 @@ rememberButton.addEventListener("click", () => {
 muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
   save("jarvis.muted", String(state.muted));
-  if (state.muted) stopSpeaking();
+  if (state.muted) stopSpeaking("muted");
   renderVoiceNote();
   renderControls();
 });
@@ -1113,7 +1171,7 @@ voiceSelect.addEventListener("change", () => {
 
 newButton.addEventListener("click", () => {
   endVoice("reset");
-  stopSpeaking();
+  stopSpeaking("new-conversation");
   retirePending();
   state.history = [];
   state.conversationId = newConversationId(randomBytes);
@@ -1132,3 +1190,21 @@ renderVoices();
 void refreshVoice();
 void refreshBadge();
 input.focus();
+
+// ---- brain switch (#88) ----
+
+brainButton.addEventListener("click", () => {
+  state.brain = state.brain === "claude" ? "local" : "claude";
+  save("jarvis.brain", state.brain);
+  renderControls();
+});
+
+void fetch("/brains")
+  .then((res) => (res.ok ? res.json() : null))
+  .then((body) => {
+    for (const b of Array.isArray(body?.brains) ? body.brains : []) {
+      if ((b.id === "local" || b.id === "claude") && typeof b.label === "string") brainLabels[b.id] = b.label;
+    }
+    renderControls();
+  })
+  .catch(() => undefined);
