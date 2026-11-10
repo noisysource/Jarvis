@@ -9,6 +9,8 @@ export const LIMITS = {
   questionChars: 2_000,
   historyTurns: 20,
   turnChars: 4_000,
+  toolsPerTurn: 5,
+  toolChars: 80,
 } as const;
 
 const AskRequestSchema = z
@@ -32,6 +34,11 @@ const AskRequestSchema = z
               .string()
               .min(1, { error: "history text is empty" })
               .max(LIMITS.turnChars, { error: `a history turn is longer than ${LIMITS.turnChars} characters` }),
+            // The tool calls that really ran for that answer (#104), as the page's path line shows them.
+            tools: z
+              .array(z.string().min(1).max(LIMITS.toolChars, { error: `a tool entry is longer than ${LIMITS.toolChars} characters` }), { error: "tools must be a list" })
+              .max(LIMITS.toolsPerTurn, { error: `more than ${LIMITS.toolsPerTurn} tools on a turn` })
+              .optional(),
           })
           .strict(),
         { error: "history must be a list of turns" },

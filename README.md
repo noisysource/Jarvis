@@ -291,7 +291,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      3. Put `CALENDAR=on` in `.env` and restart.
 
      How it works:
-     - **Which days:** code works them out, in Europe/Lisbon, from
+     - **With ☁️ Claude, Claude decides (#104).** Claude gets a
+       `calendar_read` tool and calls it itself when your question needs
+       the calendar, including follow-ups like "and Friday?", and answers
+       in its own words. Code checks every call (real dates, at most 14
+       days), does the read, and puts it on the path line. Each answer
+       remembers which reads really ran for it, so "did you check?" gets
+       a true answer. `TOOL_CALLING=off` in `.env` switches back to
+       the code-driven way below. 🧠 Local always uses the code-driven way.
+     - **Which days (code-driven):** code works them out, in Europe/Lisbon, from
        phrases like today, tomorrow, the day after tomorrow, yesterday,
        Friday, next Friday, this week, next week, this weekend, 12
        November or 12/11 (day first). No model counts days.

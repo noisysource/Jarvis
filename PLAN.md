@@ -575,6 +575,50 @@ the current architecture.
    contexts and the classifier, each behind its own switch and checked
    with the evals.
 
+**Milestone "Reach"** (now, from 10 Nov 2026): make Jarvis useful first,
+built and tested with **Claude as the reference brain**. If something fails
+with Claude, it's the code; local brains (Qwen) are measured afterwards
+with the evals, to see which jobs they can take. One PR at a time:
+1. **Native tool calling for the calendar on Claude (#104).** With ☁️
+   Claude and `CALENDAR=on`, Claude gets a `calendar_read` tool
+   (`from`, `to`) and decides itself when to call it, instead of code
+   guessing whether the question is about the calendar.
+   - Code checks every call with `checkCalendarRequest` (real dates, at
+     most 14 days, not too far from today), reads, and returns the same
+     `calendarForBrain` text; EC events stay "EC work, handled by Kiro".
+     A refused call, an unknown tool or a failed read goes back as a tool
+     error, so the brain can say so.
+   - At most 3 tool rounds (`MAX_TOOL_ROUNDS`); the last round gets no
+     tools, so it has to answer.
+   - Each call is on the path line (`by: model`); a read that worked lets
+     the honesty guard pass what's on the calendar, as before.
+   - **One source of truth, and less scaffolding.** With tools, Claude
+     answers in its own words: no code-written opening sentence, no
+     keyword-triggered "did you check?" path, and only two prompt rules
+     (call the tool without announcing it; trust the list of what really
+     ran). The local brain keeps the code-driven path and its sentences.
+   - **The brain knows what it did earlier.** The page sends each earlier
+     answer with the tool calls that really ran for it (from its path line:
+     dates and counts, never titles), and the prompt lists them ("your
+     answer 1: calendar_read Wed 11 Nov → 1 event"). Without this, Claude
+     saw only the text of its old answers and wrongly "confessed" it had
+     never checked, though every answer came from a real read.
+   - The honesty guard stays a narrow safety net: calendar claims pass when
+     a read ran this turn, or ran earlier in the conversation and the
+     question names no new day.
+   - `TOOL_CALLING=off` brings back the code-driven path. The local brain
+     always uses it (our Ollama provider doesn't do tools yet).
+2. **Calendar: creating events**, always after your explicit OK; the
+   confirmation is built from the tool's result (was Trust 3b).
+3. **Gmail:** read and search first, then drafts. Sending only with your OK.
+4. **Skills:** saved playbooks that use tools (the Jarvis Builder backlog).
+5. Later: Vendus, the daily brief (#49), phone access.
+
+Kept as they are: EC → Kiro (precheck and the EC event filter), your OK
+before any action, secrets local and never logged, the path line.
+Paused: growing the honesty guard (it stays as a safety net), parity for
+the local brain, further privacy work.
+
 **Adding things back, one at a time, each behind its own switch:**
 1. the profile
 2. memory

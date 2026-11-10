@@ -642,6 +642,26 @@ describe("the answer's path, for the page only (#102)", () => {
     });
   });
 
+  it("what an earlier real read found may be said again, when no new day is asked about (#104)", async () => {
+    const made = makeDeps();
+    const history: Turn[] = [
+      { role: "user", text: "What's on tomorrow?" },
+      { role: "assistant", text: "One meeting, 08:00 to 09:00.", tools: ["calendar_read Wed 11 Nov → 1 event"] },
+    ];
+    const claude: Deps = { ...made.deps, calendarEnabled: true, bare: async () => ok({ kind: "answer", text: "Yes, I really did. Tomorrow you have one meeting, from eight to nine." }) };
+    // A typo, so no code path: the brain answers from the record, and the guard lets it.
+    expect(await handleAsk(claude, { question: "did you actully check??", history })).toMatchObject({
+      answer: "Yes, I really did. Tomorrow you have one meeting, from eight to nine.",
+      path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "guard", toolResult: 0, replaced: false }],
+    });
+    // A new day still needs a read of its own.
+    const friday: Deps = { ...made.deps, calendarEnabled: true, bare: async () => ok({ kind: "answer", text: "On Friday your calendar is clear." }) };
+    expect(await handleAsk(friday, { question: "and Friday?", history })).toMatchObject({ path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "guard", toolResult: 1 }] });
+    // No record of a read: as before.
+    const noRecord: Turn[] = [history[0] ?? { role: "user", text: "" }, { role: "assistant", text: "One meeting, 08:00 to 09:00." }];
+    expect(await handleAsk(claude, { question: "did you actully check??", history: noRecord })).toMatchObject({ path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "guard", toolResult: 1 }] });
+  });
+
   it("a claim about the calendar is dropped unless calendar_read worked this turn (#102)", async () => {
     const made = makeDeps();
     const history: Turn[] = [{ role: "user", text: "What's on today?" }, { role: "assistant", text: "Looking at Tuesday 10 November. Nothing on." }];

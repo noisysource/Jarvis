@@ -17,7 +17,8 @@
 // Logs carry the context id and outcome only, never the question or answer.
 
 import { makeHonestyGuard } from "./answer/honesty.js";
-import { calendarIntent } from "./calendar/intent.js";
+import { calendarIntent, cameFromRead } from "./calendar/intent.js";
+import { resolveDatePhrase } from "./calendar/dates.js";
 import { clarifyOptions, handoffMessage } from "./contexts.js";
 import type { AskRequest, AskResponse, Context, ContextOption, Deps, PathStep, Turn } from "./types.js";
 
@@ -226,6 +227,11 @@ export const handleAsk = async (deps: Deps, request: AskRequest, outer: AskMeta 
     ...(outer.firstClauseAfter !== undefined ? { firstClauseAfter: outer.firstClauseAfter } : {}),
     log: deps.log,
   });
+  // A read earlier in this conversation (the page's record of real tool calls, #104): what it found may be
+  // said again, e.g. to "did you check?". Without this, true answers about it were dropped as unchecked.
+  // Not when the question names a day: that day may not have been read, so it needs a read of its own.
+  const namesADay = resolveDatePhrase(request.question, "2026-01-01") !== undefined;
+  if (!namesADay && (request.history ?? []).some((t) => t.role === "assistant" && cameFromRead(t))) guard.resultsKnown();
   const streaming = outer.onText !== undefined || outer.onSentence !== undefined;
   const { onText: rawText, ...rest } = outer;
   const meta: AskMeta = streaming

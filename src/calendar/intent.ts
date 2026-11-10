@@ -16,7 +16,11 @@
 import { resolveDatePhrase } from "./dates.js";
 import { mightBeAboutCalendar } from "./read.js";
 
-export type ChatTurn = { readonly role: "user" | "assistant"; readonly text: string };
+export type ChatTurn = { readonly role: "user" | "assistant"; readonly text: string; readonly tools?: readonly string[] };
+
+/** The answer came from a real read: the page says calendar_read ran for it (#104), or it opens with code's sentence. */
+export const cameFromRead = (turn: ChatTurn | undefined): boolean =>
+  turn !== undefined && ((turn.tools ?? []).some((t) => t.startsWith("calendar_read")) || READ_MARK.test(turn.text));
 
 export type CalendarIntent = {
   /** The question whose days are read: this one, or the earlier one it refers to. */
@@ -57,7 +61,8 @@ const lastCalendarAsk = (history: readonly ChatTurn[]): string | undefined => {
 };
 
 export const calendarIntent = (question: string, history: readonly ChatTurn[]): CalendarIntent | undefined => {
-  const lastAssistant = [...history].reverse().find((t) => t.role === "assistant")?.text ?? "";
+  const lastAssistantTurn = [...history].reverse().find((t) => t.role === "assistant");
+  const lastAssistant = lastAssistantTurn?.text ?? "";
   const lastUser = [...history].reverse().find((t) => t.role === "user")?.text;
 
   // "Did you check?": read now for the last calendar question, and say truthfully whether it was read before.
@@ -65,7 +70,7 @@ export const calendarIntent = (question: string, history: readonly ChatTurn[]): 
     const named = resolveDatePhrase(question, ANY_DAY) !== undefined;
     const ask = named ? question : lastCalendarAsk(history);
     const relevant = /\b(?:calendar|agenda|diary|schedule)\b/i.test(question) || aboutCalendar(lastAssistant) || (lastUser !== undefined && mightBeAboutCalendar(lastUser));
-    return ask !== undefined && relevant ? { ask, didCheck: { before: READ_MARK.test(lastAssistant) } } : undefined;
+    return ask !== undefined && relevant ? { ask, didCheck: { before: cameFromRead(lastAssistantTurn) } } : undefined;
   }
 
   if (mightBeAboutCalendar(question)) return { ask: question };

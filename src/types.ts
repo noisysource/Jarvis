@@ -55,6 +55,12 @@ export type Context = {
 export type Turn = {
   readonly role: "user" | "assistant";
   readonly text: string;
+  /**
+   * The tool calls that really ran for this answer (#104), from the page's
+   * path line, e.g. "calendar_read Wed 11 Nov → 1 event": dates and counts,
+   * never titles. The brain is told about them, so it knows what it did.
+   */
+  readonly tools?: readonly string[];
 };
 
 /** Which model answers (#88): only these two, from config; the page never names a model. */

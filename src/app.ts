@@ -151,6 +151,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           bare: makeBrainRouter({
             claude: makeBareAnswerer({
               llm: answerLlm.value,
+              // Claude decides itself when to read the calendar (#104); the local brain keeps the code-driven path.
+              tools: config.toolCalling,
               ...(config.userName ? { userName: config.userName } : {}),
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,

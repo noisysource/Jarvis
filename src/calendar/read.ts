@@ -6,7 +6,7 @@
 // handled by Kiro": never its title, place or people.
 
 import { err, ok, type Result } from "../result.js";
-import type { JsonObjectSchema } from "../llm/types.js";
+import type { JsonObjectSchema, LlmTool } from "../llm/types.js";
 import type { Precheck } from "../types.js";
 
 /** What an EC event becomes before the brain sees it. */
@@ -60,6 +60,25 @@ export const CALENDAR_REQUEST_SCHEMA: JsonObjectSchema = {
   },
   required: ["tool", "from", "to"],
   additionalProperties: false,
+};
+
+/**
+ * The same read as a native tool (#104): the brain (Claude) decides itself
+ * when to call it. Code still checks every call with {@link checkCalendarRequest}.
+ */
+export const CALENDAR_READ_TOOL: LlmTool = {
+  name: "calendar_read",
+  description:
+    "Read their personal Google Calendar (read-only) for a range of days, inclusive. Use it whenever answering needs what's on their calendar: what's on, whether they're free or busy, their plans, meetings or appointments. At most 14 days per call.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "First day to read, YYYY-MM-DD, in their time zone" },
+      to: { type: "string", description: "Last day to read (inclusive), YYYY-MM-DD" },
+    },
+    required: ["from", "to"],
+    additionalProperties: false,
+  },
 };
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;

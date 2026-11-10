@@ -3,7 +3,7 @@
 // app.js wires it to the page, the microphone and speech.
 
 /** Same limits as the server (src/request.ts). */
-export const LIMITS = { historyTurns: 20, turnChars: 4000, questionChars: 2000 };
+export const LIMITS = { historyTurns: 20, turnChars: 4000, questionChars: 2000, toolsPerTurn: 5, toolChars: 80 };
 
 /** Speech languages: English by default, Portuguese (Portugal) as the alternative. */
 export const LANGUAGES = {
@@ -16,7 +16,7 @@ export const DEFAULT_LANGUAGE = "en";
 export const parseLanguage = (value) => (value === "pt" ? "pt" : DEFAULT_LANGUAGE);
 
 /**
- * @typedef {{ role: "user" | "assistant", text: string }} Turn
+ * @typedef {{ role: "user" | "assistant", text: string, tools?: string[] }} Turn
  * @typedef {{ id: string, name: string, aliases?: string[] }} ContextOption
  * @typedef {
  *   | { type: "answer", context: string, answer: string }
@@ -36,10 +36,22 @@ export const parseLanguage = (value) => (value === "pt" ? "pt" : DEFAULT_LANGUAG
 
 /**
  * Adds a turn, keeping only the most recent turns the server accepts.
- * @param {readonly Turn[]} history @param {Turn["role"]} role @param {string} text @returns {Turn[]}
+ * `tools`: the tool calls that really ran for an answer (#104), e.g.
+ * "calendar_read Wed 11 Nov → 1 event", so the brain knows later what it did.
+ * @param {readonly Turn[]} history @param {Turn["role"]} role @param {string} text @param {readonly string[]} [tools] @returns {Turn[]}
  */
-export const appendTurn = (history, role, text) =>
-  [...history, { role, text: text.slice(0, LIMITS.turnChars) }].slice(-LIMITS.historyTurns);
+export const appendTurn = (history, role, text, tools) => {
+  const kept = (tools ?? []).slice(0, LIMITS.toolsPerTurn).map((t) => t.slice(0, LIMITS.toolChars));
+  return [...history, { role, text: text.slice(0, LIMITS.turnChars), ...(kept.length > 0 ? { tools: kept } : {}) }].slice(-LIMITS.historyTurns);
+};
+
+/**
+ * The tool calls that ran and worked for an answer, from its path (#104):
+ * dates and counts only, never titles.
+ * @param {readonly PathStep[]} path @returns {string[]}
+ */
+export const toolsRan = (path) =>
+  path.flatMap((step) => (step.kind === "tool" && step.ok ? [`${step.name}${step.args ? ` ${step.args}` : ""} → ${step.result ?? "ok"}`] : []));
 
 /**
  * The POST /ask body. `conversationId` groups this conversation's history
