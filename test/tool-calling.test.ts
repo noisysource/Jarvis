@@ -89,8 +89,8 @@ const answerer = (llm: LlmCall, read: ReturnType<typeof googleWith>["read"], log
 describe("native tool calling (#104)", () => {
   it("the prompt tells the brain to call calendar_read itself", () => {
     const p = barePrompt("Alex", { calendar: true, tools: true });
-    expect(p).toContain("call the calendar_read tool first, before writing anything");
-    expect(p).toContain("Only a calendar_read in this message counts");
+    expect(p).toContain("call the calendar_read tool, without announcing it first");
+    expect(p).toContain("What you really did for earlier answers is listed at the end of this prompt; trust that list.");
     expect(p).not.toContain("the app reads it and gives you the events");
     expect(barePrompt("Alex", { calendar: true })).toContain("the app reads it and gives you the events");
   });
@@ -102,7 +102,8 @@ describe("native tool calling (#104)", () => {
     const steps: PathStep[] = [];
     const result = await answerer(llm, google.read, log)({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, onStep: (s) => steps.push(s) });
 
-    expect(result).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You've got the dentist at eleven." }));
+    // No code-written sentences: the brain answers in its own words (#104).
+    expect(result).toEqual(ok({ kind: "answer", text: "You've got the dentist at eleven." }));
     // No structured request and no code detection: the brain got the tool.
     expect(requests).toHaveLength(2);
     expect(requests[0]?.outputSchema).toBeUndefined();
@@ -117,7 +118,6 @@ describe("native tool calling (#104)", () => {
     expect(content).toContain("Dentist");
     expect(content).toContain(EC_EVENT);
     expect(content).not.toContain("UTP standup"); // EC titles never reach the brain
-    expect(content).toContain('Your reply already starts with "Looking at Wednesday 11 November."');
     expect(new URL(google.urls[0] ?? "").searchParams.get("timeMin")).toBe("2026-11-11T00:00:00+00:00");
     expect(steps).toEqual([{ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "model", ok: true, result: "2 events" }]);
     expect(logs).toContainEqual({ m: "calendar read", f: expect.objectContaining({ days: 1, events: 2, ec: 1, by: "model" }) });
@@ -137,7 +137,7 @@ describe("native tool calling (#104)", () => {
       memories: [],
       now: NOW,
     });
-    expect(result).toEqual(ok({ kind: "answer", text: "Looking at Friday 13 November. Nothing on Friday." }));
+    expect(result).toEqual(ok({ kind: "answer", text: "Nothing on Friday." }));
     expect(google.urls).toHaveLength(1);
   });
 
@@ -196,16 +196,16 @@ describe("native tool calling (#104)", () => {
     expect(requests[MAX_TOOL_ROUNDS]?.tools).toBeUndefined();
   });
 
-  it("streams: the date sentence goes out right after the read, before the answer", async () => {
+  it("streams the brain's answer as it comes, with nothing added by code", async () => {
     const { llm } = scripted([calls("", read("t1", "2026-11-11", "2026-11-11")), text("You've got the dentist at eleven.")], { stream: true });
     const deltas: string[] = [];
     const result = await answerer(llm, googleWith(events).read)({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, onText: (d) => deltas.push(d) });
-    expect(deltas).toEqual(["Looking at Wednesday 11 November. ", "You've got the dentist at eleven."]);
-    expect(result).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You've got the dentist at eleven." }));
+    expect(deltas).toEqual(["You've got the dentist at eleven."]);
+    expect(result).toEqual(ok({ kind: "answer", text: "You've got the dentist at eleven." }));
   });
 
-  it("\"did you check?\" stays in code: answered from what really happened", async () => {
-    const { llm, requests } = scripted([text("You have the dentist at eleven.")]);
+  it("\"did you check?\" goes to the brain, with the record of what really ran", async () => {
+    const { llm, requests } = scripted([text("No, I hadn't. Shall I check tomorrow now?")]);
     const result = await answerer(llm, googleWith(events).read)({
       context: personal,
       question: "Did you actually check my calendar?",
@@ -216,8 +216,10 @@ describe("native tool calling (#104)", () => {
       memories: [],
       now: NOW,
     });
-    expect(requests[0]?.tools).toBeUndefined();
-    expect(result.ok && result.value.kind === "answer" ? result.value.text : "").toMatch(/^No, I hadn't checked before\. I've checked now/);
+    // No keyword-triggered code path: the brain gets the tool and answers itself.
+    expect(requests[0]?.tools).toEqual([CALENDAR_READ_TOOL]);
+    expect(requests[0]?.systemSuffix ?? "").not.toContain("Tools the app really ran"); // nothing ran before
+    expect(result).toEqual(ok({ kind: "answer", text: "No, I hadn't. Shall I check tomorrow now?" }));
   });
 
   it("without tools (the local brain, or TOOL_CALLING=off), code decides as before", async () => {
@@ -280,7 +282,7 @@ describe("native tool calling (#104)", () => {
     });
 
     it("the prompt says to call the tool without announcing it", () => {
-      expect(barePrompt("Alex", { calendar: true, tools: true })).toContain("Don't announce it");
+      expect(barePrompt("Alex", { calendar: true, tools: true })).toContain("without announcing it");
     });
   });
 });

@@ -183,8 +183,8 @@ export const barePrompt = (
           "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           ...(options.tools
             ? [
-                "When answering needs their calendar, call the calendar_read tool first, before writing anything, with the days to read. Don't announce it (no \"I'll check\" or \"I haven't read it yet\"): just call it. Work the days out from today's date at the end of this prompt. Answer about their calendar only from what the tool returns, and if it fails or is refused, say so plainly. You can't add, move or delete events yet.",
-                "Only a calendar_read in this message counts: never say what's on their calendar, or that you checked it, without calling it now. Earlier answers in this conversation may be out of date, so read again when they ask.",
+                "When answering needs their calendar, call the calendar_read tool, without announcing it first. Answer about their calendar only from what a read returned, and if a read fails or is refused, say so plainly. You can't add, move or delete events yet.",
+                "What you really did for earlier answers is listed at the end of this prompt; trust that list. To talk about a day you haven't read, read it.",
               ]
             : [
                 "When they ask about their calendar, the app reads it and gives you the events at the end of this prompt; answer from those only. You can't add, move or delete events yet.",
@@ -414,18 +414,17 @@ export const makeBareAnswerer = (deps: {
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
-    // Native tool calling (#104): the brain reads the calendar itself, except for
-    // "did you check?", which is answered in code from what really happened.
+    // Native tool calling (#104): the brain reads the calendar itself, and answers "did you
+    // check?" from the record of what really ran (toolsSoFar). Code only checks each call.
+    // Without tools (the local brain), code decides and words the date sentence, as before.
     const tools = deps.tools === true && deps.calendar !== undefined;
-    const viaCode = !tools || calendarIntent(question, history)?.didCheck !== undefined;
-    const calendar = viaCode ? await calendarTurn(question, history, signal, onStep) : undefined;
+    const calendar = tools ? undefined : await calendarTurn(question, history, signal, onStep);
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
-    // With tools, it's set after the first read that works, if nothing was said yet.
-    let lead = calendar?.lead;
+    const lead = calendar?.lead;
     const withLead = (text: string): string => (lead ? `${lead} ${text}`.trim() : text);
     // The model sometimes restates the date sentence: it's taken off.
-    let strip = lead ? makeLeadStripper() : undefined;
+    const strip = lead ? makeLeadStripper() : undefined;
     const unrestated = (text: string): string => {
       if (!lead) return text;
       const s = makeLeadStripper();
@@ -450,15 +449,13 @@ export const makeBareAnswerer = (deps: {
         return { systemSuffix: suffix.join("\n\n") };
       })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
-      ...(tools && !viaCode ? { tools: [CALENDAR_READ_TOOL] } : {}),
+      ...(tools ? { tools: [CALENDAR_READ_TOOL] } : {}),
       effort: "low",
       // A conversation: answer without thinking first (Claude; Ollama has its own think setting).
       thinking: "off",
       maxTokens: BARE_MAX_TOKENS,
     };
 
-    /** Something has been passed on, so a lead can no longer open the reply. */
-    let said = lead !== undefined;
     /** Runs one tool call the brain asked for (#104). Code checks it; the result goes back to the brain. */
     const runTool = async (call: LlmToolCall): Promise<LlmToolResult> => {
       const cal = deps.calendar;
@@ -492,16 +489,7 @@ export const makeBareAnswerer = (deps: {
         ms: Math.round(performance.now() - started),
       });
       onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by: "model", ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
-      const parts = [calendarForBrain(range, read.value, cal.timeZone)];
-      if (!said) {
-        // The first read that works opens the reply with the days, worded by code.
-        lead = readSentence(range, today);
-        said = true;
-        strip = makeLeadStripper();
-        onText?.(`${lead} `);
-        parts.push(`Your reply already starts with "${lead}" (written by the app). Continue straight on with what's on then. Don't say "Looking at", don't restate the date, and don't open with a reaction.`);
-      }
-      return { callId: call.id, content: parts.join("\n") };
+      return { callId: call.id, content: calendarForBrain(range, read.value, cal.timeZone) };
     };
 
     // Our own controller too, so the model can be stopped at the sentence limit.
@@ -510,7 +498,6 @@ export const makeBareAnswerer = (deps: {
     // Returns true when the sentence limit is reached.
     const pass = (text: string): boolean => {
       if (text === "") return false;
-      said = true;
       if (!cap) {
         onText?.(text);
         return false;
@@ -546,10 +533,7 @@ export const makeBareAnswerer = (deps: {
       }
       if (cut || !result.ok || result.value.kind !== "tool_calls" || last) break;
       const response: LlmResponse & { readonly kind: "tool_calls" } = result.value;
-      if (response.text !== "") {
-        earlier.push(response.text);
-        said = true;
-      }
+      if (response.text !== "") earlier.push(response.text);
       const results: LlmToolResult[] = [];
       for (const call of response.calls) results.push(await runTool(call));
       if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
@@ -565,7 +549,6 @@ export const makeBareAnswerer = (deps: {
       return err(toAppError(result.error));
     }
     if (result.value.kind === "json") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
-    // A lead set mid-answer follows the text said before it (none, by construction).
     const text = [...earlier, unrestated(result.value.text)].filter((t) => t.trim() !== "").join(" ");
     return ok({ kind: "answer", text: withLead(text) });
   };

@@ -590,19 +590,22 @@ with the evals, to see which jobs they can take. One PR at a time:
      error, so the brain can say so.
    - At most 3 tool rounds (`MAX_TOOL_ROUNDS`); the last round gets no
      tools, so it has to answer.
-   - After the first read that works, if nothing has been said yet, the
-     reply opens with code's "Looking at <day>." sentence, so the day read
-     is visible and "did you check?" keeps working.
    - Each call is on the path line (`by: model`); a read that worked lets
      the honesty guard pass what's on the calendar, as before.
-   - "Did you check?" stays in code, answered from what really happened.
+   - **One source of truth, and less scaffolding.** With tools, Claude
+     answers in its own words: no code-written opening sentence, no
+     keyword-triggered "did you check?" path, and only two prompt rules
+     (call the tool without announcing it; trust the list of what really
+     ran). The local brain keeps the code-driven path and its sentences.
    - **The brain knows what it did earlier.** The page sends each earlier
      answer with the tool calls that really ran for it (from its path line:
      dates and counts, never titles), and the prompt lists them ("your
      answer 1: calendar_read Wed 11 Nov → 1 event"). Without this, Claude
      saw only the text of its old answers and wrongly "confessed" it had
      never checked, though every answer came from a real read.
-   - Claude calls the tool without announcing it ("I'll check…").
+   - The honesty guard stays a narrow safety net: calendar claims pass when
+     a read ran this turn, or ran earlier in the conversation and the
+     question names no new day.
    - `TOOL_CALLING=off` brings back the code-driven path. The local brain
      always uses it (our Ollama provider doesn't do tools yet).
 2. **Calendar: creating events**, always after your explicit OK; the
