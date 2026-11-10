@@ -183,7 +183,7 @@ export const barePrompt = (
           "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           ...(options.tools
             ? [
-                "When answering needs their calendar, call the calendar_read tool first, before writing anything, with the days to read. Work the days out from today's date at the end of this prompt. Answer about their calendar only from what the tool returns, and if it fails or is refused, say so plainly. You can't add, move or delete events yet.",
+                "When answering needs their calendar, call the calendar_read tool first, before writing anything, with the days to read. Don't announce it (no \"I'll check\" or \"I haven't read it yet\"): just call it. Work the days out from today's date at the end of this prompt. Answer about their calendar only from what the tool returns, and if it fails or is refused, say so plainly. You can't add, move or delete events yet.",
                 "Only a calendar_read in this message counts: never say what's on their calendar, or that you checked it, without calling it now. Earlier answers in this conversation may be out of date, so read again when they ask.",
               ]
             : [
@@ -205,6 +205,27 @@ export const barePrompt = (
 };
 
 const DEFAULT_TIME_ZONE = "Europe/Lisbon";
+
+/**
+ * What the app really did for earlier answers (#104), for the end of the
+ * prompt. The history only carries the text, so without this the brain
+ * can't see its own earlier tool calls and wrongly "confesses" it never
+ * checked. Undefined when no earlier answer used a tool.
+ */
+export const toolsSoFar = (history: AnswerInput["history"]): string | undefined => {
+  let n = 0;
+  const lines = history.flatMap((t) => {
+    if (t.role !== "assistant") return [];
+    n += 1;
+    return t.tools && t.tools.length > 0 ? [`- Your answer ${n}: ${t.tools.join("; ")}`] : [];
+  });
+  if (lines.length === 0) return undefined;
+  return [
+    "Tools the app really ran for your earlier answers in this conversation (counting your answers from the first):",
+    ...lines,
+    "Those answers came from real reads. Never say you didn't check for them. Answers not listed used no tool.",
+  ].join("\n");
+};
 
 /** "Now it's Tuesday 10 November 2026, 17:20 (Europe/Lisbon)." for the uncached end of the prompt. */
 export const nowLine = (now: Date, timeZone: string): string => {
@@ -418,7 +439,12 @@ export const makeBareAnswerer = (deps: {
       // Changes every turn, so it's after the cached part.
       ...(() => {
         // Always: today's date, weekday and time where they are (#102).
-        const suffix = [nowLine(now, deps.timeZone ?? deps.calendar?.timeZone ?? DEFAULT_TIME_ZONE), spoken === true && !lead ? openingHint(history, random) : undefined, calendar?.text].filter(
+        const suffix = [
+          nowLine(now, deps.timeZone ?? deps.calendar?.timeZone ?? DEFAULT_TIME_ZONE),
+          toolsSoFar(history),
+          spoken === true && !lead ? openingHint(history, random) : undefined,
+          calendar?.text,
+        ].filter(
           (x): x is string => x !== undefined,
         );
         return { systemSuffix: suffix.join("\n\n") };

@@ -19,6 +19,7 @@ import {
   calendarNoteDue,
   pathLines,
   pathOf,
+  toolsRan,
   pathSummary,
   shouldSpeak,
   voiceNoteVisible,
@@ -742,7 +743,7 @@ const ask = async (question, context) => {
     const remember = view ? view.remember : true; // cut off mid-answer: it was an answer
     if (remember) {
       const said = result.interrupted ? result.spoken || "—" : (view?.text ?? result.spoken);
-      state.history = appendTurn(appendTurn(state.history, "user", text), "assistant", said);
+      state.history = appendTurn(appendTurn(state.history, "user", text), "assistant", said, toolsRan(pathOf(final)));
     }
     if (result.interrupted) item?.classList.add("interrupted");
     // The server holds a streamed answer's wrap-up until it hears how playback went (#72).

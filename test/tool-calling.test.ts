@@ -2,7 +2,10 @@
 // when to call calendar_read; code checks every call, reads, and reports it.
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { barePrompt, makeBareAnswerer, MAX_TOOL_ROUNDS } from "../src/answer/bare.js";
+import { barePrompt, makeBareAnswerer, MAX_TOOL_ROUNDS, toolsSoFar } from "../src/answer/bare.js";
+import { calendarIntent } from "../src/calendar/intent.js";
+import { parseAskRequest } from "../src/request.js";
+import { appendTurn, toolsRan } from "../src/web/chat.js";
 import { makeGoogleCalendarReader } from "../src/calendar/google.js";
 import { CALENDAR_READ_TOOL, EC_EVENT, isEcEvent, type GoogleEvent } from "../src/calendar/read.js";
 import { parseContexts } from "../src/contexts.js";
@@ -223,5 +226,61 @@ describe("native tool calling (#104)", () => {
     await answer({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW });
     expect(requests[0]?.tools).toBeUndefined();
     expect(requests[0]?.systemSuffix).toContain("<calendar>");
+  });
+
+  describe("the brain knows what it really did earlier", () => {
+    const history = [
+      { role: "user" as const, text: "What's on tomorrow?" },
+      { role: "assistant" as const, text: "One meeting, 08:00 to 09:00.", tools: ["calendar_read Wed 11 Nov → 1 event"] },
+      { role: "user" as const, text: "What's a black hole?" },
+      { role: "assistant" as const, text: "A region where gravity wins." },
+      { role: "user" as const, text: "And Friday?" },
+      { role: "assistant" as const, text: "Friday is clear.", tools: ["calendar_read Fri 13 Nov → 0 events"] },
+    ];
+
+    it("the page keeps each answer's real tool calls, from its path: dates and counts only", () => {
+      const tools = toolsRan([
+        { kind: "precheck", result: "none" },
+        { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "model", ok: true, result: "1 event" },
+        { kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: "refused: too many days" },
+      ]);
+      expect(tools).toEqual(["calendar_read Wed 11 Nov → 1 event"]);
+      expect(appendTurn([], "assistant", "One meeting.", tools)).toEqual([{ role: "assistant", text: "One meeting.", tools }]);
+      expect(appendTurn([], "assistant", "Hi.", [])).toEqual([{ role: "assistant", text: "Hi." }]);
+    });
+
+    it("the server accepts them, within limits", () => {
+      expect(parseAskRequest({ question: "Why?", history }).ok).toBe(true);
+      expect(parseAskRequest({ question: "Why?", history: [{ role: "assistant", text: "x", tools: ["y".repeat(81)] }] }).ok).toBe(false);
+      expect(parseAskRequest({ question: "Why?", history: [{ role: "assistant", text: "x", tools: ["a", "b", "c", "d", "e", "f"] }] }).ok).toBe(false);
+    });
+
+    it("lists them at the end of the prompt, numbered by answer", () => {
+      expect(toolsSoFar(history)).toBe(
+        [
+          "Tools the app really ran for your earlier answers in this conversation (counting your answers from the first):",
+          "- Your answer 1: calendar_read Wed 11 Nov → 1 event",
+          "- Your answer 3: calendar_read Fri 13 Nov → 0 events",
+          "Those answers came from real reads. Never say you didn't check for them. Answers not listed used no tool.",
+        ].join("\n"),
+      );
+      expect(toolsSoFar([{ role: "assistant", text: "Hi." }])).toBeUndefined();
+    });
+
+    it("the brain gets that list with the next question", async () => {
+      const { llm, requests } = scripted([text("Next week is clear.")]);
+      await answerer(llm, googleWith([]).read)({ context: personal, question: "Thanks", history, memories: [], now: NOW });
+      expect(requests[0]?.systemSuffix).toContain("- Your answer 1: calendar_read Wed 11 Nov → 1 event");
+      expect(requests[0]?.systemSuffix).toContain("Never say you didn't check for them.");
+    });
+
+    it("\"did you check?\" says yes when the page recorded a read, even without code's date sentence", () => {
+      expect(calendarIntent("Did you actually check my calendar?", history.slice(0, 2))?.didCheck).toEqual({ before: true });
+      expect(calendarIntent("Did you actually check my calendar?", [history[0]!, { role: "assistant", text: "One meeting." }])?.didCheck).toEqual({ before: false });
+    });
+
+    it("the prompt says to call the tool without announcing it", () => {
+      expect(barePrompt("Alex", { calendar: true, tools: true })).toContain("Don't announce it");
+    });
   });
 });
