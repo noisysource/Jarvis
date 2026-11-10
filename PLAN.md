@@ -596,6 +596,13 @@ with the evals, to see which jobs they can take. One PR at a time:
    - Each call is on the path line (`by: model`); a read that worked lets
      the honesty guard pass what's on the calendar, as before.
    - "Did you check?" stays in code, answered from what really happened.
+   - **The brain knows what it did earlier.** The page sends each earlier
+     answer with the tool calls that really ran for it (from its path line:
+     dates and counts, never titles), and the prompt lists them ("your
+     answer 1: calendar_read Wed 11 Nov → 1 event"). Without this, Claude
+     saw only the text of its old answers and wrongly "confessed" it had
+     never checked, though every answer came from a real read.
+   - Claude calls the tool without announcing it ("I'll check…").
    - `TOOL_CALLING=off` brings back the code-driven path. The local brain
      always uses it (our Ollama provider doesn't do tools yet).
 2. **Calendar: creating events**, always after your explicit OK; the

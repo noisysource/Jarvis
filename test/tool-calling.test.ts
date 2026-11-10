@@ -276,7 +276,7 @@ describe("native tool calling (#104)", () => {
 
     it("\"did you check?\" says yes when the page recorded a read, even without code's date sentence", () => {
       expect(calendarIntent("Did you actually check my calendar?", history.slice(0, 2))?.didCheck).toEqual({ before: true });
-      expect(calendarIntent("Did you actually check my calendar?", [history[0]!, { role: "assistant", text: "One meeting." }])?.didCheck).toEqual({ before: false });
+      expect(calendarIntent("Did you actually check my calendar?", [{ role: "user", text: "What's on tomorrow?" }, { role: "assistant", text: "One meeting." }])?.didCheck).toEqual({ before: false });
     });
 
     it("the prompt says to call the tool without announcing it", () => {
