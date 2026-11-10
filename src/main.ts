@@ -110,6 +110,7 @@ const app = makeServer(deps.ok ? deps.value : refuse("unreachable"), {
   brains: {
     default: "local",
     labels: { local: `Local · ${cfg.models.local.model}`, claude: `Claude · ${cfg.models.answer.model}` },
+    calendar: cfg.calendar.enabled,
   },
   ...(cfg.env === "production" ? {} : { allowedHosts: localHosts(cfg.port) }),
   web: web.ok && vendor.ok ? { ...web.value, ...vendor.value } : refuse("unreachable"),

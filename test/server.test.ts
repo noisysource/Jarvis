@@ -404,7 +404,11 @@ describe("GET /brains (#88)", () => {
         { id: "local", label: "Local · llama3.1:8b" },
         { id: "claude", label: "Claude · claude-sonnet-5-5" },
       ],
+      calendar: false,
     });
+    // The calendar on (#100): the page notes once that, with Claude, event titles go to Anthropic.
+    const withCalendar = makeServer(deps, { brains: { default: "local", labels: { local: "L", claude: "C" }, calendar: true } });
+    expect(await (await withCalendar.request("/brains")).json()).toMatchObject({ calendar: true });
   });
 });
 

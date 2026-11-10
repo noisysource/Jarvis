@@ -63,6 +63,17 @@ export const buildAskBody = ({ question, context, history, conversationId, remem
 /** The page's brain choice (#88): Local unless Claude was picked. @param {string | null} saved */
 export const parseBrain = (saved) => (saved === "claude" ? "claude" : "local");
 
+/** Shown once (#100): with the calendar on and Claude answering, event titles leave this computer. */
+export const CALENDAR_CLAUDE_NOTE =
+  "Your calendar is connected. With ☁️ Claude answering, the titles, times and places of the events you ask about are sent to Anthropic. Switch to 🧠 Local to keep them on this computer. EC events are only ever sent as \"EC work, handled by Kiro\".";
+
+/**
+ * Whether to show that note now: the calendar is on, Claude is answering,
+ * and it hasn't been shown before.
+ * @param {{ calendar: boolean, brain: "claude" | "local", seen: boolean }} s
+ */
+export const calendarNoteDue = ({ calendar, brain, seen }) => calendar && brain === "claude" && !seen;
+
 /**
  * A fresh id for a conversation: 32 hex characters.
  * @param {(count: number) => ArrayLike<number>} randomBytes returns `count` random bytes

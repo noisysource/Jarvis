@@ -6,6 +6,9 @@ import { readFile } from "node:fs/promises";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
+import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google.js";
+import { makeAccessTokens } from "./calendar/oauth.js";
+import { isEcEvent } from "./calendar/read.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
 import { loadContexts } from "./contexts.js";
@@ -36,6 +39,8 @@ export type AppInputs = {
   readonly memoryStore?: MemoryStore;
   /** Runs work after the reply (the memory wrap-up). main.ts passes one so shutdown can drain it. */
   readonly background?: BackgroundTasks;
+  /** The calendar (CALENDAR=on, #100); defaults to Google with this Mac's tokens. */
+  readonly calendarReader?: CalendarReader;
 };
 
 /**
@@ -114,13 +119,28 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       spokenThinking: config.turn.spokenThinking,
     }),
   });
+  // Your personal calendar (#100), read-only, for both brains. EC-looking events reach a brain only as "EC work, handled by Kiro".
+  const precheck = makePrecheck(contexts.value);
+  const calendar = config.calendar.enabled
+    ? {
+        read:
+          inputs.calendarReader ??
+          makeGoogleCalendarReader({
+            accessToken: makeAccessTokens({ clientPath: config.calendar.clientPath, tokensPath: config.calendar.tokensPath }),
+            timeZone: config.timeZone,
+            isEc: (event) => isEcEvent(event, precheck),
+          }),
+        timeZone: config.timeZone,
+        now,
+      }
+    : undefined;
   const answerers = personalWith(answerLlm.value);
   const localAnswerers = personalWith(localLlm.value);
   const background = inputs.background ?? makeBackgroundTasks({ log });
 
   return ok({
     contexts: contexts.value,
-    precheck: makePrecheck(contexts.value),
+    precheck,
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
@@ -134,6 +154,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,
               ...(config.bareProfile ? { profile } : {}),
+              ...(calendar ? { calendar } : {}),
               log,
             }),
             local: makeBareAnswerer({
@@ -142,6 +163,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,
               ...(config.bareProfile ? { profile } : {}),
+              ...(calendar ? { calendar } : {}),
               log,
             }),
           }),

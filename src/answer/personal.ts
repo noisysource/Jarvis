@@ -141,7 +141,7 @@ export const makePersonalAnswerer = (deps: {
     const profile = await deps.profile();
     if (!profile.ok) {
       // The error names the path, never the profile's content.
-      deps.log?.error("profile unavailable", { code: profile.error.code, message: profile.error.message });
+      deps.log?.error("profile unavailable", { code: profile.error.code, reason: profile.error.message });
       return err({ code: "config", message: "I can't read your profile right now." });
     }
 

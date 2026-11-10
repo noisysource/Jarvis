@@ -122,15 +122,33 @@ describe("Ollama provider (#88)", () => {
     expect(!notInstalled.ok && notInstalled.error.userMessage).toContain('ollama pull qwen3:8b');
   });
 
-  it("refuses JSON output and tools (not supported yet) without calling Ollama", async () => {
+  it("refuses tools (not supported yet) without calling Ollama", async () => {
     let called = false;
     const base = await fakeOllama((_req, _b, res) => {
       called = true;
       res.end();
     });
     const llm = makeOllamaLlm({ model: "m", baseUrl: base });
-    expect(await llm({ ...request, outputSchema: { type: "object", properties: {} } })).toMatchObject({ ok: false, error: { kind: "bad_request" } });
+    const tools = [{ name: "t", description: "d", inputSchema: { type: "object" as const, properties: {} } }];
+    expect(await llm({ ...request, tools })).toMatchObject({ ok: false, error: { kind: "bad_request" } });
     expect(called).toBe(false);
+  });
+
+  it("asks for JSON with Ollama's format, and returns it parsed (#100)", async () => {
+    const schema = { type: "object" as const, properties: { read: { type: "boolean" } }, required: ["read"], additionalProperties: false };
+    let seen: Record<string, unknown> = {};
+    const base = await fakeOllama((_req, body, res) => {
+      seen = body;
+      streamChunks(res, ['{"read": ', "true}"]);
+    });
+    const result = await makeOllamaLlm({ model: "m", baseUrl: base })({ ...request, outputSchema: schema });
+    expect(seen.format).toEqual(schema);
+    expect(result).toMatchObject({ ok: true, value: { kind: "json", value: { read: true } } });
+    const garbled = await fakeOllama((_req, _b, res) => streamChunks(res, ["not json"]));
+    expect(await makeOllamaLlm({ model: "m", baseUrl: garbled })({ ...request, outputSchema: schema })).toMatchObject({
+      ok: false,
+      error: { kind: "invalid_output" },
+    });
   });
 
   it("cancels when asked", async () => {
