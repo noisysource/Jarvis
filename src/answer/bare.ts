@@ -7,7 +7,7 @@
 // the code (it's personal data).
 
 import { err, ok, type Result } from "../result.js";
-import type { AnswerInput, AnswerOutcome, AppError, Logger } from "../types.js";
+import type { AnswerInput, AnswerOutcome, AppError, Logger, PathStep } from "../types.js";
 import type { LlmCall, LlmError, LlmRequest } from "../llm/types.js";
 import { streamOrCall } from "../llm/stream.js";
 import { makeSentenceSplitter } from "../sentences.js";
@@ -16,14 +16,14 @@ import type { CalendarReader } from "../calendar/google.js";
 import {
   CALENDAR_REQUEST_SCHEMA,
   calendarForBrain,
-  calendarQuestion,
   calendarRequestPrompt,
   calendarUnavailable,
   checkCalendarRequest,
   localDate,
   type DayRange,
 } from "../calendar/read.js";
-import { readSentence, resolveDatePhrase } from "../calendar/dates.js";
+import { rangeLabel, readSentence, resolveDatePhrase, shortRangeLabel } from "../calendar/dates.js";
+import { calendarIntent } from "../calendar/intent.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
@@ -191,6 +191,42 @@ export const barePrompt = (
   ].join("\n");
 };
 
+const DEFAULT_TIME_ZONE = "Europe/Lisbon";
+
+/** "Now it's Tuesday 10 November 2026, 17:20 (Europe/Lisbon)." for the uncached end of the prompt. */
+export const nowLine = (now: Date, timeZone: string): string => {
+  const part = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone, ...o }).format(now);
+  const date = `${part({ weekday: "long" })} ${part({ day: "numeric" })} ${part({ month: "long" })} ${part({ year: "numeric" })}`;
+  return `Now it's ${date}, ${part({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} (${timeZone}). Use this for today's date, the weekday and the time.`;
+};
+
+/**
+ * Takes a restated date sentence off the start of the model's text (#102):
+ * the reply already opens with the one code wrote. Text is held back only
+ * until the first sentence is known.
+ */
+export const makeLeadStripper = () => {
+  let held = "";
+  let decided = false;
+  const RESTATED = /^\s*(?:(?:okay|ok|sure|right|alright)[,.!]?\s+)?(?:looking at|i(?:'ve| have)? (?:just )?checked|i(?:'m| am) looking at|for|on)\b[^.!?\n]{0,80}?\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:\s+\d{4})?\s*[.!:]\s+/i;
+  return {
+    feed: (delta: string): string => {
+      if (decided) return delta;
+      held += delta;
+      // Enough to tell: a sentence end with something after it, or plenty of text.
+      if (!/[.!?:]\s+\S/.test(held) && held.length < 120) return "";
+      decided = true;
+      return held.replace(RESTATED, "");
+    },
+    /** The rest, at the end. */
+    flush: (): string => {
+      if (decided) return "";
+      decided = true;
+      return held.replace(/^\s*(?:looking at|i(?:'ve| have)? (?:just )?checked)\b[^.!?\n]{0,80}[.!:]\s*$/i, "").replace(RESTATED, "");
+    },
+  };
+};
+
 const toAppError = (e: LlmError): AppError =>
   e.kind === "aborted"
     ? { code: "cancelled", message: "Cancelled." }
@@ -208,6 +244,8 @@ export const makeBareAnswerer = (deps: {
   readonly random?: () => number;
   /** PROFILE=on (#98): their profile goes in the prompt, re-read when it changes. Otherwise still bare. */
   readonly profile?: ProfileSource;
+  /** Where they are, for "now" in every prompt (#102). Defaults to Europe/Lisbon. */
+  readonly timeZone?: string;
   /** CALENDAR=on (#100): it can read their personal calendar, in this time zone. */
   readonly calendar?: { readonly read: CalendarReader; readonly timeZone: string; readonly now?: () => Date };
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
@@ -237,24 +275,35 @@ export const makeBareAnswerer = (deps: {
     question: string,
     history: AnswerInput["history"],
     signal?: AbortSignal,
+    onStep?: (step: PathStep) => void,
   ): Promise<{ readonly text: string; readonly lead?: string } | undefined> => {
     const calendar = deps.calendar;
     if (!calendar) return undefined;
-    // A bare "yes" to "shall I try again?" repeats the last calendar question.
-    const asked = calendarQuestion(question, history);
-    if (asked === undefined) return undefined;
+    // A follow-up naming a day, a "yes" to "shall I try again?" and "did you check?" all read for real (#102).
+    const intent = calendarIntent(question, history);
+    if (intent === undefined) return undefined;
+    const asked = intent.ask;
+    // "Did you check?" is answered from what happened, in code: whether the last reply came from a read.
+    const before = intent.didCheck ? (intent.didCheck.before ? "Yes, that answer came from a real check of your calendar." : "No, I hadn't checked before.") : undefined;
+    const unread = (reason: Parameters<typeof calendarUnavailable>[0]) => ({
+      text: [calendarUnavailable(reason), ...(before ? [`Your reply already starts with "${before}" Continue from there, and don't claim any other check.`] : [])].join("\n"),
+      ...(before ? { lead: before } : {}),
+    });
     const now = (calendar.now ?? (() => new Date()))();
     const today = localDate(now, calendar.timeZone);
     const started = performance.now();
 
     let range: DayRange | undefined;
     let by: "code" | "model" = "code";
+    // For the answer's path (#102): dates and fixed words only.
+    const failed = (error: string, args = ""): void => onStep?.({ kind: "tool", name: "calendar_read", args, by, ok: false, error });
     const named = resolveDatePhrase(asked, today);
     if (named) {
       const checked = checkCalendarRequest({ tool: "calendar_read", ...named }, today);
       if (!checked.ok) {
         deps.log?.info("calendar request refused", { why: checked.error, by });
-        return { text: calendarUnavailable("unclear") };
+        failed(`refused: ${checked.error}`, shortRangeLabel(named));
+        return unread("unclear");
       }
       range = checked.value;
     } else {
@@ -274,12 +323,14 @@ export const makeBareAnswerer = (deps: {
       const ms = Math.round(performance.now() - started);
       if (!request.ok || request.value.kind !== "json") {
         if (!signal?.aborted) deps.log?.warn("calendar request failed", { kind: request.ok ? request.value.kind : request.error.kind, ms });
-        return { text: calendarUnavailable("unclear") };
+        failed("request_failed");
+        return unread("unclear");
       }
       const checked = checkCalendarRequest(request.value.value, today);
       if (!checked.ok) {
         deps.log?.info("calendar request refused", { why: checked.error, by, ms });
-        return { text: calendarUnavailable("unclear") };
+        failed(`refused: ${checked.error}`);
+        return unread("unclear");
       }
       range = checked.value;
     }
@@ -290,7 +341,8 @@ export const makeBareAnswerer = (deps: {
     const read = await calendar.read(range, signal);
     if (!read.ok) {
       deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
-      return { text: calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed") };
+      failed(read.error.code, shortRangeLabel(range));
+      return unread(read.error.code === "not_connected" ? "not_connected" : "failed");
     }
     deps.log?.info("calendar read", {
       days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
@@ -299,16 +351,18 @@ export const makeBareAnswerer = (deps: {
       by,
       ms: Math.round(performance.now() - started),
     });
-    const lead = readSentence(range, today);
+    const count = read.value.length;
+    onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by, ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
+    const lead = before ? `${before} I've checked now: looking at ${rangeLabel(range, today)}.` : readSentence(range, today);
     return {
       lead,
       text: [
         calendarForBrain(range, read.value, calendar.timeZone),
-        `Your reply already starts with "${lead}" Continue from there: don't repeat the date, and don't open with a reaction.`,
+        `Your reply already starts with "${lead}" Continue straight on with what's on then. Don't say "Looking at", don't restate the date, don't say again that you checked, and don't open with a reaction.`,
       ].join("\n"),
     };
   };
-  return async ({ question, history, onText, signal, spoken }) => {
+  return async ({ question, history, onText, signal, spoken, onStep, now }) => {
     let system = withoutProfile;
     if (deps.profile) {
       const profile = await deps.profile();
@@ -320,11 +374,18 @@ export const makeBareAnswerer = (deps: {
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
-    const calendar = await calendarTurn(question, history, signal);
+    const calendar = await calendarTurn(question, history, signal, onStep);
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
     const lead = calendar?.lead;
-    const withLead = (text: string): string => (lead ? `${lead} ${text}` : text);
+    const withLead = (text: string): string => (lead ? `${lead} ${text}`.trim() : text);
+    // The model sometimes restates the date sentence: it's taken off.
+    const strip = lead ? makeLeadStripper() : undefined;
+    const unrestated = (text: string): string => {
+      if (!lead) return text;
+      const s = makeLeadStripper();
+      return s.feed(text) + s.flush();
+    };
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
     const cap = spoken === true && !asksForDetail(question) ? makeSentenceCap(max) : undefined;
     const request: LlmRequest = {
@@ -332,8 +393,11 @@ export const makeBareAnswerer = (deps: {
       cacheSystem: true,
       // Changes every turn, so it's after the cached part.
       ...(() => {
-        const suffix = [spoken === true && !lead ? openingHint(history, random) : undefined, calendar?.text].filter((x): x is string => x !== undefined);
-        return suffix.length > 0 ? { systemSuffix: suffix.join("\n\n") } : {};
+        // Always: today's date, weekday and time where they are (#102).
+        const suffix = [nowLine(now, deps.timeZone ?? deps.calendar?.timeZone ?? DEFAULT_TIME_ZONE), spoken === true && !lead ? openingHint(history, random) : undefined, calendar?.text].filter(
+          (x): x is string => x !== undefined,
+        );
+        return { systemSuffix: suffix.join("\n\n") };
       })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "low",
@@ -350,19 +414,25 @@ export const makeBareAnswerer = (deps: {
       const streamed = streamOrCall(deps.llm, request, controller.signal);
       // The date sentence goes out first, outside the sentence limit.
       if (lead) onText?.(`${lead} `);
-      for await (const delta of streamed.text) {
+      // Returns true when the sentence limit is reached.
+      const pass = (text: string): boolean => {
+        if (text === "") return false;
         if (!cap) {
-          onText?.(delta);
-          continue;
+          onText?.(text);
+          return false;
         }
-        const step = cap.feed(delta);
+        const step = cap.feed(text);
         if (step.text !== "") onText?.(step.text);
-        if (step.done) {
+        return step.done;
+      };
+      for await (const delta of streamed.text) {
+        if (pass(strip ? strip.feed(delta) : delta)) {
           cut = true;
           controller.abort();
           break;
         }
       }
+      if (!cut && strip && pass(strip.flush())) cut = true;
       result = await streamed.result;
     } else {
       result = await deps.llm(request);
@@ -376,6 +446,6 @@ export const makeBareAnswerer = (deps: {
       return err(toAppError(result.error));
     }
     if (result.value.kind !== "text") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
-    return ok({ kind: "answer", text: withLead(result.value.text) });
+    return ok({ kind: "answer", text: withLead(unrestated(result.value.text)) });
   };
 };

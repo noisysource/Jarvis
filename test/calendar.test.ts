@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
-import { makeBareAnswerer } from "../src/answer/bare.js";
+import { makeBareAnswerer, nowLine } from "../src/answer/bare.js";
 import { eventsUrl, makeGoogleCalendarReader } from "../src/calendar/google.js";
 import {
   authorizationUrl,
@@ -307,6 +307,27 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     expect(JSON.stringify(logs)).not.toMatch(/Dentist|UTP/);
   });
 
+  it("reports each calendar step for the answer's path: dates and counts, never titles (#102)", async () => {
+    const steps: unknown[] = [];
+    const run = async (llmValue: unknown, read: Parameters<typeof makeBareAnswerer>[0]["calendar"], question: string) => {
+      const { llm } = recording(llmValue);
+      const answer = makeBareAnswerer({ llm, ...(read ? { calendar: read } : {}) });
+      await answer({ context: personal, question, history: [], memories: [], now: NOW, onStep: (s) => steps.push(s) });
+    };
+    await run({}, { read: googleWith(twoEvents).read, timeZone: TZ, now: () => NOW }, "What's on tomorrow?");
+    await run({ tool: "calendar_read", from: "2026-11-16", to: "2026-11-22" }, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "When's my next appointment?");
+    await run({}, { read: async () => err({ code: "not_connected" as const, message: "x" }), timeZone: TZ, now: () => NOW }, "What's on Friday?");
+    await run({ tool: "calendar_write", from: "2026-11-11", to: "2026-11-11" }, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "Any plans?");
+    await run({}, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "What's a black hole?");
+    expect(steps).toEqual([
+      { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "2 events" },
+      { kind: "tool", name: "calendar_read", args: "Mon 16 – Sun 22 Nov", by: "model", ok: true, result: "0 events" },
+      { kind: "tool", name: "calendar_read", args: "Fri 13 Nov", by: "code", ok: false, error: "not_connected" },
+      { kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: "refused: not an allowed tool" },
+    ]);
+    expect(JSON.stringify(steps)).not.toMatch(/Dentist|UTP/);
+  });
+
   it("streams the date sentence first, outside the spoken sentence limit, with no opening reaction", async () => {
     const requests: LlmRequest[] = [];
     const llm: LlmCall = Object.assign(async () => ok({ kind: "text" as const, text: "", servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } }), {
@@ -344,7 +365,7 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     expect(await ask(answer, "Do you have any plans?")).toEqual(ok({ kind: "answer", text: "Tomorrow you've got the dentist at eleven." })); // no date sentence: nothing was read
     expect(google.urls).toEqual([]);
     expect(none.requests).toHaveLength(2);
-    expect(none.requests[1]?.systemSuffix).toBeUndefined();
+    expect(none.requests[1]?.systemSuffix).not.toContain("<calendar>");
     await ask(answer, "What's a black hole?");
     expect(none.requests).toHaveLength(3); // no structured request at all
   });
@@ -390,7 +411,83 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     // A "yes" to something else isn't a read, and the prompt says not to claim one.
     await answer({ context: personal, question: "yes", history: [{ role: "assistant", text: "Want a joke?" }], memories: [], now: NOW });
     expect(google.urls).toHaveLength(1);
-    expect(requests[1]?.systemSuffix).toBeUndefined();
+    expect(requests[1]?.systemSuffix).not.toContain("<calendar>");
     expect(requests[1]?.system).toContain("Otherwise it wasn't: never say what's on it, or that it can or can't be reached.");
+  });
+
+  const oneEvent: GoogleEvent[] = [{ summary: "Dentist", start: { dateTime: "2026-11-11T08:00:00Z" }, end: { dateTime: "2026-11-11T09:00:00Z" } }];
+  const saying = (text: string) => {
+    const requests: LlmRequest[] = [];
+    const llm: LlmCall = Object.assign(async (r: LlmRequest) => {
+      requests.push(r);
+      return ok({ kind: "text" as const, text, servedBy: "m", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } });
+    });
+    return { llm, requests };
+  };
+  const afterToday = [
+    { role: "user" as const, text: "What's on today?" },
+    { role: "assistant" as const, text: "Looking at Tuesday 10 November. Nothing on." },
+  ];
+
+  it("a follow-up naming a day does a real read: \"what about tomorrow?\", then \"and Friday?\" (#102)", async () => {
+    const { llm } = saying("You have one event, from eight to nine.");
+    const google = googleWith(oneEvent);
+    const answer = makeBareAnswerer({ llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
+    const tomorrow = await answer({ context: personal, question: "what about tomorrow?", history: afterToday, memories: [], now: NOW });
+    expect(tomorrow).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You have one event, from eight to nine." }));
+    expect(new URL(google.urls[0] ?? "").searchParams.get("timeMin")).toBe("2026-11-11T00:00:00+00:00");
+    const history = [...afterToday, { role: "user" as const, text: "what about tomorrow?" }, { role: "assistant" as const, text: "Looking at Wednesday 11 November. You have one event, from eight to nine." }];
+    await answer({ context: personal, question: "and Friday?", history, memories: [], now: NOW });
+    expect(new URL(google.urls[1] ?? "").searchParams.get("timeMin")).toBe("2026-11-13T00:00:00+00:00");
+  });
+
+  it("\"did you check?\" is answered from what happened, with a real read now (#102)", async () => {
+    // The evidence: no read for "what about tomorrow?", then "have you honestly tried…?".
+    const noRead = [...afterToday, { role: "user" as const, text: "what about tomorrow?" }, { role: "assistant" as const, text: "On Wednesday your calendar is clear." }];
+    const { llm, requests } = saying("You have one event, from eight to nine.");
+    const google = googleWith(oneEvent);
+    const answer = makeBareAnswerer({ llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
+    expect(await answer({ context: personal, question: "have you honestly tried to reach the calendar?", history: noRead, memories: [], now: NOW })).toEqual(
+      ok({ kind: "answer", text: "No, I hadn't checked before. I've checked now: looking at Wednesday 11 November. You have one event, from eight to nine." }),
+    );
+    expect(google.urls).toHaveLength(1);
+    expect(requests[0]?.systemSuffix).toContain("don't say again that you checked");
+    // When the last reply did come from a read, it says so.
+    const wasRead = [{ role: "user" as const, text: "What's on tomorrow?" }, { role: "assistant" as const, text: "Looking at Wednesday 11 November. You have one event, from eight to nine." }];
+    const again = await answer({ context: personal, question: "Did you check?", history: wasRead, memories: [], now: NOW });
+    expect(again.ok && again.value.kind === "answer" && again.value.text).toBe(
+      "Yes, that answer came from a real check of your calendar. I've checked now: looking at Wednesday 11 November. You have one event, from eight to nine.",
+    );
+    // If the read fails now, it still says what happened before, and claims no new check.
+    const down = makeBareAnswerer({ llm: saying("I couldn't reach your calendar right now.").llm, calendar: { read: async () => err({ code: "network" as const, message: "x" }), timeZone: TZ, now: () => NOW } });
+    const failed = await down({ context: personal, question: "Did you check?", history: noRead, memories: [], now: NOW });
+    expect(failed.ok && failed.value.kind === "answer" && failed.value.text).toBe("No, I hadn't checked before. I couldn't reach your calendar right now.");
+  });
+
+  it("takes a restated date sentence off the model's text, typed and streamed (#102)", async () => {
+    // What qwen2.5:14b did: it repeated the date sentence.
+    const repeated = "Looking at Wednesday 11 November. You have one event, from eight to nine.";
+    const typed = makeBareAnswerer({ llm: saying(repeated).llm, calendar: { read: googleWith(oneEvent).read, timeZone: TZ, now: () => NOW } });
+    expect(await ask(typed, "What's on tomorrow?")).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You have one event, from eight to nine." }));
+    const parts = ["Looking at Wed", "nesday 11 Novem", "ber. You have one ", "event, from eight to nine."];
+    const llm: LlmCall = Object.assign(async () => ok({ kind: "text" as const, text: "", servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } }), {
+      stream: () => streamedFrom(parts, ok({ kind: "text" as const, text: parts.join(""), servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } })),
+    });
+    const deltas: string[] = [];
+    const streamed = makeBareAnswerer({ llm, calendar: { read: googleWith(oneEvent).read, timeZone: TZ, now: () => NOW } });
+    const result = await streamed({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, onText: (d) => deltas.push(d) });
+    expect(deltas.join("")).toBe("Looking at Wednesday 11 November. You have one event, from eight to nine.");
+    expect(result).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You have one event, from eight to nine." }));
+    // Text that doesn't restate the date is untouched.
+    const plain = makeBareAnswerer({ llm: saying("On Wednesday you have one event. It's from eight to nine.").llm, calendar: { read: googleWith(oneEvent).read, timeZone: TZ, now: () => NOW } });
+    expect(await ask(plain, "What's on tomorrow?")).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. On Wednesday you have one event. It's from eight to nine." }));
+  });
+
+  it("always tells the brain today's date, weekday and time in Lisbon (#102)", async () => {
+    const { llm, requests } = saying("It's Tuesday.");
+    await ask(makeBareAnswerer({ llm }), "What day is today?");
+    expect(requests[0]?.systemSuffix).toBe("Now it's Tuesday 10 November 2026, 17:20 (Europe/Lisbon). Use this for today's date, the weekday and the time.");
+    expect(nowLine(new Date("2026-07-10T23:30:00Z"), TZ)).toContain("Now it's Saturday 11 July 2026, 00:30 (Europe/Lisbon).");
+    expect(requests[0]?.system).not.toContain("Now it's"); // not in the cached part
   });
 });

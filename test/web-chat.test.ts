@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  pathLines,
+  pathOf,
+  pathSummary,
+  shouldSpeak,
+  voiceNoteVisible,
   CALENDAR_CLAUDE_NOTE,
   calendarNoteDue,
   CONVERSATION,
@@ -358,5 +363,84 @@ describe("the calendar note for Claude (#100)", () => {
     expect(calendarNoteDue({ calendar: false, brain: "claude", seen: false })).toBe(false);
     expect(CALENDAR_CLAUDE_NOTE).toContain("sent to Anthropic");
     expect(CALENDAR_CLAUDE_NOTE).toContain("EC work, handled by Kiro");
+  });
+});
+
+describe("voice only in voice mode (#102)", () => {
+  it("reads a reply aloud only for a mic turn, or when \"read typed replies\" is on; never when muted", () => {
+    expect(shouldSpeak({ spoken: false, readTyped: false, muted: false })).toBe(false); // typed: text only
+    expect(shouldSpeak({ spoken: true, readTyped: false, muted: false })).toBe(true);
+    expect(shouldSpeak({ spoken: false, readTyped: true, muted: false })).toBe(true);
+    expect(shouldSpeak({ spoken: true, readTyped: true, muted: true })).toBe(false);
+  });
+});
+
+describe("the voice note (#102)", () => {
+  it("shows only when the voice is actually used for the turn", () => {
+    const note = "Kokoro isn't running, so Jarvis is using the browser voice.";
+    expect(voiceNoteVisible({ note, voiceInUse: true })).toBe(true);
+    expect(voiceNoteVisible({ note, voiceInUse: false })).toBe(false); // a typed, text-only turn
+    expect(voiceNoteVisible({ note: "", voiceInUse: true })).toBe(false);
+  });
+});
+
+describe("the answer's path (#102)", () => {
+  const path = pathOf({
+    path: [
+      { kind: "precheck", result: "none" },
+      { kind: "brain", brain: "local" },
+      { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "2 events" },
+      { kind: "guard", claimedAction: 0, promise: 1, perception: 0, replaced: false },
+      { kind: "something-new" },
+    ],
+  });
+
+  it("sums it up in one line", () => {
+    expect(pathSummary(path)).toBe("🧠 Local · 🗓 calendar_read Wed 11 Nov → 2 events · 🛡 guard: 1 dropped");
+    expect(pathSummary(pathOf({ path: [{ kind: "precheck", result: "none" }, { kind: "brain", brain: "claude" }, { kind: "guard", claimedAction: 0, promise: 0, perception: 0, replaced: false }] }))).toBe("☁️ Claude");
+    expect(pathSummary(pathOf({ path: [{ kind: "precheck", result: "handoff" }] }))).toBe("🚦 EC precheck → Kiro");
+  });
+
+  it("lists each step in order when opened", () => {
+    expect(pathLines(path, { local: "Local · qwen2.5:14b" })).toEqual([
+      "🚦 EC precheck: not EC work.",
+      "🧠 Brain: Local · qwen2.5:14b",
+      "🗓 Tool calendar_read · Wed 11 Nov (worked out by code) · ok: 2 events",
+      "🛡 Honesty guard: dropped 1 promise.",
+    ]);
+  });
+
+  it("shows a failed tool with its error code, who chose the arguments, and what the guard dropped", () => {
+    const failed = pathOf({
+      path: [
+        { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "model", ok: false, error: "not_connected" },
+        { kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: "refused: too many days" },
+        { kind: "guard", claimedAction: 2, promise: 0, perception: 1, replaced: true },
+      ],
+    });
+    expect(pathSummary(failed)).toBe("🗓 calendar_read Wed 11 Nov → failed (not_connected) · 🗓 calendar_read → failed (refused: too many days) · 🛡 guard: 3 dropped");
+    expect(pathLines(failed)).toEqual([
+      "🗓 Tool calendar_read · Wed 11 Nov (chosen by the model, checked by code) · failed: not_connected",
+      "🗓 Tool calendar_read · failed: refused: too many days",
+      "🛡 Honesty guard: dropped 2 claimed actions, 1 claim to see or hear you; said it can't do that yet.",
+    ]);
+  });
+
+  it("shows claims about the calendar that were dropped for lack of a read", () => {
+    const steps = pathOf({ path: [{ kind: "brain", brain: "local" }, { kind: "guard", claimedAction: 0, promise: 0, perception: 0, toolResult: 1, replaced: true }] });
+    expect(pathSummary(steps)).toBe("🧠 Local · 🛡 guard: 1 dropped");
+    expect(pathLines(steps)[1]).toBe("🛡 Honesty guard: dropped 1 claim about your calendar with no read; said it hadn't checked.");
+  });
+
+  it("marks skills differently from tools", () => {
+    const steps = pathOf({ path: [{ kind: "skill", name: "weekly-review", args: "", by: "code", ok: true }, { kind: "tool", name: "search", args: "x", by: "model", ok: true }] });
+    expect(pathSummary(steps)).toBe("✨ skill weekly-review → ok · 🔧 search x → ok");
+    expect(pathLines(steps)[0]).toBe("✨ Skill weekly-review · ok");
+  });
+
+  it("is empty for a reply with no path", () => {
+    expect(pathOf({ type: "answer" })).toEqual([]);
+    expect(pathOf(null)).toEqual([]);
+    expect(pathOf({ path: "x" })).toEqual([]);
   });
 });

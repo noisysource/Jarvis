@@ -131,7 +131,7 @@ describe("personal questions", () => {
     const { result, requests } = await build();
     const deps = depsOf(result);
 
-    expect(await ask(deps, { question: "When is my daughter's birthday?" })).toEqual({
+    expect(await ask(deps, { question: "When is my daughter's birthday?" })).toMatchObject({
       type: "answer",
       context: "personal",
       answer: "Her birthday is 2 September.",

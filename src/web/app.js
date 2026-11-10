@@ -17,6 +17,11 @@ import {
   parseBrain,
   CALENDAR_CLAUDE_NOTE,
   calendarNoteDue,
+  pathLines,
+  pathOf,
+  pathSummary,
+  shouldSpeak,
+  voiceNoteVisible,
   parseLanguage,
   pickVoice,
   shouldReopenMic,
@@ -63,6 +68,7 @@ const input = /** @type {HTMLTextAreaElement} */ (byId("question"));
 const sendButton = /** @type {HTMLButtonElement} */ (byId("send"));
 const micButton = /** @type {HTMLButtonElement} */ (byId("mic"));
 const muteButton = /** @type {HTMLButtonElement} */ (byId("mute"));
+const readTypedButton = /** @type {HTMLButtonElement} */ (byId("read-typed"));
 const languageSelect = /** @type {HTMLSelectElement} */ (byId("language"));
 const voiceSelect = /** @type {HTMLSelectElement} */ (byId("voice"));
 const newButton = /** @type {HTMLButtonElement} */ (byId("new-conversation"));
@@ -114,7 +120,7 @@ const randomBytes = (count) => crypto.getRandomValues(new Uint8Array(count));
  * voiceSession: the user is talking (last question was spoken and they haven't stopped).
  * autoBlocked: the browser refused to reopen the mic by itself; paused until the toggle is flipped.
  * @type {{
- *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, busy: boolean,
+ *   history: import("./chat.js").Turn[], language: "en" | "pt", muted: boolean, readTyped: boolean, busy: boolean,
  *   listening: boolean, transcribing: boolean, pending: PendingClarify | null,
  *   phase: import("./turn-lib.js").Phase, lastContext: string | undefined,
  *   conversation: boolean, voiceSession: boolean, autoBlocked: boolean,
@@ -125,6 +131,8 @@ const state = {
   history: [],
   language: parseLanguage(load("jarvis.language")),
   muted: load("jarvis.muted") === "true",
+  /** Typed questions get text only (#102), unless this is on. */
+  readTyped: load("jarvis.readTyped") === "true",
   busy: false,
   listening: false,
   transcribing: false,
@@ -157,6 +165,32 @@ const setStatus = (text) => {
   status.textContent = text;
 };
 
+/** Puts text on the clipboard. @param {string} text @returns {Promise<boolean>} */
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // No clipboard permission (or not a secure page): the old way.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    const done = (() => {
+      try {
+        return document.execCommand("copy");
+      } catch {
+        return false;
+      }
+    })();
+    area.remove();
+    return done;
+  }
+};
+
 /**
  * @param {"user" | import("./chat.js").ReplyView["kind"]} kind
  * @param {string} text
@@ -174,6 +208,19 @@ const addMessage = (kind, text) => {
   const body = document.createElement("p");
   body.textContent = text;
   item.append(body);
+  // Copies the message's plain text (#102): not the path line, the timing or the button.
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "copy";
+  copy.textContent = "Copy";
+  copy.setAttribute("aria-label", "Copy this message");
+  copy.addEventListener("click", () => {
+    void copyText(body.textContent ?? "").then((done) => {
+      copy.textContent = done ? "Copied" : "Couldn't copy";
+      setTimeout(() => (copy.textContent = "Copy"), 1500);
+    });
+  });
+  item.append(copy);
   transcript.append(item);
   item.scrollIntoView({ block: "end", behavior: "smooth" });
   return item;
@@ -220,6 +267,8 @@ const renderControls = () => {
   rememberButton.textContent = state.remember ? "🧠 Remembering" : "🙈 Not remembering this conversation";
   muteButton.setAttribute("aria-pressed", String(state.muted));
   muteButton.textContent = state.muted ? "🔇 Muted" : "🔊 Sound on";
+  readTypedButton.setAttribute("aria-pressed", String(state.readTyped));
+  readTypedButton.textContent = state.readTyped ? "🔈 Read typed replies: on" : "🔈 Read typed replies: off";
   languageSelect.value = state.language;
   document.documentElement.lang = LANGUAGES[state.language].speech;
 };
@@ -246,9 +295,11 @@ const audio = () => {
 
 /** The voice in use, from GET /tts. @type {ReturnType<typeof chooseVoice>} */
 let voiceChoice = { server: null, note: "" };
+/** Whether the current turn's reply is read aloud: the voice note only shows then (#102). */
+let voiceInUse = false;
 const renderVoiceNote = () => {
   voiceNote.textContent = voiceChoice.note;
-  voiceNote.hidden = voiceChoice.note === "" || state.muted;
+  voiceNote.hidden = !voiceNoteVisible({ note: voiceChoice.note, voiceInUse });
 };
 let voiceChecked = false;
 const refreshVoice = async () => {
@@ -510,7 +561,8 @@ const startSpeaker = (onDone, timing, onFirstSound) => {
       void Promise.resolve().then(() => firstSound(performance.now()));
       return done;
     },
-    muted: state.muted || (!server && !synth),
+    // Voice only in voice mode (#102): a typed question's reply isn't read aloud unless you turned that on.
+    muted: !shouldSpeak({ spoken: timing.spoken, readTyped: state.readTyped, muted: state.muted }) || (!server && !synth),
     onFallback: (why) => {
       voiceChoice = { server: null, note: `${why}, so Jarvis is using the browser voice.` };
       renderVoiceNote();
@@ -653,8 +705,11 @@ const ask = async (question, context) => {
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
+  // A typed, text-only turn doesn't use the voice: no voice check, and no note about it (#102).
+  voiceInUse = shouldSpeak({ spoken: timing.spoken, readTyped: state.readTyped, muted: state.muted });
+  renderVoiceNote();
   // The voice is checked again only when it isn't the configured one (it may be back up).
-  const voiceReady = voiceChecked && voiceChoice.server ? Promise.resolve() : refreshVoice();
+  const voiceReady = !voiceInUse || (voiceChecked && voiceChoice.server) ? Promise.resolve() : refreshVoice();
 
   /** @type {unknown} */
   let final = null;
@@ -802,7 +857,22 @@ const ask = async (question, context) => {
   }
   // Which brain answered (#88).
   const brain = final && typeof final === "object" && "brain" in final ? String(final.brain) : "";
-  if (view.kind === "answer" && (brain === "local" || brain === "claude")) {
+  // The answer's path (#102): one line under the reply that opens to each step. It includes the brain.
+  const path = pathOf(final);
+  if (path.length > 0 && (view.kind === "answer" || view.kind === "handoff")) {
+    const details = document.createElement("details");
+    details.className = "path";
+    const summary = document.createElement("summary");
+    summary.textContent = pathSummary(path) || "Path";
+    const steps = document.createElement("ol");
+    for (const line of pathLines(path, brainLabels)) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      steps.append(li);
+    }
+    details.append(summary, steps);
+    item.append(details);
+  } else if (view.kind === "answer" && (brain === "local" || brain === "claude")) {
     const tag = document.createElement("span");
     tag.className = "brain-tag";
     tag.textContent = brainLabels[brain] ?? brain;
@@ -1413,7 +1483,14 @@ muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
   save("jarvis.muted", String(state.muted));
   if (state.muted) stopSpeaking("muted");
+  voiceInUse = voiceInUse && !state.muted;
   renderVoiceNote();
+  renderControls();
+});
+
+readTypedButton.addEventListener("click", () => {
+  state.readTyped = !state.readTyped;
+  save("jarvis.readTyped", String(state.readTyped));
   renderControls();
 });
 

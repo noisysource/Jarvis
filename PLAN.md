@@ -527,6 +527,46 @@ the current architecture.
      - **Reading isn't an action:** the honesty guard stays on.
      - **Claude:** the page notes once, before the first question, that
        with Claude the events go to Anthropic.
+   - **What a turn means for the calendar** (`src/calendar/intent.ts`,
+     #102), decided in code from the question and the history:
+     - a calendar question reads for the days it names
+     - a follow-up naming a day ("what about tomorrow?", "and Friday?")
+       reads too, while the conversation is about the calendar
+     - a bare "yes" to an offer to check or try again repeats the last
+       calendar question
+     - "did you check?" / "have you tried?" reads now, and the reply
+       opens with what really happened, worded by code: "No, I hadn't
+       checked before. I've checked now: looking at Wednesday 11
+       November." or "Yes, that answer came from a real check of your
+       calendar. …"
+     - a past reply counts as checked only if it opens with "Looking at
+       <day>.", which only code writes after a read that worked
+   - **Claimed tool results (#102):** a fourth honesty-guard category.
+     - Dropped: statements about what's on the calendar ("your calendar is
+       clear", "no events", "you have one event…") or about having checked
+       it ("I did check"), unless `calendar_read` worked in that turn
+       (`guard.resultsKnown()`, set from the tool step).
+     - In a turn about the calendar, "you have X at ten" and "you're
+       free" count as well.
+     - The reply then says "I haven't checked your calendar for that.
+       Which day shall I look at?". After a failed read it says "I
+       couldn't check your calendar just now."; with no calendar, "I
+       can't see your calendar yet."
+     - Promises and claimed actions are still dropped after a read.
+   - **Now (#102):** every bare prompt ends with today's date, weekday
+     and time in Europe/Lisbon (uncached).
+   - **No repeated date (#102):** if the model restates the date
+     sentence, code takes it off (streamed and typed).
+   - **The answer's path (#102):** answers and handoffs carry `path`, a
+     list of steps: the EC precheck result, the brain, each tool or skill
+     step (`AnswerInput.onStep`: name, arguments as checked by code, who
+     chose them, ok or an error code, a count), and the guard's counts.
+     The page shows it as one collapsible line under the reply. It holds
+     fixed words, dates and counts only, and is never logged. Skills get
+     their own mark (✨) when they exist.
+   - **Voice only in voice mode (#102):** the page reads a reply aloud
+     only for a mic turn, or when "read typed replies" is on (off by
+     default). Each message has a copy button.
    - **3b, creating:** only after your explicit yes to an event (title,
      date, time, calendar) shown and spoken from the validated request,
      and confirmed from the tool's result. This needs the

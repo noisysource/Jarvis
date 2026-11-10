@@ -45,7 +45,8 @@ describe("bare mode prompt (#88)", () => {
     });
     expect(result).toEqual(ok({ kind: "answer", text: "Hi!" }));
     expect(requests[0]?.system).toBe(barePrompt("Alex"));
-    expect(requests[0]?.systemSuffix).toBeUndefined();
+    // The only extra: now, where they are (#102). No profile, no memories.
+    expect(requests[0]?.systemSuffix).toMatch(/^Now it's \w+day \d{1,2} \w+ \d{4}, \d\d:\d\d \(Europe\/Lisbon\)\. Use this for today's date, the weekday and the time\.$/);
     expect(requests[0]?.thinking).toBe("off"); // a conversation: no thinking first (#76)
     expect(requests[0]?.messages).toEqual([
       { role: "user", text: "Hello" },
@@ -169,7 +170,7 @@ describe("spoken style in bare mode (#92)", () => {
     const answer = makeBareAnswerer({ llm, userName: "Alex", spokenSentences: 3 });
     const result = await answer({ context: personal, question: "Explain black holes like I'm five", history: [], memories: [], now: new Date(), spoken: true, onText: (d) => deltas.push(d) });
     expect(requests[0]?.system).toBe(barePrompt("Alex", { spoken: true, maxSentences: 3 }));
-    expect(requests[0]?.systemSuffix).toMatch(/^This time, /); // this turn's opening, after the cached part
+    expect(requests[0]?.systemSuffix).toMatch(/^Now it's .*\n\nThis time, /); // now, then this turn's opening, after the cached part
     expect(deltas.join("")).toBe("Okay. One. Two. Three.");
     expect(result).toEqual(ok({ kind: "answer", text: "Okay. One. Two. Three." }));
     expect(aborted()).toBe(true);
@@ -183,7 +184,7 @@ describe("spoken style in bare mode (#92)", () => {
     const r2 = await makeBareAnswerer({ llm: typed.llm })({ context: personal, question: "Hi", history: [], memories: [], now: new Date(), onText: () => undefined });
     expect(r2).toEqual(ok({ kind: "answer", text: seven.join("") }));
     expect(typed.requests[0]?.system).toBe(barePrompt(undefined));
-    expect(typed.requests[0]?.systemSuffix).toBeUndefined();
+    expect(typed.requests[0]?.systemSuffix).not.toContain("This time,"); // no opening hint when typed
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dayLabel, rangeLabel, readSentence, resolveDatePhrase, shortRangeLabel } from "../src/calendar/dates.js";
-import { calendarQuestion, localDate } from "../src/calendar/read.js";
+import { asksWhatJarvisDid, calendarIntent } from "../src/calendar/intent.js";
+import { localDate } from "../src/calendar/read.js";
 
 const TZ = "Europe/Lisbon";
 // Tuesday 10 November 2026.
@@ -112,28 +113,71 @@ describe("the date read, worded by code (#100)", () => {
   });
 });
 
+const user = (text: string) => ({ role: "user" as const, text });
+const jarvis = (text: string) => ({ role: "assistant" as const, text });
+
 describe("a bare yes after an offer to try again (#100)", () => {
-  const failed = [
-    { role: "user" as const, text: "What's on tomorrow?" },
-    { role: "assistant" as const, text: "I couldn't reach your calendar right now. Shall I try again?" },
-  ];
+  const failed = [user("What's on tomorrow?"), jarvis("I couldn't reach your calendar right now. Shall I try again?")];
   it("repeats the last calendar question", () => {
     for (const yes of ["yes", "Yes please.", "ok", "Sure, go ahead", "try again", "Yes, try again!"]) {
-      expect(calendarQuestion(yes, failed), yes).toBe("What's on tomorrow?");
+      expect(calendarIntent(yes, failed), yes).toEqual({ ask: "What's on tomorrow?" });
     }
     // "Try again" needs no offer.
-    const noOffer = [{ role: "user" as const, text: "What's on tomorrow?" }, { role: "assistant" as const, text: "I couldn't reach your calendar right now." }];
-    expect(calendarQuestion("try again", noOffer)).toBe("What's on tomorrow?");
-    expect(calendarQuestion("yes", noOffer)).toBeUndefined();
+    const noOffer = [user("What's on tomorrow?"), jarvis("I couldn't reach your calendar right now.")];
+    expect(calendarIntent("try again", noOffer)).toEqual({ ask: "What's on tomorrow?" });
+    expect(calendarIntent("yes", noOffer)).toBeUndefined();
+    // An offer to check (the guard's line) counts too.
+    const offered = [user("What's on tomorrow?"), jarvis("I haven't checked your calendar for that. Shall I check?")];
+    expect(calendarIntent("yes", offered)).toEqual({ ask: "What's on tomorrow?" });
   });
   it("isn't a calendar turn otherwise", () => {
-    expect(calendarQuestion("yes", [])).toBeUndefined();
-    expect(calendarQuestion("yes, and tell me a joke", failed)).toBeUndefined();
-    const other = [
-      { role: "user" as const, text: "Explain black holes" },
-      { role: "assistant" as const, text: "That got cut off. Shall I try again?" },
-    ];
-    expect(calendarQuestion("yes", other)).toBeUndefined();
-    expect(calendarQuestion("What's on Friday?", [])).toBe("What's on Friday?");
+    expect(calendarIntent("yes", [])).toBeUndefined();
+    expect(calendarIntent("yes, and tell me a joke", failed)).toBeUndefined();
+    expect(calendarIntent("yes", [user("Explain black holes"), jarvis("That got cut off. Shall I try again?")])).toBeUndefined();
+    expect(calendarIntent("What's on Friday?", [])).toEqual({ ask: "What's on Friday?" });
+  });
+});
+
+describe("follow-ups that name a day read for real (#102)", () => {
+  const afterRead = [user("What's on today?"), jarvis("Looking at Tuesday 10 November. Nothing on.")];
+  it("reads for the day named, while the conversation is about the calendar", () => {
+    expect(calendarIntent("what about tomorrow?", afterRead)).toEqual({ ask: "what about tomorrow?" });
+    expect(calendarIntent("and Friday?", afterRead)).toEqual({ ask: "and Friday?" });
+    expect(calendarIntent("12 November?", afterRead)).toEqual({ ask: "12 November?" });
+    // A chain: the follow-up to a follow-up.
+    const chain = [...afterRead, user("what about tomorrow?"), jarvis("Looking at Wednesday 11 November. One event, from eight to nine.")];
+    expect(calendarIntent("and Friday?", chain)).toEqual({ ask: "and Friday?" });
+    // After the guard asked which day.
+    const asked = [user("Is my week busy?"), jarvis("I haven't checked your calendar for that. Which day shall I look at?")];
+    expect(calendarIntent("tomorrow", asked)).toEqual({ ask: "tomorrow" });
+    // After a failed read.
+    expect(calendarIntent("and Friday?", [user("What's on tomorrow?"), jarvis("I couldn't reach your calendar right now.")])).toEqual({ ask: "and Friday?" });
+  });
+  it("doesn't read when the conversation isn't about the calendar", () => {
+    const weather = [user("Will it be cold?"), jarvis("I can't look that up, I'm afraid.")];
+    expect(calendarIntent("what about tomorrow?", weather)).toBeUndefined();
+    expect(calendarIntent("and Friday?", [])).toBeUndefined();
+  });
+});
+
+describe("\"did you check?\" is answered from what happened (#102)", () => {
+  it("knows the question", () => {
+    for (const q of ["Did you check?", "have you honestly tried to reach the calendar?", "Have you actually looked?", "Are you sure you checked?", "did you really read my calendar"]) {
+      expect(asksWhatJarvisDid(q), q).toBe(true);
+    }
+    for (const q of ["What's on tomorrow?", "Can you check tomorrow?", "Have you got a minute?"]) expect(asksWhatJarvisDid(q), q).toBe(false);
+  });
+  it("reads now for the last calendar question, and knows whether the last reply came from a real read", () => {
+    // The evidence: "what about tomorrow?" answered "your calendar is clear" with no read.
+    const noRead = [user("What's on today?"), jarvis("Looking at Tuesday 10 November. Nothing on."), user("what about tomorrow?"), jarvis("On Wednesday your calendar is clear.")];
+    expect(calendarIntent("have you honestly tried to reach the calendar?", noRead)).toEqual({ ask: "what about tomorrow?", didCheck: { before: false } });
+    const wasRead = [user("What's on tomorrow?"), jarvis("Looking at Wednesday 11 November. One event, from eight to nine.")];
+    expect(calendarIntent("Did you check?", wasRead)).toEqual({ ask: "What's on tomorrow?", didCheck: { before: true } });
+    // A day in the question itself wins.
+    expect(calendarIntent("Did you check Friday in my calendar?", wasRead)).toEqual({ ask: "Did you check Friday in my calendar?", didCheck: { before: true } });
+  });
+  it("isn't a calendar turn when nothing was asked of the calendar", () => {
+    expect(calendarIntent("Did you check?", [user("Explain black holes"), jarvis("Sure. They're heavy.")])).toBeUndefined();
+    expect(calendarIntent("Did you check?", [])).toBeUndefined();
   });
 });

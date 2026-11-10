@@ -75,7 +75,7 @@ describe("POST /ask", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/json");
     expect(res.headers.get("x-request-id")).toBe("req-1");
-    expect(await res.json()).toEqual({ type: "answer", context: "personal", answer: ANSWER });
+    expect(await res.json()).toMatchObject({ type: "answer", context: "personal", answer: ANSWER });
   });
 
   it("gives the wrap-up the request id and the page's conversation id", async () => {
@@ -99,7 +99,7 @@ describe("POST /ask", () => {
     });
 
     const res = await post(JSON.stringify({ question: QUESTION }));
-    expect(await res.json()).toEqual({ type: "answer", context: "personal", answer: ANSWER });
+    expect(await res.json()).toMatchObject({ type: "answer", context: "personal", answer: ANSWER });
     expect(background.pending()).toBe(1); // the reply is out; the wrap-up is still to finish
 
     await new Promise((r) => setImmediate(r));

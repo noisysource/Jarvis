@@ -107,7 +107,7 @@ describe("answered contexts", () => {
 
     const response = await handleAsk(deps, { question: QUESTION, history });
 
-    expect(response).toEqual({ type: "answer", context: "personal", answer: "2 September." });
+    expect(response).toMatchObject({ type: "answer", context: "personal", answer: "2 September." });
     // The reply is ready and the wrap-up hasn't run: it was handed to afterReply.
     expect(calls).toEqual(["classify", "loadMemories", "answer", "after reply: memory wrap-up"]);
     expect(wrapUps).toEqual([]);
@@ -264,7 +264,7 @@ describe("local precheck always runs first", () => {
   it("hands 'Summarise the UTP standup' to Kiro even with context personal, without any model call", async () => {
     const { deps, calls } = makeDeps();
 
-    expect(await handleAsk(deps, { question: "Summarise the UTP standup", context: id("personal") })).toEqual({
+    expect(await handleAsk(deps, { question: "Summarise the UTP standup", context: id("personal") })).toMatchObject({
       type: "handoff",
       context: "ec-hrt",
       to: "Kiro (the EC's agent)",
@@ -454,7 +454,7 @@ describe("bare mode (#88)", () => {
       ];
       const response = await handleAsk(deps, { question, history, brain: "local" });
       await flush();
-      expect(response, question).toEqual({ type: "answer", context: "personal", answer: "Hi! What can I do for you?", brain: "local" });
+      expect(response, question).toMatchObject({ type: "answer", context: "personal", answer: "Hi! What can I do for you?", brain: "local" });
       // No classifier (so no context picker), no other context, no memory reads or writes.
       expect(calls, question).toEqual(["bare answer"]);
       expect(bareInputs[0]?.history).toEqual(history);
@@ -508,7 +508,7 @@ describe("failures", () => {
     };
     const { deps, answerInputs, flush } = makeDeps({ memory: makeSafeMemoryHooks(failing) });
 
-    expect(await handleAsk(deps, { question: QUESTION })).toEqual({
+    expect(await handleAsk(deps, { question: QUESTION })).toMatchObject({
       type: "answer",
       context: "personal",
       answer: "2 September.",
@@ -566,7 +566,7 @@ describe("honesty guard on every answer (#96)", () => {
     // Asked to do something: the "Sure." is held, and never said before the refusal (#98).
     expect(sentences).toEqual(["Actually, I can't do that yet."]);
     expect(response).toMatchObject({ type: "answer", answer: "Actually, I can't do that yet." });
-    expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, replaced: true } });
+    expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, toolResult: 0, replaced: true } });
   });
 
   it("typed, not streamed: the whole answer is checked, and memory only gets the checked text", async () => {
@@ -594,5 +594,85 @@ describe("honesty guard on every answer (#96)", () => {
     const response = await handleAsk(deps, { question: "Add it", brain: "local" }, { onSentence: (s) => sentences.push(s) });
     expect(sentences).toEqual(["Done.", "I've added it for Tuesday at ten."]);
     expect(response).toMatchObject({ answer: "Done. I've added it for Tuesday at ten." });
+  });
+});
+
+describe("the answer's path, for the page only (#102)", () => {
+  it("bare: the precheck, the brain, each tool step in order, then the guard", async () => {
+    const made = makeDeps();
+    const deps: Deps = {
+      ...made.deps,
+      bare: async (input) => {
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "2 events" });
+        return ok({ kind: "answer", text: "Looking at Wednesday 11 November. You've got the dentist. I'll remind you." });
+      },
+    };
+    const response = await handleAsk(deps, { question: "What's on tomorrow?", brain: "local" });
+    expect(response).toMatchObject({
+      answer: "Looking at Wednesday 11 November. You've got the dentist.",
+      path: [
+        { kind: "precheck", result: "none" },
+        { kind: "brain", brain: "local" },
+        { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "2 events" },
+        { kind: "guard", claimedAction: 0, promise: 1, perception: 0, replaced: false },
+      ],
+    });
+    // The server log keeps its numbers-only lines: the path isn't logged.
+    expect(JSON.stringify(made.logs)).not.toContain("calendar_read");
+    expect(JSON.stringify(made.logs)).not.toContain("Wed 11 Nov");
+  });
+
+  it("an EC question shows only the precheck: no brain ran", async () => {
+    const made = makeDeps();
+    const deps: Deps = { ...made.deps, bare: async () => ok({ kind: "answer", text: "x" }) };
+    expect(await handleAsk(deps, { question: "Summarise the UTP standup", brain: "local" })).toMatchObject({
+      type: "handoff",
+      path: [{ kind: "precheck", result: "handoff" }],
+    });
+  });
+
+  it("the normal path has it too", async () => {
+    const { deps } = makeDeps();
+    expect(await handleAsk(deps, { question: QUESTION })).toMatchObject({
+      path: [
+        { kind: "precheck", result: "none" },
+        { kind: "brain", brain: "claude" },
+        { kind: "guard", claimedAction: 0, promise: 0, perception: 0, replaced: false },
+      ],
+    });
+  });
+
+  it("a claim about the calendar is dropped unless calendar_read worked this turn (#102)", async () => {
+    const made = makeDeps();
+    const history: Turn[] = [{ role: "user", text: "What's on today?" }, { role: "assistant", text: "Looking at Tuesday 10 November. Nothing on." }];
+    // No read: what qwen said.
+    const noRead: Deps = { ...made.deps, calendarEnabled: true, bare: async () => ok({ kind: "answer", text: "On Wednesday your calendar is clear." }) };
+    expect(await handleAsk(noRead, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({
+      answer: "I haven't checked your calendar for that. Which day shall I look at?",
+      path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "guard", toolResult: 1, replaced: true }],
+    });
+    // A read that worked: the same kind of sentence is kept.
+    const read: Deps = {
+      ...made.deps,
+      calendarEnabled: true,
+      bare: async (input) => {
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "1 event" });
+        return ok({ kind: "answer", text: "Looking at Wednesday 11 November. You have one event, from eight to nine." });
+      },
+    };
+    expect(await handleAsk(read, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({
+      answer: "Looking at Wednesday 11 November. You have one event, from eight to nine.",
+      path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "tool", ok: true }, { kind: "guard", toolResult: 0 }],
+    });
+    // A read that failed: no claim, and it says so.
+    const failed: Deps = {
+      ...made.deps,
+      calendarEnabled: true,
+      bare: async (input) => {
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: false, error: "network" });
+        return ok({ kind: "answer", text: "You have nothing on tomorrow." });
+      },
+    };
+    expect(await handleAsk(failed, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({ answer: "I couldn't check your calendar just now." });
   });
 });

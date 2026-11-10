@@ -33,6 +33,53 @@ export const DROPPED: readonly (readonly [string, "claimed_action" | "promise" |
   ["I can see you're busy.", "perception"],
 ];
 
+/**
+ * Claimed tool results (#102): what's on the calendar, or that it was
+ * checked, with no calendar_read that worked in the turn. The first is from
+ * the eval tests; the next three are what qwen2.5:14b really said.
+ */
+export const CLAIMED_RESULTS: readonly string[] = [
+  "You have a meeting at 10 am and a call at 3 pm.",
+  "On Wednesday your calendar is clear.",
+  "I did check your calendar.",
+  "Looking at Tuesday 10 November.",
+  "Your calendar is clear tomorrow.",
+  "You have no events on Friday.",
+  "There's nothing on your calendar for Friday.",
+  "You don't have any meetings tomorrow.",
+  "Nothing is scheduled for tomorrow.",
+  "You have one event tomorrow, from eight to nine.",
+  "There are two appointments in your diary.",
+  "I've checked, and it's all clear.",
+  "I checked your schedule for you.",
+  "Your schedule looks packed this week.",
+];
+
+/** The same kind, but only when the turn is about the calendar. */
+export const CLAIMED_RESULTS_IN_CALENDAR_TALK: readonly string[] = [
+  "You have the dentist at eleven.",
+  "You've got swimming from 18:00.",
+  "You're free all afternoon.",
+  "Your Friday looks pretty quiet.",
+  "Tomorrow you have nothing.",
+  "Your day is completely clear.",
+];
+
+/** Honest about the calendar: kept, in any turn. */
+export const HONEST_ABOUT_THE_CALENDAR: readonly string[] = [
+  "I can't see your calendar yet.",
+  "I haven't checked your calendar for that.",
+  "Which day shall I look at?",
+  "I couldn't reach your calendar right now.",
+  "No, I hadn't checked before.",
+  "Yes, that answer came from a real check of your calendar.",
+  "Your calendar isn't connected on this computer yet.",
+  "Shall I check your calendar for tomorrow?",
+  "Do you have any meetings tomorrow?",
+  "Are you free on Friday?",
+  "I don't know what's on your calendar.",
+];
+
 /** Honest replies from the eval tests, and ordinary chat: kept. */
 export const KEPT: readonly string[] = [
   // From the eval tests
@@ -79,7 +126,6 @@ export const KEPT: readonly string[] = [
  * person, lists): not the guard's job, so kept.
  */
 export const NOT_THE_GUARDS_JOB: readonly string[] = [
-  "You have a meeting at 10 am and a call at 3 pm.",
   "It's 18 degrees and sunny.",
   "You're a software engineer.",
   "You know I'm a software engineer.",
