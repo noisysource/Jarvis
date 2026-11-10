@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ACTUALLY_CANT_YET, asksForAction, CANT_YET, honestyCategory, makeHonestyGuard } from "../src/answer/honesty.js";
+import { ACTUALLY_CANT_YET, asksForAction, CANT_YET, honestyCategory, makeHonestyGuard, NO_CALENDAR, NOT_CHECKED, READ_FAILED } from "../src/answer/honesty.js";
 import type { Logger } from "../src/types.js";
-import { DROPPED, KEPT, NOT_THE_GUARDS_JOB } from "./fixtures/honesty-cases.js";
+import { CLAIMED_RESULTS, CLAIMED_RESULTS_IN_CALENDAR_TALK, DROPPED, HONEST_ABOUT_THE_CALENDAR, KEPT, NOT_THE_GUARDS_JOB } from "./fixtures/honesty-cases.js";
 
 const spyLog = () => {
   const lines: { message: string; fields: Record<string, unknown> | undefined }[] = [];
@@ -36,7 +36,7 @@ describe("honesty guard: a turn (#96)", () => {
     expect(sent).toEqual(["I can't set reminders yet.", "Want to set one on your phone?"]);
     expect(result).toEqual({
       text: "I can't set reminders yet. Want to set one on your phone?",
-      dropped: { claimed_action: 0, promise: 1, perception: 0 },
+      dropped: { claimed_action: 0, promise: 1, perception: 0, tool_result: 0 },
       replaced: false,
     });
   });
@@ -104,14 +104,52 @@ describe("honesty guard: a turn (#96)", () => {
     const guard = makeHonestyGuard({ log });
     expect(guard.finish("You look tired.\n\nWant to take a break? I'll remind you in an hour.")).toEqual({
       text: "Want to take a break?",
-      dropped: { claimed_action: 0, promise: 1, perception: 1 },
+      dropped: { claimed_action: 0, promise: 1, perception: 1, tool_result: 0 },
       replaced: false,
     });
   });
 
   it("logs the categories and counts only, never the text", () => {
     const { lines } = stream("Sure. I've sent the email to Sam about the dentist. You look tired.");
-    expect(lines).toEqual([{ message: "honesty guard", fields: { claimedAction: 1, promise: 0, perception: 1, replaced: true } }]);
+    expect(lines).toEqual([{ message: "honesty guard", fields: { claimedAction: 1, promise: 0, perception: 1, toolResult: 0, replaced: true } }]);
     expect(JSON.stringify(lines)).not.toMatch(/Sam|dentist|email|tired/);
+  });
+});
+
+describe("honesty guard: claimed tool results (#102)", () => {
+  it.each(CLAIMED_RESULTS)("drops %j in any turn", (sentence) => expect(honestyCategory(sentence)).toBe("tool_result"));
+  it.each(CLAIMED_RESULTS_IN_CALENDAR_TALK)("drops %j when the turn is about the calendar", (sentence) => {
+    expect(honestyCategory(sentence, true)).toBe("tool_result");
+    expect(honestyCategory(sentence, false)).toBeUndefined(); // e.g. a routine from the profile
+  });
+  it.each([...HONEST_ABOUT_THE_CALENDAR, ...KEPT])("keeps %j", (sentence) => expect(honestyCategory(sentence, true)).toBeUndefined());
+
+  const turn = (text: string, opts: { read?: "ok" | "failed"; calendar?: boolean } = {}) => {
+    const sent: string[] = [];
+    const guard = makeHonestyGuard({ onSentence: (s) => sent.push(s), calendarTalk: true, calendar: opts.calendar ?? true, question: "what about tomorrow?" });
+    if (opts.read === "ok") guard.resultsKnown();
+    if (opts.read === "failed") guard.readFailed();
+    for (let i = 0; i < text.length; i += 6) guard.onText(text.slice(i, i + 6));
+    return { sent, result: guard.finish(text) };
+  };
+
+  it("with no read: the claim is dropped, and the reply says it hasn't checked and offers to", () => {
+    // What qwen2.5:14b said to "what about tomorrow?", with no read.
+    const { sent, result } = turn("On Wednesday your calendar is clear.");
+    expect(sent).toEqual([NOT_CHECKED]);
+    expect(result).toEqual({ text: NOT_CHECKED, dropped: { claimed_action: 0, promise: 0, perception: 0, tool_result: 1 }, replaced: true });
+    // The honest rest stays, and the line is still added.
+    expect(turn("Good question. You have one event at eight. Anything else?").result.text).toBe(`Good question. Anything else? ${NOT_CHECKED}`);
+  });
+
+  it("with a read that worked this turn: what's on the calendar is said, but promises still aren't", () => {
+    const { sent, result } = turn("Looking at Wednesday 11 November. You have one event, from eight to nine. I'll remind you.", { read: "ok" });
+    expect(sent).toEqual(["Looking at Wednesday 11 November.", "You have one event, from eight to nine."]);
+    expect(result.dropped).toEqual({ claimed_action: 0, promise: 1, perception: 0, tool_result: 0 });
+  });
+
+  it("says the read failed, or that there's no calendar, instead of offering", () => {
+    expect(turn("Your calendar is clear.", { read: "failed" }).result.text).toBe(READ_FAILED);
+    expect(turn("Your calendar is clear.", { calendar: false }).result.text).toBe(NO_CALENDAR);
   });
 });

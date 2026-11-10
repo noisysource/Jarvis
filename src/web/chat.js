@@ -322,13 +322,21 @@ export const badgeText = (unseen) => (unseen <= 0 ? "" : unseen > 9 ? "9+" : Str
  */
 export const shouldSpeak = ({ spoken, readTyped, muted }) => !muted && (spoken || readTyped);
 
+/**
+ * Whether the voice note ("Kokoro isn't running… using the browser voice")
+ * shows: only when there is one and the voice is actually being used for
+ * this turn. Typed, text-only turns don't show it.
+ * @param {{ note: string, voiceInUse: boolean }} s
+ */
+export const voiceNoteVisible = ({ note, voiceInUse }) => note !== "" && voiceInUse;
+
 // ---- the answer's path (#102) ----
 
 /**
  * @typedef {{ kind: "precheck", result: "none" | "handoff" | "route" }
  *   | { kind: "brain", brain: "claude" | "local" }
  *   | { kind: "tool" | "skill", name: string, args: string, by: "code" | "model", ok: boolean, result?: string, error?: string }
- *   | { kind: "guard", claimedAction: number, promise: number, perception: number, replaced: boolean }} PathStep
+ *   | { kind: "guard", claimedAction: number, promise: number, perception: number, toolResult?: number, replaced: boolean }} PathStep
  */
 
 /** The steps of a reply's path, if it has one that this page understands. @param {unknown} body @returns {PathStep[]} */
@@ -342,7 +350,7 @@ export const pathOf = (body) => {
 const toolIcon = (step) => (step.kind === "skill" ? "✨" : step.name.startsWith("calendar") ? "🗓" : "🔧");
 
 /** @param {PathStep & { kind: "guard" }} g */
-const guardDropped = (g) => g.claimedAction + g.promise + g.perception;
+const guardDropped = (g) => g.claimedAction + g.promise + g.perception + (g.toolResult ?? 0);
 
 /** @param {number} n @param {string} one */
 const count = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -397,8 +405,10 @@ export const pathLines = (path, brainLabels = {}) =>
           step.claimedAction > 0 ? count(step.claimedAction, "claimed action") : "",
           step.promise > 0 ? count(step.promise, "promise") : "",
           step.perception > 0 ? count(step.perception, "claim") + " to see or hear you" : "",
+          (step.toolResult ?? 0) > 0 ? count(step.toolResult ?? 0, "claim") + " about your calendar with no read" : "",
         ].filter(Boolean);
-        return `🛡 Honesty guard: dropped ${kinds.join(", ")}${step.replaced ? "; said it can't do that yet" : ""}.`;
+        const said = (step.toolResult ?? 0) > 0 ? "; said it hadn't checked" : step.replaced ? "; said it can't do that yet" : "";
+        return `🛡 Honesty guard: dropped ${kinds.join(", ")}${said}.`;
       }
       default:
         return "";

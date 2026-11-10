@@ -121,7 +121,15 @@ export type PathStep =
       /** When it failed: a fixed code, e.g. "not_connected". */
       readonly error?: string;
     }
-  | { readonly kind: "guard"; readonly claimedAction: number; readonly promise: number; readonly perception: number; readonly replaced: boolean };
+  | {
+      readonly kind: "guard";
+      readonly claimedAction: number;
+      readonly promise: number;
+      readonly perception: number;
+      /** Claims about a tool's results (what's on the calendar) with no successful read this turn. */
+      readonly toolResult: number;
+      readonly replaced: boolean;
+    };
 
 export type AskResponse =
   | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain; readonly path?: readonly PathStep[] }
@@ -274,6 +282,8 @@ export type Deps = {
   readonly afterReply: AfterReply;
   readonly now: () => Date;
   readonly log: Logger;
+  /** CALENDAR=on (#100): the calendar can be read; the honesty guard then offers to check instead of "can't". */
+  readonly calendarEnabled?: boolean;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
   readonly stickyContext?: boolean;
   /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */

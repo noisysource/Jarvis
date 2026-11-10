@@ -566,7 +566,7 @@ describe("honesty guard on every answer (#96)", () => {
     // Asked to do something: the "Sure." is held, and never said before the refusal (#98).
     expect(sentences).toEqual(["Actually, I can't do that yet."]);
     expect(response).toMatchObject({ type: "answer", answer: "Actually, I can't do that yet." });
-    expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, replaced: true } });
+    expect(made.logs).toContainEqual({ level: "info", message: "honesty guard", fields: { claimedAction: 1, promise: 1, perception: 0, toolResult: 0, replaced: true } });
   });
 
   it("typed, not streamed: the whole answer is checked, and memory only gets the checked text", async () => {
@@ -640,5 +640,39 @@ describe("the answer's path, for the page only (#102)", () => {
         { kind: "guard", claimedAction: 0, promise: 0, perception: 0, replaced: false },
       ],
     });
+  });
+
+  it("a claim about the calendar is dropped unless calendar_read worked this turn (#102)", async () => {
+    const made = makeDeps();
+    const history: Turn[] = [{ role: "user", text: "What's on today?" }, { role: "assistant", text: "Looking at Tuesday 10 November. Nothing on." }];
+    // No read: what qwen said.
+    const noRead: Deps = { ...made.deps, calendarEnabled: true, bare: async () => ok({ kind: "answer", text: "On Wednesday your calendar is clear." }) };
+    expect(await handleAsk(noRead, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({
+      answer: "I haven't checked your calendar for that. Which day shall I look at?",
+      path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "guard", toolResult: 1, replaced: true }],
+    });
+    // A read that worked: the same kind of sentence is kept.
+    const read: Deps = {
+      ...made.deps,
+      calendarEnabled: true,
+      bare: async (input) => {
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "1 event" });
+        return ok({ kind: "answer", text: "Looking at Wednesday 11 November. You have one event, from eight to nine." });
+      },
+    };
+    expect(await handleAsk(read, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({
+      answer: "Looking at Wednesday 11 November. You have one event, from eight to nine.",
+      path: [{ kind: "precheck" }, { kind: "brain" }, { kind: "tool", ok: true }, { kind: "guard", toolResult: 0 }],
+    });
+    // A read that failed: no claim, and it says so.
+    const failed: Deps = {
+      ...made.deps,
+      calendarEnabled: true,
+      bare: async (input) => {
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: false, error: "network" });
+        return ok({ kind: "answer", text: "You have nothing on tomorrow." });
+      },
+    };
+    expect(await handleAsk(failed, { question: "what about tomorrow?", history, brain: "local" })).toMatchObject({ answer: "I couldn't check your calendar just now." });
   });
 });

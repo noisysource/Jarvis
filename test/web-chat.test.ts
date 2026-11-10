@@ -4,6 +4,7 @@ import {
   pathOf,
   pathSummary,
   shouldSpeak,
+  voiceNoteVisible,
   CALENDAR_CLAUDE_NOTE,
   calendarNoteDue,
   CONVERSATION,
@@ -374,6 +375,15 @@ describe("voice only in voice mode (#102)", () => {
   });
 });
 
+describe("the voice note (#102)", () => {
+  it("shows only when the voice is actually used for the turn", () => {
+    const note = "Kokoro isn't running, so Jarvis is using the browser voice.";
+    expect(voiceNoteVisible({ note, voiceInUse: true })).toBe(true);
+    expect(voiceNoteVisible({ note, voiceInUse: false })).toBe(false); // a typed, text-only turn
+    expect(voiceNoteVisible({ note: "", voiceInUse: true })).toBe(false);
+  });
+});
+
 describe("the answer's path (#102)", () => {
   const path = pathOf({
     path: [
@@ -414,6 +424,12 @@ describe("the answer's path (#102)", () => {
       "🗓 Tool calendar_read · failed: refused: too many days",
       "🛡 Honesty guard: dropped 2 claimed actions, 1 claim to see or hear you; said it can't do that yet.",
     ]);
+  });
+
+  it("shows claims about the calendar that were dropped for lack of a read", () => {
+    const steps = pathOf({ path: [{ kind: "brain", brain: "local" }, { kind: "guard", claimedAction: 0, promise: 0, perception: 0, toolResult: 1, replaced: true }] });
+    expect(pathSummary(steps)).toBe("🧠 Local · 🛡 guard: 1 dropped");
+    expect(pathLines(steps)[1]).toBe("🛡 Honesty guard: dropped 1 claim about your calendar with no read; said it hadn't checked.");
   });
 
   it("marks skills differently from tools", () => {

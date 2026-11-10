@@ -11,7 +11,7 @@
 import { makeSentenceSplitter } from "../sentences.js";
 import type { Logger } from "../types.js";
 
-export type HonestyCategory = "claimed_action" | "promise" | "perception";
+export type HonestyCategory = "claimed_action" | "promise" | "perception" | "tool_result";
 
 /** What's said when the guard leaves nothing useful. */
 export const CANT_YET = "I can't do that yet.";
@@ -62,10 +62,62 @@ const PATTERNS: readonly (readonly [HonestyCategory, RegExp])[] = [
   ["perception", /\b(?:in|from) your (?:voice|face|eyes|tone of voice|expression)\b/i],
 ];
 
-/** Which rule a sentence breaks, if any. */
-export const honestyCategory = (sentence: string): HonestyCategory | undefined => {
+// ---- claimed tool results (#102) ----
+// What's on the calendar, or that it was checked, can only be said in a turn
+// where calendar_read ran and worked.
+
+/** Said when a claim about the calendar was dropped and the calendar can be read. */
+export const NOT_CHECKED = "I haven't checked your calendar for that. Which day shall I look at?";
+/** The same, when a read was tried this turn and failed. */
+export const READ_FAILED = "I couldn't check your calendar just now.";
+/** The same, when there's no calendar to read. */
+export const NO_CALENDAR = "I can't see your calendar yet.";
+
+const DAY = "(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day";
+const CAL = "(?:calendar|schedule|diary|agenda)";
+const CLOCK = "(?:\\d{1,2}(?::\\d\\d)?|noon|midnight|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half|quarter)";
+
+/** Honest ways to talk about the calendar: not a claim about what's on it. */
+const HONEST_ABOUT_CALENDAR =
+  /\b(?:can't|cannot|can not|couldn't|could not|unable|not able|haven't (?:checked|looked|read)|have not (?:checked|looked|read)|hadn't (?:checked|looked|read)|didn't (?:check|look|read)|isn't connected|not connected|don't know|not sure)\b/i;
+
+/** Claims that name the calendar, events or a check: dropped in any turn. */
+const TOOL_RESULT: readonly RegExp[] = [
+  // "Your calendar is clear", "your schedule shows…", "your calendar has nothing"
+  new RegExp(`\\byour ${CAL}\\b[^.!?]{0,40}\\b(?:is|looks|seems|appears|shows|has|says)\\b`, "i"),
+  // "There's nothing on your calendar", "…in your diary"
+  new RegExp(`\\b(?:on|in) your ${CAL}\\b`, "i"),
+  // "No events", "you don't have any meetings"
+  /\b(?:no|any|zero) (?:events?|meetings?|appointments?)\b/i,
+  /\bnothing (?:is |else )?(?:scheduled|planned|booked)\b/i,
+  // "You have one event from eight to nine", "a meeting at ten", "two appointments tomorrow"
+  /\b(?:one|two|three|four|five|six|\d+|an?|a few|several|some) (?:events?|meetings?|appointments?)\b/i,
+  // "I checked your calendar", "I did check", "I've checked"
+  new RegExp(`\\bI(?:'ve| have| did|'ve just| have just| just)? ?(?:check(?:ed)?|looked (?:at|in|through)|had a look (?:at|in)|read|went through)\\b[^.!?]{0,30}\\b${CAL}\\b`, "i"),
+  /\bI (?:did check|checked)\b|\bI(?:'ve| have)(?: just| already)? checked\b/i,
+  // The sentence only code writes after a read that worked.
+  new RegExp(`^Looking at ${DAY} \\d`),
+];
+
+/** Claims that only mean the calendar when the turn is about it: "you have X at ten", "you're free". */
+const TOOL_RESULT_IN_CALENDAR_TALK: readonly RegExp[] = [
+  new RegExp(`\\byou(?:'ve| have)(?: got)?\\b[^.!?]{1,60}\\b(?:at|from|until|till) ${CLOCK}\\b`, "i"),
+  /\byou(?:'re| are)(?: completely| totally| all| pretty)? (?:free|busy|booked|available|clear)\b/i,
+  new RegExp(`\\b(?:your|the) (?:day|morning|afternoon|evening|week|weekend|${DAY})\\b[^.!?]{0,20}\\b(?:is|looks|seems)\\b[^.!?]{0,20}\\b(?:clear|free|empty|open|busy|full|packed|quiet)\\b`, "i"),
+  /\b(?:you(?:'ve| have)(?: got)?|there(?:'s| is)) nothing\b/i,
+];
+
+/** A statement about what's on the calendar, or about having checked it. Questions and honest "I can't" lines aren't. */
+export const claimsToolResult = (sentence: string, calendarTalk = false): boolean => {
+  const text = sentence.trim();
+  if (text.endsWith("?") || HONEST_ABOUT_CALENDAR.test(text)) return false;
+  return TOOL_RESULT.some((p) => p.test(text)) || (calendarTalk && TOOL_RESULT_IN_CALENDAR_TALK.some((p) => p.test(text)));
+};
+
+/** Which rule a sentence breaks, if any. `calendarTalk`: the turn is about the calendar. */
+export const honestyCategory = (sentence: string, calendarTalk = false): HonestyCategory | undefined => {
   for (const [category, pattern] of PATTERNS) if (pattern.test(sentence)) return category;
-  return undefined;
+  return claimsToolResult(sentence, calendarTalk) ? "tool_result" : undefined;
 };
 
 /** A reaction of one to three words ("Sure.", "Good question."): not something useful on its own. */
@@ -92,11 +144,18 @@ export const makeHonestyGuard = (deps: {
   readonly firstClauseAfter?: number;
   /** The question: if it asks for an action, an affirmative opening waits for the next sentence (#98). */
   readonly question?: string;
+  /** The turn is about the calendar: "you have X at ten" then counts as a claim about it (#102). */
+  readonly calendarTalk?: boolean;
+  /** The calendar can be read (CALENDAR=on): decides what's said when a claim about it is dropped. */
+  readonly calendar?: boolean;
   readonly log?: Logger;
 }) => {
   const holdYes = deps.question !== undefined && asksForAction(deps.question);
   const splitter = makeSentenceSplitter({ language: "en", ...(deps.firstClauseAfter !== undefined ? { firstClauseAfter: deps.firstClauseAfter } : {}) });
-  const dropped: Record<HonestyCategory, number> = { claimed_action: 0, promise: 0, perception: 0 };
+  const dropped: Record<HonestyCategory, number> = { claimed_action: 0, promise: 0, perception: 0, tool_result: 0 };
+  /** calendar_read worked this turn: what's on the calendar may be said. */
+  let resultsKnown = false;
+  let readFailed = false;
   const droppedText: string[] = [];
   let kept = 0;
   let seen = 0;
@@ -119,7 +178,8 @@ export const makeHonestyGuard = (deps: {
     for (const sentence of sentences) {
       const first = seen === 0;
       seen += 1;
-      const category = toolSucceeded ? undefined : honestyCategory(sentence);
+      const found = toolSucceeded ? undefined : honestyCategory(sentence, deps.calendarTalk === true);
+      const category = found === "tool_result" && resultsKnown ? undefined : found;
       if (category) {
         dropped[category] += 1;
         droppedText.push(sentence);
@@ -147,6 +207,14 @@ export const makeHonestyGuard = (deps: {
     toolSucceeded: (): void => {
       toolSucceeded = true;
     },
+    /** calendar_read ran and worked this turn (#102): what's on the calendar may be said. Promises and other claims are still dropped. */
+    resultsKnown: (): void => {
+      resultsKnown = true;
+    },
+    /** calendar_read was tried this turn and failed. */
+    readFailed: (): void => {
+      readFailed = true;
+    },
     /** A streamed piece of the answer. */
     onText: (delta: string): void => {
       pushed = true;
@@ -155,7 +223,7 @@ export const makeHonestyGuard = (deps: {
     /** The answer is complete: checks what's left and returns the text to keep. */
     finish: (fullText: string): HonestyResult => {
       check(pushed ? splitter.flush() : [...splitter.push(fullText), ...splitter.flush()]);
-      const total = dropped.claimed_action + dropped.promise + dropped.perception;
+      const total = dropped.claimed_action + dropped.promise + dropped.perception + dropped.tool_result;
       const replaced = total > 0 && !useful;
       // A held "Sure." is said after all, unless the reply turned into "I can't" (#98).
       if (replaced && held !== undefined) {
@@ -173,14 +241,16 @@ export const makeHonestyGuard = (deps: {
         .replace(/\n[ \t]+/g, "\n")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      if (replaced) {
+      // A dropped claim about the calendar: say it wasn't checked, and offer to (#102).
+      const unchecked = dropped.tool_result > 0;
+      if (replaced || unchecked) {
         // After an opening reaction it flows on ("Hmm. Actually, I can't…"); a held yes is never said.
-        const line = reacted ? ACTUALLY_CANT_YET : CANT_YET;
+        const line = unchecked ? (readFailed ? READ_FAILED : deps.calendar ? NOT_CHECKED : NO_CALENDAR) : reacted ? ACTUALLY_CANT_YET : CANT_YET;
         deps.onSentence?.(line);
         text = kept > 0 && text !== "" ? `${text} ${line}` : line;
       }
       // Categories and counts only: never the text.
-      deps.log?.info("honesty guard", { claimedAction: dropped.claimed_action, promise: dropped.promise, perception: dropped.perception, replaced });
+      deps.log?.info("honesty guard", { claimedAction: dropped.claimed_action, promise: dropped.promise, perception: dropped.perception, toolResult: dropped.tool_result, replaced });
       return { text, dropped, replaced };
     },
   };

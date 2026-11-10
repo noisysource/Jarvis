@@ -21,6 +21,7 @@ import {
   pathOf,
   pathSummary,
   shouldSpeak,
+  voiceNoteVisible,
   parseLanguage,
   pickVoice,
   shouldReopenMic,
@@ -294,9 +295,11 @@ const audio = () => {
 
 /** The voice in use, from GET /tts. @type {ReturnType<typeof chooseVoice>} */
 let voiceChoice = { server: null, note: "" };
+/** Whether the current turn's reply is read aloud: the voice note only shows then (#102). */
+let voiceInUse = false;
 const renderVoiceNote = () => {
   voiceNote.textContent = voiceChoice.note;
-  voiceNote.hidden = voiceChoice.note === "" || state.muted;
+  voiceNote.hidden = !voiceNoteVisible({ note: voiceChoice.note, voiceInUse });
 };
 let voiceChecked = false;
 const refreshVoice = async () => {
@@ -702,8 +705,11 @@ const ask = async (question, context) => {
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
+  // A typed, text-only turn doesn't use the voice: no voice check, and no note about it (#102).
+  voiceInUse = shouldSpeak({ spoken: timing.spoken, readTyped: state.readTyped, muted: state.muted });
+  renderVoiceNote();
   // The voice is checked again only when it isn't the configured one (it may be back up).
-  const voiceReady = voiceChecked && voiceChoice.server ? Promise.resolve() : refreshVoice();
+  const voiceReady = !voiceInUse || (voiceChecked && voiceChoice.server) ? Promise.resolve() : refreshVoice();
 
   /** @type {unknown} */
   let final = null;
@@ -1477,6 +1483,7 @@ muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
   save("jarvis.muted", String(state.muted));
   if (state.muted) stopSpeaking("muted");
+  voiceInUse = voiceInUse && !state.muted;
   renderVoiceNote();
   renderControls();
 });

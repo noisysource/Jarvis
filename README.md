@@ -301,9 +301,19 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      - **The answer** opens with the date that was read, worded by code
        ("Looking at Wednesday 11 November."), so a wrong day is visible.
        The brain answers only from that day's events.
-     - **"Yes" to "shall I try again?"** reads the calendar again for the
-       same question. Without a read, Jarvis is told never to say what's
-       on, or whether the calendar can be reached.
+     - **Follow-ups read too.** "What about tomorrow?" or "and Friday?"
+       after a calendar answer does a real read for that day. So does
+       "yes" to "shall I try again?".
+     - **No claims without a read.** The honesty guard drops any statement
+       about what's on your calendar ("your calendar is clear", "you have
+       one event…") or about having checked it, unless the calendar was
+       really read in that turn. Jarvis then says "I haven't checked your
+       calendar for that. Which day shall I look at?"
+     - **"Did you check?"** makes Jarvis read now and say truthfully
+       whether the earlier answer came from a read: "No, I hadn't checked
+       before. I've checked now: looking at Wednesday 11 November. …"
+     - **Today.** Jarvis always knows today's date, weekday and time in
+       Lisbon.
      - **EC events** (the EC precheck matches the title or place, or anyone
        invited is at europa.eu) reach the brain only as "EC work, handled
        by Kiro", with their time.
@@ -322,6 +332,8 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      allergy, a blood type it doesn't have).
 
    **In the page (#102):**
+   - **The voice note** ("Kokoro isn't running… using the browser
+     voice") shows only on turns that are read aloud.
    - **Voice only in voice mode.** A typed question gets text only. Replies
      are read aloud when you asked with the mic or in conversation mode.
      "🔈 Read typed replies" (off by default) reads typed ones too.

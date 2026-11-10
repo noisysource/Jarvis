@@ -17,6 +17,7 @@
 // Logs carry the context id and outcome only, never the question or answer.
 
 import { makeHonestyGuard } from "./answer/honesty.js";
+import { calendarIntent } from "./calendar/intent.js";
 import { clarifyOptions, handoffMessage } from "./contexts.js";
 import type { AskRequest, AskResponse, Context, ContextOption, Deps, PathStep, Turn } from "./types.js";
 
@@ -182,7 +183,11 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(request.brain ? { brain: request.brain } : {}),
     ...(request.spoken === true ? { spoken: true } : {}),
     onToolSucceeded: guard.toolSucceeded,
-    onStep: (step) => void path.push(step),
+    onStep: (step) => {
+      path.push(step);
+      // Only a read that worked lets the reply say what's on the calendar (#102).
+      if (step.kind === "tool" && step.name === "calendar_read") (step.ok ? guard.resultsKnown : guard.readFailed)();
+    },
   });
   path.splice(1, 0, { kind: "brain", brain: request.brain ?? "claude" });
   if (!answer.ok) {
@@ -203,6 +208,7 @@ const guardStep = (checked: ReturnType<HonestyGuard["finish"]>): PathStep => ({
   claimedAction: checked.dropped.claimed_action,
   promise: checked.dropped.promise,
   perception: checked.dropped.perception,
+  toolResult: checked.dropped.tool_result,
   replaced: checked.replaced,
 });
 
@@ -214,6 +220,8 @@ const guardStep = (checked: ReturnType<HonestyGuard["finish"]>): PathStep => ({
 export const handleAsk = async (deps: Deps, request: AskRequest, outer: AskMeta = {}): Promise<AskResponse> => {
   const guard = makeHonestyGuard({
     question: request.question,
+    calendarTalk: calendarIntent(request.question, request.history ?? []) !== undefined,
+    calendar: deps.calendarEnabled === true,
     ...(outer.onSentence ? { onSentence: outer.onSentence } : {}),
     ...(outer.firstClauseAfter !== undefined ? { firstClauseAfter: outer.firstClauseAfter } : {}),
     log: deps.log,
