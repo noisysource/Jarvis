@@ -695,6 +695,34 @@ Cloud Run in `europe-southwest1` (Madrid) with `--no-allow-unauthenticated`
 **Quality.** Vitest unit tests with stubbed deps; CI runs lint, typecheck,
 tests and build on every PR.
 
+## Memory layers (design, #106)
+
+Memory comes back after bare mode as layers, like a brain, one at a time,
+each behind its own switch and checked with evals.
+
+| Layer | Holds | Lasts | Today |
+|---|---|---|---|
+| **Working** | This conversation: the messages and the tool calls that really ran for each answer | The conversation | Done (#104): the page sends each answer's tool record; the prompt lists it |
+| **Short-term** (#107) | Things just said or done: "Duarte has football tomorrow", a dated log of what Jarvis did (dates and counts only) | Days, then they expire | Partly: dated one-off memories and 30-day history lines |
+| **Long-term** | Stable facts and preferences | Until changed or deleted | The SQLite memory and the profile |
+| **Routine** (#108) | How things are done: playbooks, later learned skills | Until changed | Playbooks; skills in the Builder backlog |
+
+**Before each answer**, a little from each layer is loaded: all of working
+memory, the most recent short-term items, the long-term facts that match the
+question, and the routines that apply. The prompt stays small.
+
+**Consolidation ("sleep", #108):** a nightly review of short-term memory and
+the tool log. Items that keep coming up are proposed as long-term facts;
+repeated tool sequences are proposed as routines (skills: playbooks over
+existing tools). Nothing becomes permanent without Renato's OK. New tools
+(code) are never built automatically: the Builder can only draft a PR.
+
+**Never stored:** what tools fetch (calendar, email). It goes stale, so it's
+read again. Memory keeps what Renato said and what Jarvis did.
+
+The existing memory rules carry over to every layer: EC never, secrets never,
+sensitive details only on an explicit "remember", deletes are real.
+
 ## Build order
 
 **Voice:** #72 streaming answers → #73 mouth (TtsProvider: Kokoro-FastAPI,
