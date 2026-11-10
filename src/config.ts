@@ -90,6 +90,11 @@ export type Config = {
   readonly bareMode: boolean;
   /** PROFILE=on (#98): in bare mode, the brain also gets data/profile.md. Otherwise still bare. */
   readonly bareProfile: boolean;
+  /**
+   * CALENDAR=on (#100, bare mode, this Mac only): reading your personal
+   * Google Calendar. The OAuth client and tokens are gitignored files here.
+   */
+  readonly calendar: { readonly enabled: boolean; readonly clientPath: string; readonly tokensPath: string };
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
   readonly userName: string | undefined;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
@@ -113,6 +118,8 @@ export const DEFAULTS = {
   profileSource: "file:data/profile.md",
   anthropicSecretName: "anthropic-api-key",
   timeZone: "Europe/Lisbon",
+  googleOAuthClientPath: "data/google-oauth-client.json",
+  googleTokensPath: "data/google-tokens.json",
   memoryDb: "data/memory.sqlite",
   neverRememberPath: "data/never-remember.txt",
   ttsProvider: "browser",
@@ -218,6 +225,12 @@ const EnvSchema = z.object({
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
+  CALENDAR: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
+  ),
+  GOOGLE_OAUTH_CLIENT_PATH: optionalString,
+  GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
   VOICE_END_OF_TURN_MS: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -307,6 +320,11 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   if (production && raw("GOOGLE_CLOUD_PROJECT") === undefined) {
     errors.push("GOOGLE_CLOUD_PROJECT: required in production (secrets come from Secret Manager)");
   }
+  if (raw("CALENDAR") === "on") {
+    // The calendar's tokens are files on this Mac; in the cloud, secrets come only from Secret Manager.
+    if (production) errors.push("CALENDAR: local only for now (its tokens are files on this Mac, not in Secret Manager)");
+    if (raw("BARE_MODE") !== "on") errors.push("CALENDAR: needs BARE_MODE=on for now");
+  }
 
   if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl || !ollamaUrl) {
     return err(errors.join("\n"));
@@ -331,6 +349,11 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     ollamaUrl,
     bareMode: e.BARE_MODE === "on",
     bareProfile: e.PROFILE === "on",
+    calendar: {
+      enabled: e.CALENDAR === "on",
+      clientPath: e.GOOGLE_OAUTH_CLIENT_PATH ?? DEFAULTS.googleOAuthClientPath,
+      tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
+    },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

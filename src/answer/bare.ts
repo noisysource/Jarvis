@@ -12,6 +12,16 @@ import type { LlmCall, LlmError, LlmRequest } from "../llm/types.js";
 import { streamOrCall } from "../llm/stream.js";
 import { makeSentenceSplitter } from "../sentences.js";
 import type { ProfileSource } from "../profile.js";
+import type { CalendarReader } from "../calendar/google.js";
+import {
+  CALENDAR_REQUEST_SCHEMA,
+  calendarForBrain,
+  calendarRequestPrompt,
+  calendarUnavailable,
+  checkCalendarRequest,
+  localDate,
+  mightBeAboutCalendar,
+} from "../calendar/read.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
@@ -142,6 +152,8 @@ export const barePrompt = (
     readonly pauses?: boolean;
     /** Their profile (PROFILE=on, #98): what Jarvis knows about them. Personal data: never logged. */
     readonly profile?: string;
+    /** It can read their calendar (CALENDAR=on, #100). */
+    readonly calendar?: boolean;
   } = {},
 ): string => {
   const you = userName ?? "the person you're talking to";
@@ -158,8 +170,16 @@ export const barePrompt = (
     `You are Jarvis, ${userName ? `${userName}'s` : "the"} personal assistant. You speak as "I"; ${userName ?? "they"} ${userName ? "is" : "are"} "you". Never speak as them.`,
     ...knowledge,
     "",
-    "What you can do right now: only talk. You can chat, answer questions from what you know, and think things through together.",
-    "You can't see a calendar, set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use any tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
+    ...(options.calendar
+      ? [
+          "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
+          "When they ask about their calendar, the app reads it and gives you the events at the end of this prompt; answer from those only. You can't add, move or delete events yet.",
+          "You can't set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use other tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
+        ]
+      : [
+          "What you can do right now: only talk. You can chat, answer questions from what you know, and think things through together.",
+          "You can't see a calendar, set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use any tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
+        ]),
     "Never say or suggest you've done something you can't do (\"I've added it\", \"done\", \"I'll remind you\").",
     "And don't promise it for later either, even after saying you can't: no \"but I'll remember\", \"I'll tell you\", \"I'll keep it in mind\" or \"I can remember that for you\". You won't remember anything after this conversation.",
     "",
@@ -185,6 +205,8 @@ export const makeBareAnswerer = (deps: {
   readonly random?: () => number;
   /** PROFILE=on (#98): their profile goes in the prompt, re-read when it changes. Otherwise still bare. */
   readonly profile?: ProfileSource;
+  /** CALENDAR=on (#100): it can read their personal calendar, in this time zone. */
+  readonly calendar?: { readonly read: CalendarReader; readonly timeZone: string; readonly now?: () => Date };
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
   const random = deps.random ?? Math.random;
@@ -192,30 +214,88 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = profile ? { profile } : {};
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
   let cached: { text: string; prompts: ReturnType<typeof prompts> } | undefined;
+
+  /**
+   * The calendar for this turn (#100), as text for the end of the prompt, or
+   * undefined when it isn't about the calendar. The brain asks with a
+   * structured request; code checks it and reads. Reading isn't an action,
+   * so the honesty guard stays on. Logs numbers and fixed words only.
+   */
+  const calendarTurn = async (question: string, history: AnswerInput["history"], signal?: AbortSignal): Promise<string | undefined> => {
+    const calendar = deps.calendar;
+    if (!calendar || !mightBeAboutCalendar(question)) return undefined;
+    const now = (calendar.now ?? (() => new Date()))();
+    const started = performance.now();
+    const asked = await streamOrCall(
+      deps.llm,
+      {
+        system: calendarRequestPrompt(now, calendar.timeZone),
+        messages: [...historyMessages(history).slice(-4), { role: "user", text: question }],
+        outputSchema: CALENDAR_REQUEST_SCHEMA,
+        effort: "low",
+        thinking: "off",
+        maxTokens: 200,
+      },
+      signal,
+    ).result;
+    const requestMs = Math.round(performance.now() - started);
+    if (!asked.ok || asked.value.kind !== "json") {
+      if (!signal?.aborted) deps.log?.warn("calendar request failed", { kind: asked.ok ? asked.value.kind : asked.error.kind, ms: requestMs });
+      return undefined;
+    }
+    const checked = checkCalendarRequest(asked.value.value, localDate(now, calendar.timeZone));
+    if (!checked.ok) {
+      deps.log?.info("calendar request refused", { why: checked.error, ms: requestMs });
+      return calendarUnavailable("unclear");
+    }
+    if (checked.value === undefined) {
+      deps.log?.info("calendar not needed", { ms: requestMs });
+      return undefined;
+    }
+    const range = checked.value;
+    const read = await calendar.read(range, signal);
+    if (!read.ok) {
+      deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
+      return calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed");
+    }
+    deps.log?.info("calendar read", {
+      days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
+      events: read.value.length,
+      ec: read.value.filter((e) => e.ec).length,
+      requestMs,
+      ms: Math.round(performance.now() - started),
+    });
+    return calendarForBrain(range, read.value, calendar.timeZone);
+  };
   return async ({ question, history, onText, signal, spoken }) => {
     let system = withoutProfile;
     if (deps.profile) {
       const profile = await deps.profile();
       if (!profile.ok) {
         // The error names the path, never the profile's content.
-        deps.log?.error("profile unavailable", { code: profile.error.code, message: profile.error.message });
+        deps.log?.error("profile unavailable", { code: profile.error.code, reason: profile.error.message });
         return err({ code: "config", message: "I can't read your profile right now." });
       }
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
+    const calendarText = await calendarTurn(question, history, signal);
+    if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
     const cap = spoken === true && !asksForDetail(question) ? makeSentenceCap(max) : undefined;
     const request: LlmRequest = {
       system: spoken === true ? system.spoken : system.typed,
       cacheSystem: true,
       // Changes every turn, so it's after the cached part.
-      ...(spoken === true ? { systemSuffix: openingHint(history, random) } : {}),
+      ...(() => {
+        const suffix = [spoken === true ? openingHint(history, random) : undefined, calendarText].filter((x): x is string => x !== undefined);
+        return suffix.length > 0 ? { systemSuffix: suffix.join("\n\n") } : {};
+      })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
       effort: "low",
       // A conversation: answer without thinking first (Claude; Ollama has its own think setting).

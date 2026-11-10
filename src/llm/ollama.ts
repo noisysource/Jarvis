@@ -3,8 +3,10 @@
 // line). The plain call is the stream collected.
 //
 // keep_alive keeps the model loaded between turns, so a turn doesn't pay for
-// loading it; `warmOllama` loads it at startup. JSON output and tools aren't
-// supported yet: such requests are refused clearly. Effort, thinking and
+// loading it; `warmOllama` loads it at startup. JSON output (`outputSchema`)
+// goes through Ollama's `format`, for structured requests like the
+// calendar's (#100). Tools aren't supported yet: such requests are refused
+// clearly. Effort, thinking and
 // prompt caching have no Ollama equivalent and are ignored.
 
 import { err, ok, type Result } from "../result.js";
@@ -44,6 +46,8 @@ export const ollamaBody = (model: string, request: LlmRequest, think?: boolean) 
   stream: true,
   keep_alive: OLLAMA_KEEP_ALIVE,
   ...(think !== undefined ? { think } : {}),
+  // Structured output (#100): Ollama keeps the reply to this JSON schema.
+  ...(request.outputSchema ? { format: request.outputSchema } : {}),
   options: { num_predict: request.maxTokens },
 });
 
@@ -81,8 +85,8 @@ export const makeOllamaLlm = (deps: {
   let think = deps.think;
 
   const stream = (request: LlmRequest, signal?: AbortSignal): LlmStreamed => {
-    if (request.outputSchema || (request.tools && request.tools.length > 0)) {
-      const refused = err<LlmError>({ kind: "bad_request", message: "The Ollama provider doesn't do JSON output or tools yet", retryable: false });
+    if (request.tools && request.tools.length > 0) {
+      const refused = err<LlmError>({ kind: "bad_request", message: "The Ollama provider doesn't do tools yet", retryable: false });
       return { text: (async function* () {})(), result: Promise.resolve(refused) };
     }
     let full = "";
@@ -145,12 +149,24 @@ export const makeOllamaLlm = (deps: {
         settle(err(signal?.aborted ? ABORTED : down(deps.baseUrl)));
         return;
       }
+      const usage = { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      if (request.outputSchema) {
+        let value: unknown;
+        try {
+          value = JSON.parse(full);
+        } catch {
+          settle(err({ kind: "invalid_output", message: "Ollama's JSON reply didn't parse", retryable: false }));
+          return;
+        }
+        settle(ok({ kind: "json", value, servedBy: `ollama:${deps.model}`, usage, payload: { provider: "ollama", data: null } }));
+        return;
+      }
       settle(
         ok({
           kind: "text",
           text: full,
           servedBy: `ollama:${deps.model}`,
-          usage: { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          usage,
           payload: { provider: "ollama", data: null },
         }),
       );

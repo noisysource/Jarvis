@@ -276,6 +276,31 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      Jarvis says so. Everything else is still bare: no memory, contexts or
      classifier. With Claude selected, the profile goes to Anthropic; with
      Local, it stays on your Mac.
+   - **`CALENDAR=on` (with `BARE_MODE=on`, on your Mac only): reading your
+     Google Calendar.** Ask "What's on tomorrow?" or "Am I free on
+     Friday?". Only your personal (primary) calendar is read, and only
+     read: nothing is added or changed yet. Set it up once:
+     1. In [Google Cloud](https://console.cloud.google.com/), enable the
+        **Google Calendar API**. Create an **OAuth client ID** of type
+        **Desktop app**, download its JSON, and save it as
+        `data/google-oauth-client.json` (gitignored).
+     2. Run `npm run calendar:connect`. It opens Google's sign-in, asks for
+        read-only access to your events, and saves the refresh token to
+        `data/google-tokens.json` (gitignored, readable only by you). It
+        then counts today's events to check it works.
+     3. Put `CALENDAR=on` in `.env` and restart.
+
+     How it works:
+     - **Request:** the brain you picked fills in a structured request
+       (which days). Code checks it: only that tool, real dates, at most 14
+       days, in Europe/Lisbon. Then code reads the calendar and the brain
+       answers only from those events.
+     - **EC events** (the EC precheck matches the title or place, or anyone
+       invited is at europa.eu) reach the brain only as "EC work, handled
+       by Kiro", with their time.
+     - **With ☁️ Claude**, the events you ask about go to Anthropic. The
+       page says so once. With 🧠 Local, they stay on your Mac.
+     - **Logs:** counts only, never titles. Tokens are never logged.
    - `npm run eval:identity` (or `-- local` / `-- claude`) checks who is
      who and the conversational style on both brains, in bare mode with a
      made-up name: "Can you code?", "Who are you?", the calendar, a

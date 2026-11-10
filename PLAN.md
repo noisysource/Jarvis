@@ -485,17 +485,37 @@ the current architecture.
    - Still no memory, contexts or classifier.
    - `eval:identity --profile` uses the made-up example profile, never
      yours. `--guarded` checks what you'd actually get, after the guard.
-3. **Google Calendar, the first real tool:**
-   - OAuth on the Mac, with tokens stored locally, gitignored and never
-     logged.
-   - Read first ("What's on tomorrow?"), personal calendar only.
-   - Create only after your explicit yes to an event (title, date, time,
-     calendar) built from the tool's result.
-   - The model asks through a structured tool request that code validates
-     (allowed tool, sensible date, Europe/Lisbon).
-   - EC-looking events reach the brain only as "EC work, handled by Kiro".
-   - It works with both brains; with Claude, a one-time note says event
-     titles go to Anthropic.
+3. **Google Calendar, the first real tool**, in two PRs:
+   - **3a, reading (#100), done** (`src/calendar/`, `CALENDAR=on`, bare
+     mode, local only):
+     - **OAuth on the Mac:** `npm run calendar:connect` (installed-app flow,
+       PKCE, loopback redirect, scope `calendar.events.readonly`). The
+       client and refresh token are gitignored files under `data/`, 0600,
+       and never logged. Production refuses `CALENDAR=on`, since secrets
+       there come only from Secret Manager.
+     - **The request:** on a turn that might be about the calendar (a
+       cheap check in code), the selected brain fills in a structured
+       request (`outputSchema`; Ollama's `format`):
+       `{tool: calendar_read|none, from, to}`.
+     - **Code checks it:** only that tool, real YYYY-MM-DD dates, from ≤
+       to, at most 14 days, from 31 days back to a year ahead. It then
+       reads the primary calendar for those days (GET only), with day
+       bounds in Europe/Lisbon.
+     - **The answer:** the events go into the uncached part of the prompt
+       as data, and the brain answers only from them. If it isn't
+       connected, the read fails or the request is refused, the brain is
+       told to say so or to ask which day, never to guess.
+     - **EC events:** the local EC precheck matches the title or place, or
+       an organiser or invitee is at europa.eu. Such an event reaches the
+       brain only as "EC work, handled by Kiro" with its time: no title,
+       place or people.
+     - **Reading isn't an action:** the honesty guard stays on.
+     - **Claude:** the page notes once, before the first question, that
+       with Claude the events go to Anthropic.
+   - **3b, creating:** only after your explicit yes to an event (title,
+     date, time, calendar) shown and spoken from the validated request,
+     and confirmed from the tool's result. This needs the
+     `calendar.events` scope (connect again).
 4. Later: Haiku as a brain option (☁️ Claude Haiku), then memory, then
    contexts and the classifier, each behind its own switch and checked
    with the evals.

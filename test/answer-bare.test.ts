@@ -249,6 +249,6 @@ describe("the profile back in bare mode (#98, PROFILE=on)", () => {
     const missing = async () => err({ code: "missing" as const, message: "No profile at data/profile.md." });
     expect(await ask(makeBareAnswerer({ llm, log, profile: missing }))).toEqual(err({ code: "config", message: "I can't read your profile right now." }));
     expect(requests).toEqual([]);
-    expect(logged).toEqual([{ m: "profile unavailable", f: { code: "missing", message: "No profile at data/profile.md." } }]);
+    expect(logged).toEqual([{ m: "profile unavailable", f: { code: "missing", reason: "No profile at data/profile.md." } }]);
   });
 });

@@ -16,3 +16,6 @@ data/never-remember.txt
 .voice/
 # Names Whisper should expect (family, places, businesses): personal, never commit
 data/whisper-hints.txt
+# Google Calendar (#100): the OAuth client and your refresh token, local only, never commit
+data/google-oauth-client.json
+data/google-tokens.json

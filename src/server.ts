@@ -130,7 +130,12 @@ export const makeServer = (
     /** Warms the model connection (#76): POST /warm, when a spoken conversation starts. */
     readonly warm?: () => void;
     /** The two brains the page can pick (#88): GET /brains. Ids and labels only. */
-    readonly brains?: { readonly default: "claude" | "local"; readonly labels: { readonly claude: string; readonly local: string } };
+    readonly brains?: {
+      readonly default: "claude" | "local";
+      readonly labels: { readonly claude: string; readonly local: string };
+      /** CALENDAR=on (#100): the page notes once that, with Claude, event titles go to Anthropic. */
+      readonly calendar?: boolean;
+    };
   } = {},
 ): Hono<ServerEnv> => {
   const newRequestId = options.newRequestId ?? randomUUID;
@@ -332,6 +337,7 @@ export const makeServer = (
           { id: "local", label: brains.labels.local },
           { id: "claude", label: brains.labels.claude },
         ],
+        calendar: brains.calendar === true,
       });
     });
   }

@@ -15,6 +15,8 @@ import {
   matchContextOption,
   newConversationId,
   parseBrain,
+  CALENDAR_CLAUDE_NOTE,
+  calendarNoteDue,
   parseLanguage,
   pickVoice,
   shouldReopenMic,
@@ -1468,10 +1470,26 @@ input.focus();
 
 // ---- brain switch (#88) ----
 
+// The calendar (#100): with Claude answering, event titles go to Anthropic. Said once, before the first question.
+const calendarNote = /** @type {HTMLElement} */ (byId("calendar-note"));
+let calendarOn = false;
+const CALENDAR_NOTE_SEEN = "jarvis.calendarClaudeNoteSeen";
+const showCalendarNote = () => {
+  if (state.brain !== "claude") {
+    calendarNote.hidden = true;
+    return;
+  }
+  if (!calendarNoteDue({ calendar: calendarOn, brain: state.brain, seen: load(CALENDAR_NOTE_SEEN) === "1" })) return;
+  calendarNote.textContent = CALENDAR_CLAUDE_NOTE;
+  calendarNote.hidden = false;
+  save(CALENDAR_NOTE_SEEN, "1");
+};
+
 brainButton.addEventListener("click", () => {
   state.brain = state.brain === "claude" ? "local" : "claude";
   save("jarvis.brain", state.brain);
   renderControls();
+  showCalendarNote();
 });
 
 void fetch("/brains")
@@ -1480,6 +1498,8 @@ void fetch("/brains")
     for (const b of Array.isArray(body?.brains) ? body.brains : []) {
       if ((b.id === "local" || b.id === "claude") && typeof b.label === "string") brainLabels[b.id] = b.label;
     }
+    calendarOn = body?.calendar === true;
     renderControls();
+    showCalendarNote();
   })
   .catch(() => undefined);

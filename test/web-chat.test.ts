@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CALENDAR_CLAUDE_NOTE,
+  calendarNoteDue,
   CONVERSATION,
   LANGUAGES,
   LIMITS,
@@ -345,5 +347,16 @@ describe("memories panel helpers", () => {
   it("formats the day in the page's language", () => {
     expect(formatMemoryDay("2026-11-07T10:00:00.000Z", "en")).toBe("7 Nov 2026");
     expect(formatMemoryDay("2026-11-07T10:00:00.000Z", "pt")).toBe("7 de novembro de 2026");
+  });
+});
+
+describe("the calendar note for Claude (#100)", () => {
+  it("shows once, when the calendar is on and Claude is answering", () => {
+    expect(calendarNoteDue({ calendar: true, brain: "claude", seen: false })).toBe(true);
+    expect(calendarNoteDue({ calendar: true, brain: "claude", seen: true })).toBe(false);
+    expect(calendarNoteDue({ calendar: true, brain: "local", seen: false })).toBe(false);
+    expect(calendarNoteDue({ calendar: false, brain: "claude", seen: false })).toBe(false);
+    expect(CALENDAR_CLAUDE_NOTE).toContain("sent to Anthropic");
+    expect(CALENDAR_CLAUDE_NOTE).toContain("EC work, handled by Kiro");
   });
 });

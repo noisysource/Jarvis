@@ -28,6 +28,7 @@ describe("loadConfig", () => {
       ollamaUrl: new URL("http://127.0.0.1:11434"),
       bareMode: false,
       bareProfile: false,
+      calendar: { enabled: false, clientPath: "data/google-oauth-client.json", tokensPath: "data/google-tokens.json" },
       ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",
@@ -96,6 +97,20 @@ describe("loadConfig", () => {
       const bad = loadConfig({ [name]: value });
       expect(!bad.ok && bad.error, `${name}=${value}`).toContain(`${name}: `);
     }
+  });
+
+  it("reads the calendar only locally and in bare mode, with its files under data/ (#100)", () => {
+    expect(loadOk({ CALENDAR: "on", BARE_MODE: "on" }).calendar).toEqual({
+      enabled: true,
+      clientPath: "data/google-oauth-client.json",
+      tokensPath: "data/google-tokens.json",
+    });
+    const noBare = loadConfig({ CALENDAR: "on" });
+    expect(!noBare.ok && noBare.error).toContain("CALENDAR: needs BARE_MODE=on for now");
+    const production = loadConfig({ CALENDAR: "on", BARE_MODE: "on", NODE_ENV: "production", GOOGLE_CLOUD_PROJECT: "p" });
+    expect(!production.ok && production.error).toContain("CALENDAR: local only for now");
+    const bad = loadConfig({ CALENDAR: "yes" });
+    expect(!bad.ok && bad.error).toContain("CALENDAR: ");
   });
 
   it("runs the local brain on Ollama on this machine only (#88)", () => {
