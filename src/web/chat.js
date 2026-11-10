@@ -311,3 +311,96 @@ export const unseenIds = (memories) => memories.filter((m) => !m.seen).map((m) =
 
 /** The badge text: "" when there's nothing new, "9+" past nine. @param {number} unseen */
 export const badgeText = (unseen) => (unseen <= 0 ? "" : unseen > 9 ? "9+" : String(unseen));
+
+// ---- voice only in voice mode (#102) ----
+
+/**
+ * Whether a reply is read aloud: when you asked with the mic (or in a
+ * spoken conversation), or when "read typed replies aloud" is on. Never
+ * when muted.
+ * @param {{ spoken: boolean, readTyped: boolean, muted: boolean }} turn
+ */
+export const shouldSpeak = ({ spoken, readTyped, muted }) => !muted && (spoken || readTyped);
+
+// ---- the answer's path (#102) ----
+
+/**
+ * @typedef {{ kind: "precheck", result: "none" | "handoff" | "route" }
+ *   | { kind: "brain", brain: "claude" | "local" }
+ *   | { kind: "tool" | "skill", name: string, args: string, by: "code" | "model", ok: boolean, result?: string, error?: string }
+ *   | { kind: "guard", claimedAction: number, promise: number, perception: number, replaced: boolean }} PathStep
+ */
+
+/** The steps of a reply's path, if it has one that this page understands. @param {unknown} body @returns {PathStep[]} */
+export const pathOf = (body) => {
+  const path = body && typeof body === "object" && "path" in body ? body.path : undefined;
+  if (!Array.isArray(path)) return [];
+  return path.filter((s) => s && typeof s === "object" && ["precheck", "brain", "tool", "skill", "guard"].includes(s.kind));
+};
+
+/** Tools do or fetch something; skills are ways of working. They're marked differently. @param {PathStep & { kind: "tool" | "skill" }} step */
+const toolIcon = (step) => (step.kind === "skill" ? "✨" : step.name.startsWith("calendar") ? "🗓" : "🔧");
+
+/** @param {PathStep & { kind: "guard" }} g */
+const guardDropped = (g) => g.claimedAction + g.promise + g.perception;
+
+/** @param {number} n @param {string} one */
+const count = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/**
+ * The one-line summary: "🧠 Local · 🗓 calendar_read Wed 11 Nov → 2 events · 🛡 guard: 1 dropped".
+ * @param {readonly PathStep[]} path
+ */
+export const pathSummary = (path) =>
+  path
+    .flatMap((step) => {
+      switch (step.kind) {
+        case "precheck":
+          return step.result === "handoff" ? ["🚦 EC precheck → Kiro"] : [];
+        case "brain":
+          return [step.brain === "claude" ? "☁️ Claude" : "🧠 Local"];
+        case "tool":
+        case "skill":
+          return [`${toolIcon(step)} ${step.kind === "skill" ? "skill " : ""}${step.name}${step.args ? ` ${step.args}` : ""} → ${step.ok ? (step.result ?? "ok") : `failed (${step.error ?? "error"})`}`];
+        case "guard":
+          return guardDropped(step) > 0 ? [`🛡 guard: ${guardDropped(step)} dropped`] : [];
+        default:
+          return [];
+      }
+    })
+    .join(" · ");
+
+/**
+ * Each step in order, for the expanded view.
+ * @param {readonly PathStep[]} path @param {Record<string, string>} [brainLabels] e.g. { local: "Local · qwen3:8b" }
+ */
+export const pathLines = (path, brainLabels = {}) =>
+  path.map((step) => {
+    switch (step.kind) {
+      case "precheck":
+        return step.result === "handoff"
+          ? "🚦 EC precheck: EC work, handed to Kiro. No model ran."
+          : step.result === "route"
+            ? "🚦 EC precheck: mentions the EC, but it's yours to answer (invoicing)."
+            : "🚦 EC precheck: not EC work.";
+      case "brain":
+        return `${step.brain === "claude" ? "☁️" : "🧠"} Brain: ${brainLabels[step.brain] ?? (step.brain === "claude" ? "Claude" : "Local")}`;
+      case "tool":
+      case "skill": {
+        const who = step.by === "code" ? "worked out by code" : "chosen by the model, checked by code";
+        const args = step.args ? ` · ${step.args} (${who})` : "";
+        return `${toolIcon(step)} ${step.kind === "skill" ? "Skill" : "Tool"} ${step.name}${args} · ${step.ok ? `ok${step.result ? `: ${step.result}` : ""}` : `failed: ${step.error ?? "error"}`}`;
+      }
+      case "guard": {
+        if (guardDropped(step) === 0) return "🛡 Honesty guard: nothing dropped.";
+        const kinds = [
+          step.claimedAction > 0 ? count(step.claimedAction, "claimed action") : "",
+          step.promise > 0 ? count(step.promise, "promise") : "",
+          step.perception > 0 ? count(step.perception, "claim") + " to see or hear you" : "",
+        ].filter(Boolean);
+        return `🛡 Honesty guard: dropped ${kinds.join(", ")}${step.replaced ? "; said it can't do that yet" : ""}.`;
+      }
+      default:
+        return "";
+    }
+  });

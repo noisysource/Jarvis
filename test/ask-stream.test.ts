@@ -77,7 +77,7 @@ describe("POST /ask, streamed", () => {
     const res = await ask({ question: "Who's my doctor?" });
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const events = parseSse(await res.text());
-    expect(events.filter((e) => e.event !== "timing")).toEqual([
+    expect(events.filter((e) => e.event !== "timing")).toMatchObject([
       { event: "start", data: { turnId: "turn-0001" } },
       { event: "sentence", data: { index: 0, text: "Hello!" } },
       { event: "sentence", data: { index: 1, text: "Dr. Silva is your doctor." } },
@@ -118,7 +118,7 @@ describe("POST /ask, streamed", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question: "Who's my doctor?" }),
     });
-    expect(await res.json()).toEqual({ type: "answer", context: "personal", answer: CHUNKS.join("") });
+    expect(await res.json()).toMatchObject({ type: "answer", context: "personal", answer: CHUNKS.join("") });
     expect(wrapUps).toEqual([{ answer: CHUNKS.join("") }]); // wrapped up straight away, as before
   });
 

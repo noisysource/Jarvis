@@ -97,8 +97,34 @@ export type ContextOption = {
   readonly aliases?: readonly string[];
 };
 
+/**
+ * One step on the way to an answer (#102), in order, for the page's "path"
+ * line under each reply. It carries fixed words, dates and counts as
+ * checked by code: never a question, an answer or an event's title. It
+ * goes to the page only; the server log keeps its own numbers-only lines.
+ */
+export type PathStep =
+  /** The local EC precheck: "handoff" went to Kiro with no model. */
+  | { readonly kind: "precheck"; readonly result: "none" | "handoff" | "route" }
+  | { readonly kind: "brain"; readonly brain: Brain }
+  /** A tool call (something done or fetched), or a skill (a way of working), when those exist. */
+  | {
+      readonly kind: "tool" | "skill";
+      readonly name: string;
+      /** The arguments as checked by code, e.g. "Wed 11 Nov". Empty when it never got that far. */
+      readonly args: string;
+      /** Who chose the arguments: code (a date phrase) or the model's structured request. */
+      readonly by: "code" | "model";
+      readonly ok: boolean;
+      /** When it worked, e.g. "2 events". */
+      readonly result?: string;
+      /** When it failed: a fixed code, e.g. "not_connected". */
+      readonly error?: string;
+    }
+  | { readonly kind: "guard"; readonly claimedAction: number; readonly promise: number; readonly perception: number; readonly replaced: boolean };
+
 export type AskResponse =
-  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain }
+  | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain; readonly path?: readonly PathStep[] }
   | {
       readonly type: "clarify";
       readonly message: string;
@@ -110,6 +136,7 @@ export type AskResponse =
       /** The agent that handles this context, e.g. "Kiro (the EC's agent)". */
       readonly to: string;
       readonly message: string;
+      readonly path?: readonly PathStep[];
     }
   /** The context exists but its data isn't connected yet (e.g. KidClub in M0). A normal reply, not a failure. */
   | { readonly type: "unavailable"; readonly context: ContextId; readonly message: string }
@@ -200,6 +227,8 @@ export type AnswerInput = {
   readonly brain?: Brain;
   /** A tool ran and succeeded this turn (#96): the honesty guard then lets its claims through. Called by a tool loop. */
   readonly onToolSucceeded?: () => void;
+  /** Reports a tool or skill step for the answer's path (#102). */
+  readonly onStep?: (step: PathStep) => void;
 };
 
 /**

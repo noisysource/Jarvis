@@ -527,6 +527,16 @@ the current architecture.
      - **Reading isn't an action:** the honesty guard stays on.
      - **Claude:** the page notes once, before the first question, that
        with Claude the events go to Anthropic.
+   - **The answer's path (#102):** answers and handoffs carry `path`, a
+     list of steps: the EC precheck result, the brain, each tool or skill
+     step (`AnswerInput.onStep`: name, arguments as checked by code, who
+     chose them, ok or an error code, a count), and the guard's counts.
+     The page shows it as one collapsible line under the reply. It holds
+     fixed words, dates and counts only, and is never logged. Skills get
+     their own mark (✨) when they exist.
+   - **Voice only in voice mode (#102):** the page reads a reply aloud
+     only for a mic turn, or when "read typed replies" is on (off by
+     default). Each message has a copy button.
    - **3b, creating:** only after your explicit yes to an event (title,
      date, time, calendar) shown and spoken from the validated request,
      and confirmed from the tool's result. This needs the

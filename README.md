@@ -321,6 +321,20 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      cases ("Tell me about me", your work, your daughter's birthday, an
      allergy, a blood type it doesn't have).
 
+   **In the page (#102):**
+   - **Voice only in voice mode.** A typed question gets text only. Replies
+     are read aloud when you asked with the mic or in conversation mode.
+     "🔈 Read typed replies" (off by default) reads typed ones too.
+   - **Copy.** Chat text can be selected, and each message has a Copy
+     button for its plain text.
+   - **The path of each answer.** Under each reply is one line, such as
+     `🧠 Local · 🗓 calendar_read Wed 11 Nov → 2 events · 🛡 guard: 1
+     dropped`. Open it to see each step in order: the EC precheck, the
+     brain, each tool call (its dates as checked by code, whether code or
+     the model chose them, ok or the error code) and what the honesty
+     guard dropped. It has dates and counts only, never titles, and it's
+     only in the page: the server log doesn't get it.
+
    **Why did he stop?** Each spoken answer's end is logged as one
    `playback` line. It gives the `reason` (`finished`, `barge-in`,
    `new-question`, `stop`, `typed`, `muted`, `new-conversation`,

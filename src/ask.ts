@@ -18,7 +18,7 @@
 
 import { makeHonestyGuard } from "./answer/honesty.js";
 import { clarifyOptions, handoffMessage } from "./contexts.js";
-import type { AskRequest, AskResponse, Context, ContextOption, Deps, Turn } from "./types.js";
+import type { AskRequest, AskResponse, Context, ContextOption, Deps, PathStep, Turn } from "./types.js";
 
 export const clarifyMessage = (options: readonly ContextOption[]): string => {
   const names = options.map((o) => o.name);
@@ -157,6 +157,8 @@ const startSpeculation = (deps: Deps, request: AskRequest, history: readonly Tur
  */
 const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest, meta: AskMeta, guard: HonestyGuard): Promise<AskResponse> => {
   const local = deps.precheck(request.question);
+  // The answer's path (#102), for the page only: never logged.
+  const path: PathStep[] = [{ kind: "precheck", result: local.kind }];
   if (local.kind === "handoff") {
     deps.log.info("ask", { context: local.context.id, outcome: "handoff", bare: true });
     return {
@@ -164,6 +166,7 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
       context: local.context.id,
       to: local.context.handling.kind === "handoff" ? local.context.handling.to : "",
       message: handoffMessage(local.context),
+      path,
     };
   }
   const personal = deps.contexts.find((c) => c.id === "personal");
@@ -179,18 +182,29 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(request.brain ? { brain: request.brain } : {}),
     ...(request.spoken === true ? { spoken: true } : {}),
     onToolSucceeded: guard.toolSucceeded,
+    onStep: (step) => void path.push(step),
   });
+  path.splice(1, 0, { kind: "brain", brain: request.brain ?? "claude" });
   if (!answer.ok) {
     deps.log.info("ask", { outcome: answer.error.code === "cancelled" ? "cancelled" : "error", bare: true, brain: request.brain ?? "claude" });
     return { type: "error", message: answer.error.message };
   }
   if (answer.value.kind !== "answer") return { type: "unavailable", context: personal.id, message: answer.value.message };
   const checked = guard.finish(answer.value.text);
+  path.push(guardStep(checked));
   deps.log.info("ask", { outcome: "answer", bare: true, brain: request.brain ?? "claude" });
-  return { type: "answer", context: personal.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}) };
+  return { type: "answer", context: personal.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}), path };
 };
 
 type HonestyGuard = ReturnType<typeof makeHonestyGuard>;
+
+const guardStep = (checked: ReturnType<HonestyGuard["finish"]>): PathStep => ({
+  kind: "guard",
+  claimedAction: checked.dropped.claimed_action,
+  promise: checked.dropped.promise,
+  perception: checked.dropped.perception,
+  replaced: checked.replaced,
+});
 
 /**
  * Every answer goes through the honesty guard (#96), whatever brain wrote it:
@@ -256,7 +270,13 @@ const answerChecked = async (deps: Deps, request: AskRequest, meta: AskMeta, gua
     if (context.handling.kind === "handoff") {
       // Nothing else runs: no answerer, no memory, and the question isn't logged.
       deps.log.info("ask", { context: context.id, outcome: "handoff" });
-      return { type: "handoff", context: context.id, to: context.handling.to, message: handoffMessage(context) };
+      return {
+        type: "handoff",
+        context: context.id,
+        to: context.handling.to,
+        message: handoffMessage(context),
+        ...(resolved.how === "precheck" ? { path: [{ kind: "precheck" as const, result: "handoff" as const }] } : {}),
+      };
     }
 
     // No answerer, no memory: "not connected yet" needs nothing loaded.
@@ -334,7 +354,12 @@ const answerChecked = async (deps: Deps, request: AskRequest, meta: AskMeta, gua
     }
 
     deps.log.info("ask", { context: context.id, outcome: "answer", brain: request.brain ?? "claude" });
-    return { type: "answer", context: context.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}) };
+    const path: PathStep[] = [
+      { kind: "precheck", result: resolved.how === "precheck" ? "route" : "none" },
+      { kind: "brain", brain: request.brain ?? "claude" },
+      guardStep(checked),
+    ];
+    return { type: "answer", context: context.id, answer: checked.text, ...(request.brain ? { brain: request.brain } : {}), path };
   } catch (e) {
     // Only the error class is logged; messages could quote the question.
     deps.log.error("ask failed", { errorName: e instanceof Error ? e.name : typeof e });

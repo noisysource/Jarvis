@@ -307,6 +307,27 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     expect(JSON.stringify(logs)).not.toMatch(/Dentist|UTP/);
   });
 
+  it("reports each calendar step for the answer's path: dates and counts, never titles (#102)", async () => {
+    const steps: unknown[] = [];
+    const run = async (llmValue: unknown, read: Parameters<typeof makeBareAnswerer>[0]["calendar"], question: string) => {
+      const { llm } = recording(llmValue);
+      const answer = makeBareAnswerer({ llm, ...(read ? { calendar: read } : {}) });
+      await answer({ context: personal, question, history: [], memories: [], now: NOW, onStep: (s) => steps.push(s) });
+    };
+    await run({}, { read: googleWith(twoEvents).read, timeZone: TZ, now: () => NOW }, "What's on tomorrow?");
+    await run({ tool: "calendar_read", from: "2026-11-16", to: "2026-11-22" }, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "When's my next appointment?");
+    await run({}, { read: async () => err({ code: "not_connected" as const, message: "x" }), timeZone: TZ, now: () => NOW }, "What's on Friday?");
+    await run({ tool: "calendar_write", from: "2026-11-11", to: "2026-11-11" }, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "Any plans?");
+    await run({}, { read: googleWith([]).read, timeZone: TZ, now: () => NOW }, "What's a black hole?");
+    expect(steps).toEqual([
+      { kind: "tool", name: "calendar_read", args: "Wed 11 Nov", by: "code", ok: true, result: "2 events" },
+      { kind: "tool", name: "calendar_read", args: "Mon 16 – Sun 22 Nov", by: "model", ok: true, result: "0 events" },
+      { kind: "tool", name: "calendar_read", args: "Fri 13 Nov", by: "code", ok: false, error: "not_connected" },
+      { kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: "refused: not an allowed tool" },
+    ]);
+    expect(JSON.stringify(steps)).not.toMatch(/Dentist|UTP/);
+  });
+
   it("streams the date sentence first, outside the spoken sentence limit, with no opening reaction", async () => {
     const requests: LlmRequest[] = [];
     const llm: LlmCall = Object.assign(async () => ok({ kind: "text" as const, text: "", servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } }), {

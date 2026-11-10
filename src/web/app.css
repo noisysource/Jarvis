@@ -433,3 +433,60 @@ textarea:focus-visible {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* Chat text can always be selected and copied (#102). */
+.message,
+.message p {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.message {
+  position: relative;
+}
+
+/* A copy button on each message: quiet until you point at or tab to it. */
+.message .copy {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  opacity: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.message:hover .copy,
+.message:focus-within .copy,
+.message .copy:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .message .copy {
+    opacity: 0.6;
+  }
+}
+
+/* The path of an answer (#102): one line, opens to each step. */
+.message .path {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.message .path summary {
+  cursor: pointer;
+}
+
+.message .path ol {
+  list-style: decimal;
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}
+
+button.small {
+  font-size: 0.8rem;
+}

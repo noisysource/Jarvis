@@ -7,7 +7,7 @@
 // the code (it's personal data).
 
 import { err, ok, type Result } from "../result.js";
-import type { AnswerInput, AnswerOutcome, AppError, Logger } from "../types.js";
+import type { AnswerInput, AnswerOutcome, AppError, Logger, PathStep } from "../types.js";
 import type { LlmCall, LlmError, LlmRequest } from "../llm/types.js";
 import { streamOrCall } from "../llm/stream.js";
 import { makeSentenceSplitter } from "../sentences.js";
@@ -23,7 +23,7 @@ import {
   localDate,
   type DayRange,
 } from "../calendar/read.js";
-import { readSentence, resolveDatePhrase } from "../calendar/dates.js";
+import { readSentence, resolveDatePhrase, shortRangeLabel } from "../calendar/dates.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
@@ -237,6 +237,7 @@ export const makeBareAnswerer = (deps: {
     question: string,
     history: AnswerInput["history"],
     signal?: AbortSignal,
+    onStep?: (step: PathStep) => void,
   ): Promise<{ readonly text: string; readonly lead?: string } | undefined> => {
     const calendar = deps.calendar;
     if (!calendar) return undefined;
@@ -249,11 +250,14 @@ export const makeBareAnswerer = (deps: {
 
     let range: DayRange | undefined;
     let by: "code" | "model" = "code";
+    // For the answer's path (#102): dates and fixed words only.
+    const failed = (error: string, args = ""): void => onStep?.({ kind: "tool", name: "calendar_read", args, by, ok: false, error });
     const named = resolveDatePhrase(asked, today);
     if (named) {
       const checked = checkCalendarRequest({ tool: "calendar_read", ...named }, today);
       if (!checked.ok) {
         deps.log?.info("calendar request refused", { why: checked.error, by });
+        failed(`refused: ${checked.error}`, shortRangeLabel(named));
         return { text: calendarUnavailable("unclear") };
       }
       range = checked.value;
@@ -274,11 +278,13 @@ export const makeBareAnswerer = (deps: {
       const ms = Math.round(performance.now() - started);
       if (!request.ok || request.value.kind !== "json") {
         if (!signal?.aborted) deps.log?.warn("calendar request failed", { kind: request.ok ? request.value.kind : request.error.kind, ms });
+        failed("request_failed");
         return { text: calendarUnavailable("unclear") };
       }
       const checked = checkCalendarRequest(request.value.value, today);
       if (!checked.ok) {
         deps.log?.info("calendar request refused", { why: checked.error, by, ms });
+        failed(`refused: ${checked.error}`);
         return { text: calendarUnavailable("unclear") };
       }
       range = checked.value;
@@ -290,6 +296,7 @@ export const makeBareAnswerer = (deps: {
     const read = await calendar.read(range, signal);
     if (!read.ok) {
       deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
+      failed(read.error.code, shortRangeLabel(range));
       return { text: calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed") };
     }
     deps.log?.info("calendar read", {
@@ -299,6 +306,8 @@ export const makeBareAnswerer = (deps: {
       by,
       ms: Math.round(performance.now() - started),
     });
+    const count = read.value.length;
+    onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by, ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
     const lead = readSentence(range, today);
     return {
       lead,
@@ -308,7 +317,7 @@ export const makeBareAnswerer = (deps: {
       ].join("\n"),
     };
   };
-  return async ({ question, history, onText, signal, spoken }) => {
+  return async ({ question, history, onText, signal, spoken, onStep }) => {
     let system = withoutProfile;
     if (deps.profile) {
       const profile = await deps.profile();
@@ -320,7 +329,7 @@ export const makeBareAnswerer = (deps: {
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
-    const calendar = await calendarTurn(question, history, signal);
+    const calendar = await calendarTurn(question, history, signal, onStep);
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
     const lead = calendar?.lead;
