@@ -8,12 +8,13 @@
 
 import { err, ok, type Result } from "../result.js";
 import type { AnswerInput, AnswerOutcome, AppError, Logger, PathStep } from "../types.js";
-import type { LlmCall, LlmError, LlmRequest } from "../llm/types.js";
+import type { LlmCall, LlmError, LlmMessage, LlmRequest, LlmResponse, LlmToolCall, LlmToolResult } from "../llm/types.js";
 import { streamOrCall } from "../llm/stream.js";
 import { makeSentenceSplitter } from "../sentences.js";
 import type { ProfileSource } from "../profile.js";
 import type { CalendarReader } from "../calendar/google.js";
 import {
+  CALENDAR_READ_TOOL,
   CALENDAR_REQUEST_SCHEMA,
   calendarForBrain,
   calendarRequestPrompt,
@@ -27,6 +28,9 @@ import { calendarIntent } from "../calendar/intent.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
+
+/** Native tool calling (#104): at most this many rounds of tool calls in one answer. */
+export const MAX_TOOL_ROUNDS = 3;
 
 /** Spoken replies (#92): at most this many sentences after the opening reaction, unless they ask for detail. */
 export const DEFAULT_SPOKEN_SENTENCES = 2;
@@ -156,6 +160,8 @@ export const barePrompt = (
     readonly profile?: string;
     /** It can read their calendar (CALENDAR=on, #100). */
     readonly calendar?: boolean;
+    /** It reads the calendar itself, with the calendar_read tool (#104), instead of the app reading it. */
+    readonly tools?: boolean;
   } = {},
 ): string => {
   const you = userName ?? "the person you're talking to";
@@ -175,8 +181,15 @@ export const barePrompt = (
     ...(options.calendar
       ? [
           "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
-          "When they ask about their calendar, the app reads it and gives you the events at the end of this prompt; answer from those only. You can't add, move or delete events yet.",
-          "Only when events (or a note that reading failed) are at the end of this prompt was the calendar read for this message. Otherwise it wasn't: never say what's on it, or that it can or can't be reached. If they want it checked, ask which day.",
+          ...(options.tools
+            ? [
+                "When answering needs their calendar, call the calendar_read tool first, before writing anything, with the days to read. Work the days out from today's date at the end of this prompt. Answer about their calendar only from what the tool returns, and if it fails or is refused, say so plainly. You can't add, move or delete events yet.",
+                "Only a calendar_read in this message counts: never say what's on their calendar, or that you checked it, without calling it now. Earlier answers in this conversation may be out of date, so read again when they ask.",
+              ]
+            : [
+                "When they ask about their calendar, the app reads it and gives you the events at the end of this prompt; answer from those only. You can't add, move or delete events yet.",
+                "Only when events (or a note that reading failed) are at the end of this prompt was the calendar read for this message. Otherwise it wasn't: never say what's on it, or that it can or can't be reached. If they want it checked, ask which day.",
+              ]),
           "You can't set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use other tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
         ]
       : [
@@ -248,6 +261,12 @@ export const makeBareAnswerer = (deps: {
   readonly timeZone?: string;
   /** CALENDAR=on (#100): it can read their personal calendar, in this time zone. */
   readonly calendar?: { readonly read: CalendarReader; readonly timeZone: string; readonly now?: () => Date };
+  /**
+   * Native tool calling (#104): the brain decides itself when to read the
+   * calendar, through the calendar_read tool; code checks every call. Only
+   * for brains whose provider does tools (Claude). Otherwise code decides.
+   */
+  readonly tools?: boolean;
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
   const random = deps.random ?? Math.random;
@@ -255,7 +274,7 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}) };
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
@@ -374,13 +393,18 @@ export const makeBareAnswerer = (deps: {
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
-    const calendar = await calendarTurn(question, history, signal, onStep);
+    // Native tool calling (#104): the brain reads the calendar itself, except for
+    // "did you check?", which is answered in code from what really happened.
+    const tools = deps.tools === true && deps.calendar !== undefined;
+    const viaCode = !tools || calendarIntent(question, history)?.didCheck !== undefined;
+    const calendar = viaCode ? await calendarTurn(question, history, signal, onStep) : undefined;
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
-    const lead = calendar?.lead;
+    // With tools, it's set after the first read that works, if nothing was said yet.
+    let lead = calendar?.lead;
     const withLead = (text: string): string => (lead ? `${lead} ${text}`.trim() : text);
     // The model sometimes restates the date sentence: it's taken off.
-    const strip = lead ? makeLeadStripper() : undefined;
+    let strip = lead ? makeLeadStripper() : undefined;
     const unrestated = (text: string): string => {
       if (!lead) return text;
       const s = makeLeadStripper();
@@ -400,43 +424,112 @@ export const makeBareAnswerer = (deps: {
         return { systemSuffix: suffix.join("\n\n") };
       })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
+      ...(tools && !viaCode ? { tools: [CALENDAR_READ_TOOL] } : {}),
       effort: "low",
       // A conversation: answer without thinking first (Claude; Ollama has its own think setting).
       thinking: "off",
       maxTokens: BARE_MAX_TOKENS,
     };
-    let result: Awaited<ReturnType<LlmCall>>;
-    let cut = false;
-    if (onText || cap) {
-      // Our own controller too, so the model can be stopped at the sentence limit.
-      const controller = new AbortController();
-      signal?.addEventListener("abort", () => controller.abort());
-      const streamed = streamOrCall(deps.llm, request, controller.signal);
-      // The date sentence goes out first, outside the sentence limit.
-      if (lead) onText?.(`${lead} `);
-      // Returns true when the sentence limit is reached.
-      const pass = (text: string): boolean => {
-        if (text === "") return false;
-        if (!cap) {
-          onText?.(text);
-          return false;
-        }
-        const step = cap.feed(text);
-        if (step.text !== "") onText?.(step.text);
-        return step.done;
-      };
-      for await (const delta of streamed.text) {
-        if (pass(strip ? strip.feed(delta) : delta)) {
-          cut = true;
-          controller.abort();
-          break;
-        }
+
+    /** Something has been passed on, so a lead can no longer open the reply. */
+    let said = lead !== undefined;
+    /** Runs one tool call the brain asked for (#104). Code checks it; the result goes back to the brain. */
+    const runTool = async (call: LlmToolCall): Promise<LlmToolResult> => {
+      const cal = deps.calendar;
+      if (call.name !== CALENDAR_READ_TOOL.name || !cal) {
+        onStep?.({ kind: "tool", name: call.name.slice(0, 40), args: "", by: "model", ok: false, error: "not an allowed tool" });
+        return { callId: call.id, content: "That tool doesn't exist. Answer without it.", isError: true };
       }
-      if (!cut && strip && pass(strip.flush())) cut = true;
-      result = await streamed.result;
-    } else {
-      result = await deps.llm(request);
+      const today = localDate((cal.now ?? (() => new Date()))(), cal.timeZone);
+      const input = typeof call.input === "object" && call.input !== null ? (call.input as Record<string, unknown>) : {};
+      const checked = checkCalendarRequest({ ...input, tool: "calendar_read" }, today);
+      if (!checked.ok || checked.value === undefined) {
+        const why = checked.ok ? "no days" : checked.error;
+        deps.log?.info("calendar request refused", { why, by: "model" });
+        onStep?.({ kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: `refused: ${why}` });
+        return { callId: call.id, content: `Refused: ${why}. Read at most 14 days, as YYYY-MM-DD, or ask them which days they mean.`, isError: true };
+      }
+      const range = checked.value;
+      const started = performance.now();
+      const read = await cal.read(range, signal);
+      if (!read.ok) {
+        deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
+        onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by: "model", ok: false, error: read.error.code });
+        return { callId: call.id, content: calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed"), isError: true };
+      }
+      const count = read.value.length;
+      deps.log?.info("calendar read", {
+        days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
+        events: count,
+        ec: read.value.filter((e) => e.ec).length,
+        by: "model",
+        ms: Math.round(performance.now() - started),
+      });
+      onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by: "model", ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
+      const parts = [calendarForBrain(range, read.value, cal.timeZone)];
+      if (!said) {
+        // The first read that works opens the reply with the days, worded by code.
+        lead = readSentence(range, today);
+        said = true;
+        strip = makeLeadStripper();
+        onText?.(`${lead} `);
+        parts.push(`Your reply already starts with "${lead}" (written by the app). Continue straight on with what's on then. Don't say "Looking at", don't restate the date, and don't open with a reaction.`);
+      }
+      return { callId: call.id, content: parts.join("\n") };
+    };
+
+    // Our own controller too, so the model can be stopped at the sentence limit.
+    const controller = new AbortController();
+    signal?.addEventListener("abort", () => controller.abort());
+    // Returns true when the sentence limit is reached.
+    const pass = (text: string): boolean => {
+      if (text === "") return false;
+      said = true;
+      if (!cap) {
+        onText?.(text);
+        return false;
+      }
+      const step = cap.feed(text);
+      if (step.text !== "") onText?.(step.text);
+      return step.done;
+    };
+    // The date sentence goes out first, outside the sentence limit.
+    if (lead) onText?.(`${lead} `);
+
+    let messages: readonly LlmMessage[] = request.messages;
+    /** Text from rounds that ended in tool calls, in order. */
+    const earlier: string[] = [];
+    let result: Awaited<ReturnType<LlmCall>> | undefined;
+    let cut = false;
+    for (let round = 0; ; round += 1) {
+      // The last round gets no tools, so it has to answer.
+      const last = round >= MAX_TOOL_ROUNDS;
+      const roundRequest: LlmRequest = { ...request, messages, ...(last ? { tools: undefined } : {}) };
+      if (onText || cap) {
+        const streamed = streamOrCall(deps.llm, roundRequest, controller.signal);
+        for await (const delta of streamed.text) {
+          if (pass(strip ? strip.feed(delta) : delta)) {
+            cut = true;
+            controller.abort();
+            break;
+          }
+        }
+        result = await streamed.result;
+      } else {
+        result = await deps.llm(roundRequest);
+      }
+      if (cut || !result.ok || result.value.kind !== "tool_calls" || last) break;
+      const response: LlmResponse & { readonly kind: "tool_calls" } = result.value;
+      if (response.text !== "") {
+        earlier.push(response.text);
+        said = true;
+      }
+      const results: LlmToolResult[] = [];
+      for (const call of response.calls) results.push(await runTool(call));
+      if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
+      messages = [...messages, { role: "assistant", text: response.text, toolCalls: response.calls, payload: response.payload }, { role: "user", toolResults: results }];
     }
+    if (!cut && strip && pass(strip.flush())) cut = true;
     if (cut && cap && !signal?.aborted) {
       deps.log?.info("spoken reply cut at the sentence limit", { max });
       return ok({ kind: "answer", text: withLead(cap.text()) });
@@ -445,7 +538,9 @@ export const makeBareAnswerer = (deps: {
       deps.log?.warn("bare answer failed", { kind: result.error.kind });
       return err(toAppError(result.error));
     }
-    if (result.value.kind !== "text") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
-    return ok({ kind: "answer", text: withLead(unrestated(result.value.text)) });
+    if (result.value.kind === "json") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
+    // A lead set mid-answer follows the text said before it (none, by construction).
+    const text = [...earlier, unrestated(result.value.text)].filter((t) => t.trim() !== "").join(" ");
+    return ok({ kind: "answer", text: withLead(text) });
   };
 };

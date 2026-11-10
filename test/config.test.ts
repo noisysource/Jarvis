@@ -29,6 +29,7 @@ describe("loadConfig", () => {
       bareMode: false,
       bareProfile: false,
       calendar: { enabled: false, clientPath: "data/google-oauth-client.json", tokensPath: "data/google-tokens.json" },
+      toolCalling: true,
       ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",

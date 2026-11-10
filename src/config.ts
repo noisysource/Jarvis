@@ -95,6 +95,8 @@ export type Config = {
    * Google Calendar. The OAuth client and tokens are gitignored files here.
    */
   readonly calendar: { readonly enabled: boolean; readonly clientPath: string; readonly tokensPath: string };
+  /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
+  readonly toolCalling: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
   readonly userName: string | undefined;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
@@ -229,6 +231,7 @@ const EnvSchema = z.object({
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
+  TOOL_CALLING: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -354,6 +357,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       clientPath: e.GOOGLE_OAUTH_CLIENT_PATH ?? DEFAULTS.googleOAuthClientPath,
       tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
     },
+    toolCalling: e.TOOL_CALLING !== "off",
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
