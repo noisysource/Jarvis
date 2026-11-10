@@ -247,6 +247,17 @@ main {
   margin-top: 0.5rem;
 }
 
+.message .confirm {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+}
+
+.message .confirm p {
+  margin: 0;
+}
+
 .choices button.picked {
   background: var(--accent);
   color: var(--accent-text);

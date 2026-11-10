@@ -20,6 +20,7 @@ import {
   pathLines,
   pathOf,
   toolsRan,
+  confirmsOf,
   pathSummary,
   shouldSpeak,
   voiceNoteVisible,
@@ -190,6 +191,46 @@ const copyText = async (text) => {
     area.remove();
     return done;
   }
+};
+
+/**
+ * A card for an event waiting for Renato's OK (Reach 2). Only "Add it" creates
+ * it, through POST /calendar/confirm; Jarvis's reply is worded by code from
+ * Google's answer, and goes into the history with what really ran.
+ * @param {{ id: string, label: string }} proposal
+ */
+const confirmCard = (proposal) => {
+  const card = document.createElement("div");
+  card.className = "confirm";
+  const what = document.createElement("p");
+  what.textContent = `Add to your calendar: ${proposal.label}?`;
+  const choices = document.createElement("div");
+  choices.className = "choices";
+  /** @param {"yes" | "no"} decision @param {string} label */
+  const button = (decision, label) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", async () => {
+      for (const other of choices.querySelectorAll("button")) other.disabled = true;
+      b.classList.add("picked");
+      /** @type {{ ok?: boolean, text?: string, tool?: string }} */
+      let result;
+      try {
+        const res = await fetch("/calendar/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision }) });
+        result = await res.json().catch(() => ({}));
+      } catch {
+        result = { ok: false, text: "I can't reach Jarvis, so nothing was added." };
+      }
+      const text = typeof result.text === "string" ? result.text : "Something went wrong, so nothing was added.";
+      addMessage(result.ok ? "answer" : "error", text);
+      state.history = appendTurn(state.history, "assistant", text, typeof result.tool === "string" ? [result.tool] : []);
+    });
+    return b;
+  };
+  choices.append(button("yes", "Add it"), button("no", "Don't add"));
+  card.append(what, choices);
+  return card;
 };
 
 /**
@@ -882,6 +923,8 @@ const ask = async (question, context) => {
   // A spoken conversation remembers where it was answered, for sticky context (#76).
   if (view.kind === "answer" && final && typeof final === "object" && "context" in final) state.lastContext = String(final.context);
   showTiming(item, timing, true);
+  // Reach 2: an event waiting for Renato's OK. Nothing is added until he presses "Add it".
+  for (const proposal of confirmsOf(path)) item.append(confirmCard(proposal));
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";

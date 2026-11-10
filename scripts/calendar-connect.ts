@@ -10,6 +10,10 @@
 // 3. The refresh token is saved to data/google-tokens.json (gitignored,
 //    readable only by you). Then set CALENDAR=on and restart Jarvis.
 //
+// To let Jarvis add events (always after your OK), connect with write access:
+//
+//   CALENDAR_WRITE=on npm run calendar:connect
+//
 // Nothing here prints a token, the client secret, or an event's title.
 
 import { execFile } from "node:child_process";
@@ -17,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { makeGoogleCalendarReader } from "../src/calendar/google.js";
-import { authorizationUrl, exchangeCode, makeAccessTokens, makePkce, nodeTokenFiles, parseClientFile } from "../src/calendar/oauth.js";
+import { authorizationUrl, CALENDAR_SCOPE, CALENDAR_WRITE_SCOPE, exchangeCode, makeAccessTokens, makePkce, nodeTokenFiles, parseClientFile } from "../src/calendar/oauth.js";
 import { localDate } from "../src/calendar/read.js";
 import { loadConfig } from "../src/config.js";
 
@@ -44,7 +48,10 @@ const state = randomBytes(16).toString("hex");
 const server = createServer();
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const redirectUri = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-const url = authorizationUrl({ clientId: oauthClient.clientId, redirectUri, challenge, state });
+const write = process.env.CALENDAR_WRITE === "on";
+const scope = write ? CALENDAR_WRITE_SCOPE : CALENDAR_SCOPE;
+const url = authorizationUrl({ clientId: oauthClient.clientId, redirectUri, challenge, state, scope });
+console.log(write ? "Asking for read and add access to your calendar's events (Jarvis adds only after your OK).\n" : "Asking for read-only access to your calendar's events.\n");
 
 console.log("Opening Google's sign-in in your browser. If it doesn't open, visit:\n");
 console.log(`  ${url}\n`);
