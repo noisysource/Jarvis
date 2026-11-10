@@ -26,6 +26,7 @@ import {
   type GoogleEvent,
 } from "../src/calendar/read.js";
 import { parseContexts } from "../src/contexts.js";
+import { streamedFrom } from "../src/llm/stream.js";
 import type { LlmCall, LlmRequest } from "../src/llm/types.js";
 import { makePrecheck } from "../src/precheck.js";
 import { err, ok } from "../src/result.js";
@@ -271,35 +272,76 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     return { read, urls };
   };
 
-  it("the brain asks for tomorrow with a structured request; code reads it; the answer comes from the events; EC titles never reach it", async () => {
-    const { llm, requests } = recording({ tool: "calendar_read", from: "2026-11-11", to: "2026-11-11" });
-    const google = googleWith([
-      { summary: "UTP standup", start: { dateTime: "2026-11-11T09:00:00Z" }, end: { dateTime: "2026-11-11T09:30:00Z" } },
-      { summary: "Dentist", start: { dateTime: "2026-11-11T11:00:00Z" }, end: { dateTime: "2026-11-11T12:00:00Z" } },
-    ]);
+  const logging = () => {
     const logs: unknown[] = [];
     const log = { info: (m: string, f?: unknown) => void logs.push({ m, f }), warn: (m: string, f?: unknown) => void logs.push({ m, f }), error: () => undefined };
+    return { logs, log };
+  };
+  const twoEvents: GoogleEvent[] = [
+    { summary: "UTP standup", start: { dateTime: "2026-11-11T09:00:00Z" }, end: { dateTime: "2026-11-11T09:30:00Z" } },
+    { summary: "Dentist", start: { dateTime: "2026-11-11T11:00:00Z" }, end: { dateTime: "2026-11-11T12:00:00Z" } },
+  ];
+
+  it("\"tomorrow\" is resolved in code: no model picks the day, and the answer opens with the date read", async () => {
+    // A model that would get it wrong (Thursday 12), as qwen did: it's never asked.
+    const { llm, requests } = recording({ tool: "calendar_read", from: "2026-11-12", to: "2026-11-12" });
+    const google = googleWith(twoEvents);
+    const { logs, log } = logging();
     const answer = makeBareAnswerer({ llm, userName: "Alex", log, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
-    expect(await ask(answer, "What's on tomorrow?")).toEqual(ok({ kind: "answer", text: "Tomorrow you've got the dentist at eleven." }));
+    expect(await ask(answer, "What's on tomorrow?")).toEqual(
+      ok({ kind: "answer", text: "Looking at Wednesday 11 November. Tomorrow you've got the dentist at eleven." }),
+    );
+    expect(requests).toHaveLength(1); // only the answer: no structured request
+    expect(requests[0]?.outputSchema).toBeUndefined();
+    expect(new URL(google.urls[0] ?? "").searchParams.get("timeMin")).toBe("2026-11-11T00:00:00+00:00");
+    const answerRequest = requests[0];
+    expect(answerRequest?.system).toContain("What you can do right now: talk, and read their personal Google Calendar.");
+    expect(answerRequest?.system).toContain("You can't add, move or delete events yet.");
+    expect(answerRequest?.system).toContain("never say what's on it, or that it can or can't be reached");
+    expect(answerRequest?.systemSuffix).toContain("- Wednesday 11 November 2026, 11:00–12:00: Dentist");
+    expect(answerRequest?.systemSuffix).toContain(`- Wednesday 11 November 2026, 09:00–09:30: ${EC_EVENT}`);
+    expect(answerRequest?.systemSuffix).toContain('Your reply already starts with "Looking at Wednesday 11 November."');
+    expect(JSON.stringify(requests)).not.toContain("UTP standup"); // EC titles never reach the brain
+    // Numbers and fixed words only in the log: never a title.
+    expect(logs).toContainEqual({ m: "calendar read", f: expect.objectContaining({ days: 1, events: 2, ec: 1, by: "code" }) });
+    expect(JSON.stringify(logs)).not.toMatch(/Dentist|UTP/);
+  });
+
+  it("streams the date sentence first, outside the spoken sentence limit, with no opening reaction", async () => {
+    const requests: LlmRequest[] = [];
+    const llm: LlmCall = Object.assign(async () => ok({ kind: "text" as const, text: "", servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } }), {
+      stream: (r: LlmRequest) => {
+        requests.push(r);
+        const parts = ["You've got the dentist at eleven. ", "Then nothing. ", "A third sentence. ", "A fourth."];
+        return streamedFrom(parts, ok({ kind: "text" as const, text: parts.join(""), servedBy: "m", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "x", data: null } }));
+      },
+    });
+    const deltas: string[] = [];
+    const answer = makeBareAnswerer({ llm, spokenSentences: 2, calendar: { read: googleWith(twoEvents).read, timeZone: TZ, now: () => NOW } });
+    const result = await answer({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, spoken: true, onText: (d) => deltas.push(d) });
+    expect(deltas[0]).toBe("Looking at Wednesday 11 November. ");
+    expect(result).toEqual(ok({ kind: "answer", text: "Looking at Wednesday 11 November. You've got the dentist at eleven. Then nothing." }));
+    expect(requests[0]?.systemSuffix).not.toContain("This time, open with"); // the date sentence is the opening
+  });
+
+  it("asks the brain only when no phrase names the days, and checks what it says", async () => {
+    const { llm, requests } = recording({ tool: "calendar_read", from: "2026-11-11", to: "2026-11-11" });
+    const google = googleWith(twoEvents);
+    const { logs, log } = logging();
+    const answer = makeBareAnswerer({ llm, log, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
+    const result = await ask(answer, "When's my next appointment?");
     expect(requests[0]?.outputSchema).toBeDefined(); // the structured request
     expect(requests[0]?.system).toContain("Today is Tuesday 10 November 2026");
     expect(google.urls).toHaveLength(1);
-    const answerRequest = requests[1];
-    expect(answerRequest?.system).toContain("What you can do right now: talk, and read their personal Google Calendar.");
-    expect(answerRequest?.system).toContain("You can't add, move or delete events yet.");
-    expect(answerRequest?.systemSuffix).toContain("- Wednesday 11 November 2026, 11:00–12:00: Dentist");
-    expect(answerRequest?.systemSuffix).toContain(`- Wednesday 11 November 2026, 09:00–09:30: ${EC_EVENT}`);
-    expect(JSON.stringify(requests)).not.toContain("UTP standup");
-    // Numbers only in the log: never a title.
-    expect(logs).toContainEqual({ m: "calendar read", f: expect.objectContaining({ days: 1, events: 2, ec: 1 }) });
-    expect(JSON.stringify(logs)).not.toMatch(/Dentist|UTP/);
+    expect(result.ok && result.value.kind === "answer" && result.value.text.startsWith("Looking at Wednesday 11 November. ")).toBe(true);
+    expect(logs).toContainEqual({ m: "calendar read", f: expect.objectContaining({ by: "model" }) });
   });
 
   it("doesn't read when the brain says it isn't needed, or for questions that can't be about it", async () => {
     const none = recording({ tool: "none", from: "2026-11-10", to: "2026-11-10" });
     const google = googleWith([]);
     const answer = makeBareAnswerer({ llm: none.llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
-    await ask(answer, "How are you doing today?");
+    expect(await ask(answer, "Do you have any plans?")).toEqual(ok({ kind: "answer", text: "Tomorrow you've got the dentist at eleven." })); // no date sentence: nothing was read
     expect(google.urls).toEqual([]);
     expect(none.requests).toHaveLength(2);
     expect(none.requests[1]?.systemSuffix).toBeUndefined();
@@ -310,19 +352,45 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
   it("refuses a bad request in code and asks which day, without reading", async () => {
     const bad = recording({ tool: "calendar_read", from: "2026-11-10", to: "2027-11-10" });
     const google = googleWith([]);
-    await ask(makeBareAnswerer({ llm: bad.llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } }), "What's on next year?");
+    await ask(makeBareAnswerer({ llm: bad.llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } }), "What are my plans for the year?");
     expect(google.urls).toEqual([]);
     expect(bad.requests[1]?.systemSuffix).toContain("Ask them which day they mean. Don't guess what's on.");
+    // A date in code that's too far away is refused the same way.
+    const far = recording({});
+    await ask(makeBareAnswerer({ llm: far.llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } }), "What's on 12 November 2029?");
+    expect(google.urls).toEqual([]);
+    expect(far.requests[0]?.systemSuffix).toContain("Ask them which day they mean.");
   });
 
-  it("says honestly when the calendar isn't connected or can't be read", async () => {
-    const asks = recording({ tool: "calendar_read", from: "2026-11-11", to: "2026-11-11" });
+  it("says honestly when the calendar isn't connected or can't be read, with no date sentence", async () => {
+    const asks = recording({});
     const notConnected = async () => err({ code: "not_connected" as const, message: "run npm run calendar:connect" });
-    await ask(makeBareAnswerer({ llm: asks.llm, calendar: { read: notConnected, timeZone: TZ, now: () => NOW } }), "What's on tomorrow?");
-    expect(asks.requests[1]?.systemSuffix).toContain("it isn't connected on this computer yet");
-    const failing = recording({ tool: "calendar_read", from: "2026-11-11", to: "2026-11-11" });
+    const result = await ask(makeBareAnswerer({ llm: asks.llm, calendar: { read: notConnected, timeZone: TZ, now: () => NOW } }), "What's on tomorrow?");
+    expect(asks.requests[0]?.systemSuffix).toContain("it isn't connected on this computer yet");
+    expect(result.ok && result.value.kind === "answer" && result.value.text).not.toContain("Looking at");
+    const failing = recording({});
     const down = async () => err({ code: "network" as const, message: "Couldn't reach Google Calendar" });
     await ask(makeBareAnswerer({ llm: failing.llm, calendar: { read: down, timeZone: TZ, now: () => NOW } }), "What's on tomorrow?");
-    expect(failing.requests[1]?.systemSuffix).toContain("Say you couldn't reach their calendar right now.");
+    expect(failing.requests[0]?.systemSuffix).toContain("Say you couldn't reach their calendar right now.");
+  });
+
+  it("a bare \"yes\" after an offer to try again really reads again", async () => {
+    const { llm, requests } = recording({});
+    const google = googleWith(twoEvents);
+    const answer = makeBareAnswerer({ llm, calendar: { read: google.read, timeZone: TZ, now: () => NOW } });
+    const history = [
+      { role: "user" as const, text: "What's on tomorrow?" },
+      { role: "assistant" as const, text: "I couldn't reach your calendar right now. Shall I try again?" },
+    ];
+    const result = await answer({ context: personal, question: "yes", history, memories: [], now: NOW });
+    expect(google.urls).toHaveLength(1); // a new read, for the same day
+    expect(new URL(google.urls[0] ?? "").searchParams.get("timeMin")).toBe("2026-11-11T00:00:00+00:00");
+    expect(requests[0]?.systemSuffix).toContain("Dentist");
+    expect(result.ok && result.value.kind === "answer" && result.value.text.startsWith("Looking at Wednesday 11 November. ")).toBe(true);
+    // A "yes" to something else isn't a read, and the prompt says not to claim one.
+    await answer({ context: personal, question: "yes", history: [{ role: "assistant", text: "Want a joke?" }], memories: [], now: NOW });
+    expect(google.urls).toHaveLength(1);
+    expect(requests[1]?.systemSuffix).toBeUndefined();
+    expect(requests[1]?.system).toContain("Otherwise it wasn't: never say what's on it, or that it can or can't be reached.");
   });
 });

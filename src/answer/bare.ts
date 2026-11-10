@@ -16,12 +16,14 @@ import type { CalendarReader } from "../calendar/google.js";
 import {
   CALENDAR_REQUEST_SCHEMA,
   calendarForBrain,
+  calendarQuestion,
   calendarRequestPrompt,
   calendarUnavailable,
   checkCalendarRequest,
   localDate,
-  mightBeAboutCalendar,
+  type DayRange,
 } from "../calendar/read.js";
+import { readSentence, resolveDatePhrase } from "../calendar/dates.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
@@ -174,6 +176,7 @@ export const barePrompt = (
       ? [
           "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           "When they ask about their calendar, the app reads it and gives you the events at the end of this prompt; answer from those only. You can't add, move or delete events yet.",
+          "Only when events (or a note that reading failed) are at the end of this prompt was the calendar read for this message. Otherwise it wasn't: never say what's on it, or that it can or can't be reached. If they want it checked, ask which day.",
           "You can't set reminders or alarms, take or keep notes, read or send email or messages, look anything up online, or use other tools or apps. When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.",
         ]
       : [
@@ -221,56 +224,89 @@ export const makeBareAnswerer = (deps: {
   let cached: { text: string; prompts: ReturnType<typeof prompts> } | undefined;
 
   /**
-   * The calendar for this turn (#100), as text for the end of the prompt, or
-   * undefined when it isn't about the calendar. The brain asks with a
-   * structured request; code checks it and reads. Reading isn't an action,
-   * so the honesty guard stays on. Logs numbers and fixed words only.
+   * The calendar for this turn (#100), or undefined when it isn't about the
+   * calendar. `text` goes at the end of the prompt; `lead` is the sentence
+   * the answer opens with, naming the days read, worded by code.
+   *
+   * The days come from code when the question names them ("tomorrow",
+   * "Friday", "12/11"); only otherwise does the brain fill in a structured
+   * request, which code checks. Reading isn't an action, so the honesty
+   * guard stays on. Logs numbers and fixed words only.
    */
-  const calendarTurn = async (question: string, history: AnswerInput["history"], signal?: AbortSignal): Promise<string | undefined> => {
+  const calendarTurn = async (
+    question: string,
+    history: AnswerInput["history"],
+    signal?: AbortSignal,
+  ): Promise<{ readonly text: string; readonly lead?: string } | undefined> => {
     const calendar = deps.calendar;
-    if (!calendar || !mightBeAboutCalendar(question)) return undefined;
+    if (!calendar) return undefined;
+    // A bare "yes" to "shall I try again?" repeats the last calendar question.
+    const asked = calendarQuestion(question, history);
+    if (asked === undefined) return undefined;
     const now = (calendar.now ?? (() => new Date()))();
+    const today = localDate(now, calendar.timeZone);
     const started = performance.now();
-    const asked = await streamOrCall(
-      deps.llm,
-      {
-        system: calendarRequestPrompt(now, calendar.timeZone),
-        messages: [...historyMessages(history).slice(-4), { role: "user", text: question }],
-        outputSchema: CALENDAR_REQUEST_SCHEMA,
-        effort: "low",
-        thinking: "off",
-        maxTokens: 200,
-      },
-      signal,
-    ).result;
-    const requestMs = Math.round(performance.now() - started);
-    if (!asked.ok || asked.value.kind !== "json") {
-      if (!signal?.aborted) deps.log?.warn("calendar request failed", { kind: asked.ok ? asked.value.kind : asked.error.kind, ms: requestMs });
+
+    let range: DayRange | undefined;
+    let by: "code" | "model" = "code";
+    const named = resolveDatePhrase(asked, today);
+    if (named) {
+      const checked = checkCalendarRequest({ tool: "calendar_read", ...named }, today);
+      if (!checked.ok) {
+        deps.log?.info("calendar request refused", { why: checked.error, by });
+        return { text: calendarUnavailable("unclear") };
+      }
+      range = checked.value;
+    } else {
+      by = "model";
+      const request = await streamOrCall(
+        deps.llm,
+        {
+          system: calendarRequestPrompt(now, calendar.timeZone),
+          messages: [...historyMessages(history).slice(-4), { role: "user", text: asked }],
+          outputSchema: CALENDAR_REQUEST_SCHEMA,
+          effort: "low",
+          thinking: "off",
+          maxTokens: 200,
+        },
+        signal,
+      ).result;
+      const ms = Math.round(performance.now() - started);
+      if (!request.ok || request.value.kind !== "json") {
+        if (!signal?.aborted) deps.log?.warn("calendar request failed", { kind: request.ok ? request.value.kind : request.error.kind, ms });
+        return { text: calendarUnavailable("unclear") };
+      }
+      const checked = checkCalendarRequest(request.value.value, today);
+      if (!checked.ok) {
+        deps.log?.info("calendar request refused", { why: checked.error, by, ms });
+        return { text: calendarUnavailable("unclear") };
+      }
+      range = checked.value;
+    }
+    if (range === undefined) {
+      deps.log?.info("calendar not needed", { ms: Math.round(performance.now() - started) });
       return undefined;
     }
-    const checked = checkCalendarRequest(asked.value.value, localDate(now, calendar.timeZone));
-    if (!checked.ok) {
-      deps.log?.info("calendar request refused", { why: checked.error, ms: requestMs });
-      return calendarUnavailable("unclear");
-    }
-    if (checked.value === undefined) {
-      deps.log?.info("calendar not needed", { ms: requestMs });
-      return undefined;
-    }
-    const range = checked.value;
     const read = await calendar.read(range, signal);
     if (!read.ok) {
       deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
-      return calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed");
+      return { text: calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed") };
     }
     deps.log?.info("calendar read", {
       days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
       events: read.value.length,
       ec: read.value.filter((e) => e.ec).length,
-      requestMs,
+      by,
       ms: Math.round(performance.now() - started),
     });
-    return calendarForBrain(range, read.value, calendar.timeZone);
+    const lead = readSentence(range, today);
+    return {
+      lead,
+      text: [
+        calendarForBrain(range, read.value, calendar.timeZone),
+        `Your reply already starts with "${lead}" Continue from there: don't repeat the date, and don't open with a reaction.`,
+      ].join("\n"),
+    };
   };
   return async ({ question, history, onText, signal, spoken }) => {
     let system = withoutProfile;
@@ -284,8 +320,11 @@ export const makeBareAnswerer = (deps: {
       if (cached?.text !== profile.value.text) cached = { text: profile.value.text, prompts: prompts(profile.value.text) };
       system = cached.prompts;
     }
-    const calendarText = await calendarTurn(question, history, signal);
+    const calendar = await calendarTurn(question, history, signal);
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
+    // The days read, worded by code, open the answer: a wrong day is then visible (#100).
+    const lead = calendar?.lead;
+    const withLead = (text: string): string => (lead ? `${lead} ${text}` : text);
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
     const cap = spoken === true && !asksForDetail(question) ? makeSentenceCap(max) : undefined;
     const request: LlmRequest = {
@@ -293,7 +332,7 @@ export const makeBareAnswerer = (deps: {
       cacheSystem: true,
       // Changes every turn, so it's after the cached part.
       ...(() => {
-        const suffix = [spoken === true ? openingHint(history, random) : undefined, calendarText].filter((x): x is string => x !== undefined);
+        const suffix = [spoken === true && !lead ? openingHint(history, random) : undefined, calendar?.text].filter((x): x is string => x !== undefined);
         return suffix.length > 0 ? { systemSuffix: suffix.join("\n\n") } : {};
       })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
@@ -309,6 +348,8 @@ export const makeBareAnswerer = (deps: {
       const controller = new AbortController();
       signal?.addEventListener("abort", () => controller.abort());
       const streamed = streamOrCall(deps.llm, request, controller.signal);
+      // The date sentence goes out first, outside the sentence limit.
+      if (lead) onText?.(`${lead} `);
       for await (const delta of streamed.text) {
         if (!cap) {
           onText?.(delta);
@@ -328,13 +369,13 @@ export const makeBareAnswerer = (deps: {
     }
     if (cut && cap && !signal?.aborted) {
       deps.log?.info("spoken reply cut at the sentence limit", { max });
-      return ok({ kind: "answer", text: cap.text() });
+      return ok({ kind: "answer", text: withLead(cap.text()) });
     }
     if (!result.ok) {
       deps.log?.warn("bare answer failed", { kind: result.error.kind });
       return err(toAppError(result.error));
     }
     if (result.value.kind !== "text") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
-    return ok({ kind: "answer", text: result.value.text });
+    return ok({ kind: "answer", text: withLead(result.value.text) });
   };
 };

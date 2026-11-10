@@ -50,6 +50,30 @@ export const mightBeAboutCalendar = (question: string): boolean => {
   return when && doing;
 };
 
+/** A bare yes, or "try again": nothing else in the message. */
+const isBareRetry = (question: string): boolean =>
+  /^(?:(?:yes|yeah|yep|yup|sure|ok|okay|please|go ahead|go on|do it|do that|again|retry|(?:try|check|look|read)(?: it| that)? again|one more time)[\s,.!]*){1,3}$/i.test(
+    question.trim(),
+  );
+
+/**
+ * The calendar question this turn is about (#100), or undefined. Usually
+ * the question itself. A bare "yes" after Jarvis offered to try again, or a
+ * bare "try again", repeats the last calendar question, so the calendar is
+ * really read again and nothing is claimed without a read.
+ */
+export const calendarQuestion = (question: string, history: readonly { readonly role: "user" | "assistant"; readonly text: string }[]): string | undefined => {
+  if (mightBeAboutCalendar(question)) return question;
+  if (!isBareRetry(question)) return undefined;
+  const lastAssistant = [...history].reverse().find((t) => t.role === "assistant")?.text ?? "";
+  const offered = /\b(?:try|check|look|read)(?: it| that)? again\b|\bretry\b|\banother (?:go|try|look)\b/i.test(lastAssistant);
+  const asksAgain = /\bagain\b|\bretry\b|\bone more time\b/i.test(question);
+  if (!offered && !asksAgain) return undefined;
+  // The question that offer was about: the last thing they asked.
+  const lastUser = [...history].reverse().find((t) => t.role === "user")?.text;
+  return lastUser !== undefined && mightBeAboutCalendar(lastUser) ? lastUser : undefined;
+};
+
 /** The structured request the brain fills in: read the calendar or not, and which days (inclusive). */
 export const CALENDAR_REQUEST_SCHEMA: JsonObjectSchema = {
   type: "object",

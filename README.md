@@ -291,10 +291,19 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      3. Put `CALENDAR=on` in `.env` and restart.
 
      How it works:
-     - **Request:** the brain you picked fills in a structured request
-       (which days). Code checks it: only that tool, real dates, at most 14
-       days, in Europe/Lisbon. Then code reads the calendar and the brain
-       answers only from those events.
+     - **Which days:** code works them out, in Europe/Lisbon, from
+       phrases like today, tomorrow, the day after tomorrow, yesterday,
+       Friday, next Friday, this week, next week, this weekend, 12
+       November or 12/11 (day first). No model counts days.
+     - **Only if no phrase names a day** does the brain you picked fill in
+       a structured request. Code checks it: only that tool, real dates, at
+       most 14 days.
+     - **The answer** opens with the date that was read, worded by code
+       ("Looking at Wednesday 11 November."), so a wrong day is visible.
+       The brain answers only from that day's events.
+     - **"Yes" to "shall I try again?"** reads the calendar again for the
+       same question. Without a read, Jarvis is told never to say what's
+       on, or whether the calendar can be reached.
      - **EC events** (the EC precheck matches the title or place, or anyone
        invited is at europa.eu) reach the brain only as "EC work, handled
        by Kiro", with their time.
