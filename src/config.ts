@@ -106,7 +106,8 @@ export type Config = {
    * "noisysource" Gmail accounts, read-only. Each is connected separately
    * (npm run gmail:connect -- <account>); its token file is under data/.
    */
-  readonly gmail: { readonly enabled: boolean; readonly tokensPath: (account: string) => string };
+  /** `write` (GMAIL_WRITE=on, #120): drafts, and sending after "Send it". Needs gmail:connect with write access. */
+  readonly gmail: { readonly enabled: boolean; readonly write: boolean; readonly tokensPath: (account: string) => string };
   /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
    * across conversations like a person (short-term that fades, long-term that
@@ -254,6 +255,7 @@ const EnvSchema = z.object({
   TOOL_CALLING: onOff,
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
+  GMAIL_WRITE: onOff,
   MEMORY: onOff,
   INTROSPECTION: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
@@ -355,6 +357,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   if (raw("CALENDAR_WRITE") === "on" && raw("CALENDAR") !== "on") errors.push("CALENDAR_WRITE: needs CALENDAR=on");
   if (raw("INTROSPECTION") === "on" && raw("MEMORY") !== "on") errors.push("INTROSPECTION: needs MEMORY=on");
   if (raw("MEMORY") === "on" && raw("BARE_MODE") !== "on") errors.push("MEMORY: needs BARE_MODE=on (without it, the older memory runs on its own)");
+  if (raw("GMAIL_WRITE") === "on" && raw("GMAIL") !== "on") errors.push("GMAIL_WRITE: needs GMAIL=on");
   if (raw("GMAIL") === "on") {
     if (production) errors.push("GMAIL: local only for now");
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
@@ -392,7 +395,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     toolCalling: e.TOOL_CALLING !== "off",
     bareMemory: e.MEMORY === "on",
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
-    gmail: { enabled: e.GMAIL === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
+    gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

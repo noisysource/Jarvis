@@ -118,14 +118,17 @@ export const searchForBrain = (account: GmailAccount, query: string, messages: r
 export type GmailReader = {
   readonly search: (r: SearchRequest, signal?: AbortSignal) => Promise<Result<readonly GmailMessage[], CalendarError>>;
   /** The message's headers and plain text. */
-  readonly read: (r: ReadRequest, signal?: AbortSignal) => Promise<Result<GmailMessage & { readonly body: string }, CalendarError>>;
+  readonly read: (r: ReadRequest, signal?: AbortSignal) => Promise<Result<GmailMessage & { readonly body: string; readonly thread?: EmailThread }, CalendarError>>;
 };
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 
 type Header = { name?: unknown; value?: unknown };
 type Part = { mimeType?: unknown; body?: { data?: unknown }; parts?: Part[] };
-type RawMessage = { id?: unknown; snippet?: unknown; labelIds?: unknown; payload?: Part & { headers?: Header[] } };
+type RawMessage = { id?: unknown; threadId?: unknown; snippet?: unknown; labelIds?: unknown; payload?: Part & { headers?: Header[] } };
+
+/** What a reply needs to land in the same thread (#120). */
+export type EmailThread = { readonly threadId: string; readonly messageId: string; readonly references: string };
 
 const header = (m: RawMessage, name: string): string => {
   const h = (m.payload?.headers ?? []).find((x) => typeof x.name === "string" && x.name.toLowerCase() === name.toLowerCase());
@@ -230,7 +233,8 @@ export const makeGmailReader = (deps: {
       const one = await get(r.account, `${API}/${encodeURIComponent(r.id)}?format=full`, signal);
       if (!one.ok) return one;
       const raw = one.value as RawMessage;
-      return ok({ ...toMessage(raw), body: plainText(raw.payload) });
+      const thread = typeof raw.threadId === "string" ? { threadId: raw.threadId, messageId: header(raw, "Message-ID") || header(raw, "Message-Id"), references: header(raw, "References") } : undefined;
+      return ok({ ...toMessage(raw), body: plainText(raw.payload), ...(thread ? { thread } : {}) });
     },
   };
 };

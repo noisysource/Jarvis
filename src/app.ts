@@ -10,6 +10,7 @@ import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google
 import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate } from "./calendar/read.js";
 import { makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
+import { makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
@@ -52,6 +53,8 @@ export type AppInputs = {
   readonly skillStore?: SkillStore;
   /** Tests: where the introspection report goes (#108). */
   readonly writeIntrospectionReport?: (date: string, markdown: string) => Promise<void>;
+  /** Tests: writes drafts and sends instead of Gmail (#120). */
+  readonly gmailWriter?: GmailWriter;
   /** Tests: reads email instead of Gmail (Reach 3). */
   readonly gmailReader?: GmailReader;
 };
@@ -165,7 +168,34 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     gmailTokens.set(account, made);
     return made();
   };
-  const gmail = config.gmail.enabled ? { reader: inputs.gmailReader ?? makeGmailReader({ accessToken: gmailToken }), isEc: isEcText } : undefined;
+  // #120 (GMAIL_WRITE=on): drafts are saved in Gmail; sending waits for "Send it".
+  const drafts = config.gmail.write ? { write: inputs.gmailWriter ?? makeGmailWriter({ accessToken: gmailToken }), pending: makePendingDrafts() } : undefined;
+  const gmail = config.gmail.enabled
+    ? { reader: inputs.gmailReader ?? makeGmailReader({ accessToken: gmailToken }), isEc: isEcText, ...(drafts ? { writer: drafts } : {}) }
+    : undefined;
+  const gmailSend = drafts
+    ? async (id: string, decision: "yes" | "no") => {
+        const draft = drafts.pending.take(id);
+        if (!draft) return { ok: false, text: "That draft's card has expired or was already answered. It's still in your Gmail Drafts if you want to send it there." };
+        if (decision === "no") {
+          log.info("gmail send", { outcome: "kept as draft" });
+          return { ok: true, text: `Okay, it stays in your ${draft.account} Gmail Drafts.` };
+        }
+        const sent = await drafts.write.send(draft.account, draft.draftId);
+        if (!sent.ok) {
+          log.warn("gmail send failed", { code: sent.error.code, reason: sent.error.message });
+          return {
+            ok: false,
+            text:
+              sent.error.code === "auth"
+                ? `I couldn't send it: Gmail didn't allow it. Connect ${draft.account} again with write access (GMAIL_WRITE=on npm run gmail:connect -- ${draft.account}), then restart Jarvis. It's still in Drafts.`
+                : "I couldn't send it: Gmail didn't answer properly. It's still in your Drafts.",
+          };
+        }
+        log.info("gmail send", { outcome: "sent", recipients: draft.to.length });
+        return { ok: true, text: `Sent “${draft.subject}” to ${draft.to.join(", ")}.`, tool: `gmail_send ${draft.account} → sent` };
+      }
+    : undefined;
   const calendar = config.calendar.enabled
     ? {
         read:
@@ -235,6 +265,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(skillStore ? { skills: skillStore } : {}),
     nativeTools: (calendar !== undefined || gmail !== undefined || config.bareMemory) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
+    ...(gmailSend ? { gmailSend } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
