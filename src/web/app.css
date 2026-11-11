@@ -501,3 +501,406 @@ textarea:focus-visible {
 button.small {
   font-size: 0.8rem;
 }
+
+/* ---- the brain view (#131) ---- */
+
+:root {
+  --reach: #1f6fc4;
+  --wait: #9a5b00;
+  --fail: #c0362c;
+  --quiet: #b9b9b4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --reach: #5cc8ff;
+    --wait: #f5b13d;
+    --fail: #ff7070;
+    --quiet: #4a4a52;
+  }
+}
+
+header,
+footer {
+  max-width: 76rem;
+}
+
+.layout {
+  flex: 1;
+  width: 100%;
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 2rem;
+}
+
+.chat {
+  flex: 999 1 26rem;
+  min-width: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat main,
+.chat footer {
+  max-width: none;
+  padding: 0;
+}
+
+.brain {
+  flex: 0 1 32rem;
+  min-width: 0;
+  max-width: 34rem;
+  margin: 1rem auto 0;
+  position: sticky;
+  top: 1rem;
+}
+
+/* Narrow screens: the brain sits above the chat, small, and scrolls away with it. */
+@media (max-width: 52rem) {
+  .brain {
+    position: static;
+    flex: 1 1 100%;
+    max-width: 19rem;
+  }
+}
+
+.brain-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+
+.brain-mesh {
+  position: absolute;
+  inset: 0;
+  opacity: 0.12;
+  transition: opacity 0.6s;
+}
+
+.brain[data-working="true"] .brain-mesh {
+  opacity: 0.32;
+}
+
+.brain-mesh-link,
+.brain-line {
+  position: absolute;
+  height: 2px;
+  margin-top: -1px;
+  transform-origin: 0 50%;
+  border-radius: 2px;
+}
+
+.brain-mesh-link {
+  height: 1px;
+  background: var(--reach);
+}
+
+.brain-mesh-dot {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--reach);
+}
+
+.brain-lines {
+  position: absolute;
+  inset: 0;
+}
+
+@keyframes brain-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 14px 0;
+  }
+}
+
+.brain-line-reaching {
+  background: repeating-linear-gradient(90deg, var(--reach) 0 8px, transparent 8px 14px);
+  animation: brain-flow 0.5s linear infinite;
+}
+
+.brain-line-used {
+  background: var(--reach);
+  opacity: 0.5;
+}
+
+.brain-line-waiting {
+  height: 3px;
+  background: var(--wait);
+}
+
+.brain-line-failed {
+  background: var(--fail);
+}
+
+.brain-line-handoff {
+  background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px);
+}
+
+.brain-fail-mark {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid var(--fail);
+  background: var(--bg);
+}
+
+.brain-fail-mark::before,
+.brain-fail-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 2px;
+  margin: -1px 0 0 -3.5px;
+  background: var(--fail);
+  transform: rotate(45deg);
+}
+
+.brain-fail-mark::after {
+  transform: rotate(-45deg);
+}
+
+.brain-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 25%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+}
+
+.brain-ring {
+  position: absolute;
+  inset: -14%;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--reach) 30%, transparent);
+}
+
+.brain-ring-outer {
+  inset: -30%;
+  border-color: color-mix(in srgb, var(--reach) 15%, transparent);
+}
+
+@keyframes brain-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+.brain-core[data-state="working"] .brain-ring {
+  animation: brain-pulse 1.6s ease-in-out infinite;
+}
+
+.brain-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--reach);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  text-align: center;
+  transition: box-shadow 0.4s, border-color 0.4s;
+}
+
+.brain-core[data-state="working"] .brain-face {
+  box-shadow: 0 0 2.5rem color-mix(in srgb, var(--reach) 35%, transparent);
+}
+
+.brain-core[data-state="waiting"] .brain-face {
+  border-color: var(--wait);
+}
+
+.brain-name {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.brain-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.brain-nodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.brain-node-item {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.brain-node {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -1.7rem);
+  width: 6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+}
+
+button.brain-node {
+  cursor: pointer;
+}
+
+button.brain-node:focus-visible {
+  outline: 2px solid var(--reach);
+  outline-offset: 3px;
+  border-radius: 0.6rem;
+}
+
+.brain-disc {
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 2px solid var(--quiet);
+  transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+
+.brain-disc svg {
+  width: 1.4rem;
+  height: 1.4rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brain-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.brain-tag {
+  min-height: 1rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.brain-node[data-state="reaching"] .brain-disc {
+  border-color: var(--reach);
+  background: color-mix(in srgb, var(--reach) 14%, var(--surface));
+  box-shadow: 0 0 1.4rem color-mix(in srgb, var(--reach) 45%, transparent);
+}
+
+.brain-node[data-state="reaching"] .brain-tag,
+.brain-node[data-state="used"] .brain-tag {
+  color: var(--reach);
+}
+
+.brain-node[data-state="used"] .brain-disc {
+  border-color: var(--reach);
+}
+
+.brain-node[data-state="waiting"] .brain-disc {
+  border-color: var(--wait);
+  background: color-mix(in srgb, var(--wait) 14%, var(--surface));
+}
+
+.brain-node[data-state="waiting"] .brain-tag {
+  color: var(--wait);
+}
+
+.brain-node[data-state="failed"] .brain-disc {
+  border-color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 12%, var(--surface));
+}
+
+.brain-node[data-state="failed"] .brain-tag {
+  color: var(--fail);
+}
+
+.brain-node[data-state="soon"] .brain-disc,
+.brain-node[data-state="kiro"] .brain-disc,
+.brain-node[data-state="handoff"] .brain-disc {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.brain-node[data-state="handoff"] .brain-disc {
+  border-color: var(--muted);
+}
+
+/* Small brains (narrow screens): smaller nodes, no tags. */
+@media (max-width: 52rem) {
+  .brain-node {
+    width: 4.4rem;
+    transform: translate(-50%, -1.25rem);
+    gap: 0.1rem;
+  }
+
+  .brain-disc {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .brain-disc svg {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  .brain-label {
+    font-size: 0.68rem;
+  }
+
+  .brain-tag {
+    display: none;
+  }
+
+  .brain-name {
+    font-size: 0.85rem;
+  }
+
+  .brain-sub {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brain-line-reaching {
+    animation: none;
+    background: var(--reach);
+  }
+
+  .brain-core[data-state="working"] .brain-ring {
+    animation: none;
+  }
+}

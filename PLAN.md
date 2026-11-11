@@ -933,6 +933,17 @@ Confirmed for M0 (2026-11-06):
   and handed off without calling any model; invoicing words override the EC
   cues and route to `noisysource`.
 
+Confirmed for the page (2026-11-11):
+
+- **Brain view (#130–#134):** the page shows Jarvis as a core with nodes
+  around it (Profile, Memory, Skills, Calendar, Gmail, GitHub, Code agent,
+  Kiro). A line goes to a node only when a real path step reaches it (live
+  `reach`/`step` events, then the final path): blue while reaching and when
+  used, amber while an action waits for Renato's OK, red and short when it
+  failed. Nodes become the controls (panels, badges). Browser first, built
+  responsive so it works on a phone later; no animation when reduced motion
+  is set. Mockup: the "Jarvis brain UI" artifact.
+
 ## Out of scope for M0
 
 Vendus, Cloud Run deployment or the Pi (#53), real memory (#24, #56),

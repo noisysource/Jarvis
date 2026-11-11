@@ -3,6 +3,7 @@
 // /transcribe, #74) and speech synthesis (the browser's voices). Conversation history
 // lives in this page's memory only; reload or "New conversation" clears it.
 
+import { makeBrainView } from "./brain.js";
 import {
   CONVERSATION,
   LANGUAGES,
@@ -153,6 +154,15 @@ const state = {
 /** The brains' labels from GET /brains, e.g. "Local · llama3.1:8b". @type {Record<string, string>} */
 let brainLabels = { local: "Local", claude: "Claude" };
 
+// The brain view (#131): lines to what Jarvis reaches for in the current answer.
+// Memory and Skills open their panels; the other nodes get theirs later (#133).
+const brainView = makeBrainView(byId("brain-view"), {
+  open: {
+    memory: () => void openMemories(),
+    skills: () => void openSkills(),
+  },
+});
+
 // ---- rendering ----
 
 /** Listening / Thinking / Speaking, shown and read out. @param {import("./turn-lib.js").Phase} phase */
@@ -296,6 +306,8 @@ const setMessageText = (item, text) => {
 };
 
 const renderControls = () => {
+  // The core shows the brain's short name; the model is on the Local/Claude button.
+  brainView.setBrain(state.brain === "claude" ? "Claude" : "Local");
   sendButton.disabled = state.busy;
   // Context buttons can't be used while a request is in flight.
   for (const b of state.pending?.buttons ?? []) b.disabled = state.busy;
@@ -758,6 +770,7 @@ const ask = async (question, context) => {
   stopSpeaking("new-question");
   state.busy = true;
   setPhase("thinking");
+  brainView.begin();
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
@@ -885,6 +898,11 @@ const ask = async (question, context) => {
             else appendToMessage(item, sentence);
             // A filler already reacted: don't add the reply's own reaction on top (#92).
             if (!skipSpokenReaction({ usedFiller, first, sentence })) await say(sentence);
+          } else if (ev.event === "reach") brainView.reach(String(data.tool ?? ""));
+          else if (ev.event === "step") {
+            // The same steps the final path carries (#130), drawn as they happen.
+            const [step] = pathOf({ path: [data] });
+            if (step) brainView.step(step);
           } else if (ev.event === "timing") timing.server = data;
           else if (ev.event === "done" || ev.event === "reply") final = data;
         }
@@ -900,6 +918,7 @@ const ask = async (question, context) => {
     // Interrupted (barge-in) while the answer was still coming: what was said is already recorded.
     sp?.stop("answer-cancelled");
     if (!sp) onPlayback({ interrupted: true, spoken: "", sentences: 0, fellBack: false, reason: "answer-cancelled", played: 0, voiceErrors: 0 });
+    brainView.finish([]);
     state.busy = false;
     renderControls();
     return;
@@ -915,6 +934,7 @@ const ask = async (question, context) => {
   const brain = final && typeof final === "object" && "brain" in final ? String(final.brain) : "";
   // The answer's path (#102): one line under the reply that opens to each step. It includes the brain.
   const path = pathOf(final);
+  brainView.finish(path);
   if (path.length > 0 && (view.kind === "answer" || view.kind === "handoff")) {
     const details = document.createElement("details");
     details.className = "path";
