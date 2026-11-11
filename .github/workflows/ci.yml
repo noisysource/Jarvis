@@ -48,6 +48,13 @@ jobs:
             exit 1
           fi
 
+      - name: Introspection reports are not committed
+        run: |
+          if git ls-files 'data/introspection/*' | grep -q .; then
+            echo "::error::data/introspection/ holds your memories and must not be committed. Remove it with 'git rm -r --cached data/introspection'."
+            exit 1
+          fi
+
       - name: Memory database is not committed
         run: |
           if git ls-files 'data/*.sqlite' 'data/*.sqlite-*' | grep -q .; then

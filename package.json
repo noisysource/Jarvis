@@ -16,6 +16,7 @@
     "eval:identity": "tsx --env-file-if-exists=.env scripts/eval-identity.ts",
     "calendar:connect": "tsx --env-file-if-exists=.env scripts/calendar-connect.ts",
     "gmail:connect": "tsx --env-file-if-exists=.env scripts/gmail-connect.ts",
+    "memory:reflect": "tsx --env-file-if-exists=.env scripts/memory-reflect.ts",
     "memory": "tsx --env-file-if-exists=.env scripts/memory.ts",
     "voice:setup": "bash scripts/voice-setup.sh",
     "voice:up": "bash scripts/voice-up.sh",

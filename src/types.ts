@@ -143,6 +143,9 @@ export type PathStep =
       readonly replaced: boolean;
     };
 
+export type { IntrospectionReport } from "./introspection.js";
+import type { IntrospectionReport } from "./introspection.js";
+
 export type CalendarConfirmResult = {
   readonly ok: boolean;
   /** What Jarvis says, worded by code. */
@@ -319,6 +322,8 @@ export type Deps = {
    * Google's answer; "no" drops it. Unknown or expired ids create nothing.
    */
   readonly calendarConfirm?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
+  /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */
+  readonly introspect?: () => Promise<IntrospectionReport>;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
   readonly stickyContext?: boolean;
   /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */

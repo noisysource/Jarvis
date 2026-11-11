@@ -330,6 +330,12 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and the 🧠 Memories panel lets you delete anything. Never secrets or
        EC work; health, money and others' private details only when you
        say "remember". "Off the record" keeps a conversation out.
+     - **Introspection (`INTROSPECTION=on`, with `MEMORY=on`).** Every
+       night at 03:30, while Jarvis runs, he reviews his short-term memory:
+       drops what's done, makes lasting things long-term, merges updates,
+       and lets the rest fade. He may also draft skills and tools; those are
+       only proposals. Run it now with `npm run memory:reflect`; the report
+       is in `data/introspection/<date>.md` (readable only by you).
      - **Gmail (`GMAIL=on`, ☁️ Claude), read-only.** Two accounts:
        `personal` and `noisysource`. In Google Cloud, enable the **Gmail
        API** on the same project (and, with an "External" consent screen,

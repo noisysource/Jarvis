@@ -233,7 +233,7 @@ const SENSITIVE_STEMS: Record<SensitiveCategory, readonly string[]> = {
     "allerg", "alerg", "therap", "terapi", "depress", "anxiety", "ansiedade", "cancer", "cancro", "surgery",
     "cirurgi", "pregnan", "gravid", "illness", "doenc", "disease", "symptom", "sintoma", "diabet", "psychiatr",
     "psiquiatr", "psycholog", "psicolog", "clinic", "health", "saude", "injur", "lesao", "sick", "doente",
-    "vaccin", "vacin", "dentist", "dentista", "blood", "sangue",
+    "vaccin", "vacin", "dentist", "dentista", "blood", "sangue", "pain", "dores", "dor de", "migrain", "enxaquec",
   ],
   finance: [
     "salary", "salari", "ordenado", "wage", "debt", "divida", "bank", "banco", "mortgage", "hipoteca", "loan",

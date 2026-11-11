@@ -21,6 +21,8 @@ import { makeBackgroundTasks, type BackgroundTasks } from "./background.js";
 import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
 import { makeModelExtract } from "./memory-extract.js";
 import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
+import { runIntrospection } from "./introspection.js";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
@@ -45,6 +47,8 @@ export type AppInputs = {
   readonly calendarReader?: CalendarReader;
   /** Tests: creates events instead of Google (Reach 2). */
   readonly eventCreator?: EventCreator;
+  /** Tests: where the introspection report goes (#108). */
+  readonly writeIntrospectionReport?: (date: string, markdown: string) => Promise<void>;
   /** Tests: reads email instead of Gmail (Reach 3). */
   readonly gmailReader?: GmailReader;
 };
@@ -188,6 +192,29 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     contexts: contexts.value,
     precheck,
     calendarEnabled: calendar !== undefined,
+    // #108: the nightly review, with the answer model (Claude): it runs once a night, so quality over cost.
+    ...(config.bareMemory
+      ? {
+          introspect: () =>
+            runIntrospection({
+              store: memoryStore,
+              llm: answerLlm.value,
+              contexts: contexts.value,
+              ec: makeEcMatchers(contexts.value, neverRemember),
+              timeZone: config.timeZone,
+              now,
+              log,
+              writeReport:
+                inputs.writeIntrospectionReport ??
+                (async (date, markdown) => {
+                  await mkdir("data/introspection", { recursive: true, mode: 0o700 });
+                  const path = `data/introspection/${date}.md`;
+                  await writeFile(path, markdown, { mode: 0o600 });
+                  await chmod(path, 0o600);
+                }),
+            }),
+        }
+      : {}),
     nativeTools: (calendar !== undefined || gmail !== undefined || config.bareMemory) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),

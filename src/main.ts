@@ -9,6 +9,7 @@ import { loadConfig } from "./config.js";
 import { formatModelRef } from "./llm/model-ref.js";
 import { makeJsonLogger } from "./log.js";
 import { openSqliteMemoryStore, startMemoryPurge } from "./memory-sqlite.js";
+import { startNightlyIntrospection } from "./introspection.js";
 import { makeMemoryStoreInMemory } from "./memory-store.js";
 import { localHosts, makeServer } from "./server.js";
 import { warmOllama } from "./llm/ollama.js";
@@ -55,6 +56,12 @@ const background = makeBackgroundTasks({ log });
 
 const deps = await buildDeps({ config: cfg, env: process.env, log, background, memoryStore });
 if (!deps.ok) refuse(deps.error);
+// #108: every night at 03:30 their time, while Jarvis runs (npm run memory:reflect runs it now).
+const introspect = deps.ok ? deps.value.introspect : undefined;
+const stopIntrospection =
+  cfg.introspection && introspect
+    ? startNightlyIntrospection(introspect, { timeZone: cfg.timeZone, onError: () => log.warn("introspection failed", { reason: "unexpected" }) })
+    : undefined;
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
 // The /voices audition page is dev-only (#73).
@@ -129,7 +136,7 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     bare: cfg.bareMode ? (cfg.bareProfile ? "on, with the profile" : "on") : "off",
     // Which tools Claude gets (Reach): fixed words, so a missing setting is easy to spot.
     tools:
-      [cfg.calendar.enabled ? (cfg.calendar.write ? "calendar (read, add with your OK)" : "calendar (read)") : undefined, cfg.gmail.enabled ? "gmail (read)" : undefined, cfg.bareMemory ? "memory (short and long term)" : undefined]
+      [cfg.calendar.enabled ? (cfg.calendar.write ? "calendar (read, add with your OK)" : "calendar (read)") : undefined, cfg.gmail.enabled ? "gmail (read)" : undefined, cfg.bareMemory ? (cfg.introspection ? "memory (short and long term, nightly introspection)" : "memory (short and long term)") : undefined]
         .filter((t): t is string => t !== undefined)
         .join(", ") || "none",
   });
@@ -162,6 +169,7 @@ const shutdown = (signal: string): void => {
     if (waiting > 0) log.info("waiting for background work", { tasks: waiting });
     void background.drain().then(() => {
       stopPurge?.();
+      stopIntrospection?.();
       if (sqlite?.ok) sqlite.value.close();
       log.info("stopped");
       process.exit(0);
