@@ -645,7 +645,16 @@ with the evals, to see which jobs they can take. One PR at a time:
    - Email text is marked as data, never instructions. Nothing is stored;
      logs carry counts and fixed words only. The path line shows each call.
    - Local doesn't get Gmail (no tool calling yet).
-   - Later: drafts, then sending only with your OK.
+   - **Drafts and sending (#120, `GMAIL_WRITE=on`):** Claude's `gmail_draft`
+     (account, to, cc, subject, body, optionally the id it replies to) saves
+     a draft in that account's Gmail (a reply goes in the original's
+     thread). Code checks it: real addresses, at most 10, a subject and
+     body, and never EC (no europa.eu recipients, no EC topics, no replies
+     to EC email). A card shows To / Subject with **Send it** / **Keep as
+     draft**; only Send it (`POST /gmail/send`) sends, and the confirmation
+     is worded by code from Gmail's answer (it must say SENT). A draft
+     isn't "an action succeeded", so "I've sent it" is always dropped.
+     Needs `gmail.compose` (`GMAIL_WRITE=on npm run gmail:connect -- …`).
 4. **Skills:** saved playbooks that use tools (the Jarvis Builder backlog).
 5. Later: Vendus, the daily brief (#49), phone access.
 

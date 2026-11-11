@@ -131,7 +131,7 @@ export type PathStep =
        * card with "Add it" / "Don't add", and POSTs `id` to /calendar/confirm.
        * Page only: the path is never logged.
        */
-      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" };
+      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" | "email" };
     }
   | {
       readonly kind: "guard";
@@ -323,6 +323,8 @@ export type Deps = {
    * Google's answer; "no" drops it. Unknown or expired ids create nothing.
    */
   readonly calendarConfirm?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
+  /** #120: his answer to an email draft (POST /gmail/send). "yes" sends it; "no" keeps it as a draft. */
+  readonly gmailSend?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #116: skills, with MEMORY=on: drafts and approved routines. */
   readonly skills?: SkillStore;
   /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */

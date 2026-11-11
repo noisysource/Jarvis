@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { authorizationUrl, exchangeCode, makeAccessTokens, makePkce, nodeTokenFiles, parseClientFile } from "../src/calendar/oauth.js";
 import { loadConfig } from "../src/config.js";
 import { GMAIL_ACCOUNTS, GMAIL_SCOPE, isGmailAccount } from "../src/gmail/gmail.js";
+import { GMAIL_COMPOSE_SCOPE } from "../src/gmail/send.js";
 
 const fail = (message: string): never => {
   console.error(`✗ ${message}`);
@@ -31,7 +32,9 @@ const account = process.argv[2];
 if (!isGmailAccount(account)) fail(`Say which account: npm run gmail:connect -- ${GMAIL_ACCOUNTS.join(" | ")}`);
 const which = isGmailAccount(account) ? account : fail("");
 
-const configResult = loadConfig({ ...process.env, CALENDAR: "off", CALENDAR_WRITE: "off", GMAIL: "off" });
+// #120: GMAIL_WRITE=on also asks to write drafts and send them (sending always after your OK).
+const write = process.env.GMAIL_WRITE === "on";
+const configResult = loadConfig({ ...process.env, CALENDAR: "off", CALENDAR_WRITE: "off", GMAIL: "off", GMAIL_WRITE: "off" });
 const config = configResult.ok ? configResult.value : fail(configResult.ok ? "" : configResult.error);
 if (config.env === "production") fail("Gmail is local only: run this on your Mac, not in production.");
 const clientPath = config.calendar.clientPath;
@@ -50,8 +53,12 @@ const state = randomBytes(16).toString("hex");
 const server = createServer();
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const redirectUri = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-const url = authorizationUrl({ clientId: oauthClient.clientId, redirectUri, challenge, state, scope: GMAIL_SCOPE });
-console.log(`Connecting the "${which}" Gmail, read-only. On Google's screen, pick that account and allow reading email.\n`);
+const url = authorizationUrl({ clientId: oauthClient.clientId, redirectUri, challenge, state, scope: write ? `${GMAIL_SCOPE} ${GMAIL_COMPOSE_SCOPE}` : GMAIL_SCOPE });
+console.log(
+  write
+    ? `Connecting the "${which}" Gmail to read email and write drafts (Jarvis sends only after your "Send it"). On Google's screen, pick that account and tick both boxes.\n`
+    : `Connecting the "${which}" Gmail, read-only. On Google's screen, pick that account and allow reading email.\n`,
+);
 console.log("Opening Google's sign-in in your browser. If it doesn't open, visit:\n");
 console.log(`  ${url}\n`);
 if (process.platform === "darwin") execFile("open", [url], () => undefined);
@@ -84,6 +91,8 @@ const tokens = await exchangeCode({ client: oauthClient, code, verifier, redirec
 if (!tokens.ok) fail(tokens.error.message);
 if (tokens.ok && !tokens.value.scope.split(" ").includes(GMAIL_SCOPE))
   fail("Reading email was NOT allowed (the box was probably unticked on Google's screen). Run this again and tick it.");
+if (write && tokens.ok && !tokens.value.scope.split(" ").includes(GMAIL_COMPOSE_SCOPE))
+  fail("Writing drafts was NOT allowed (the box was probably unticked). Run this again and tick it.");
 await nodeTokenFiles.writeFile(tokensPath, JSON.stringify(tokens.ok ? tokens.value : {}, null, 2));
 console.log(`✓ Saved the ${which} Gmail's refresh token to ${tokensPath} (only you can read it; gitignored).`);
 
@@ -94,4 +103,5 @@ const profile = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/prof
   .then(async (r) => (r.ok ? ((await r.json()) as { emailAddress?: unknown }) : undefined))
   .catch(() => undefined);
 console.log(typeof profile?.emailAddress === "string" ? `✓ Connected "${which}" to ${profile.emailAddress}.` : "✗ Couldn't read the account's address; check the Gmail API is enabled.");
+console.log(write ? "✓ Drafts and sending allowed (always after your OK)." : "");
 console.log("\nNow put GMAIL=on in .env (with BARE_MODE=on) and restart Jarvis: a running Jarvis keeps its old connections until it restarts.");

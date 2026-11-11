@@ -193,18 +193,26 @@ const copyText = async (text) => {
   }
 };
 
+/** What each kind of card says and where its answer goes. */
+const CARDS = {
+  calendar: { ask: (/** @type {string} */ l) => `Add to your calendar: ${l}?`, yes: "Add it", no: "Don't add", endpoint: "/calendar/confirm", failed: "nothing was added" },
+  skill: { ask: (/** @type {string} */ l) => `New skill: ${l}. Approve it?`, yes: "Approve skill", no: "Not now", endpoint: "/skills/decide", failed: "nothing changed" },
+  email: { ask: (/** @type {string} */ l) => `Draft saved. ${l}. Send it?`, yes: "Send it", no: "Keep as draft", endpoint: "/gmail/send", failed: "nothing was sent" },
+};
+
 /**
- * A card for something waiting for Renato's OK: a calendar event (Reach 2) or a
- * skill (#116). Only "Add it" / "Approve skill" acts; the reply is worded by
- * code and goes into the history with what really ran.
- * @param {{ id: string, label: string, kind?: "calendar" | "skill" }} proposal
+ * A card for something waiting for Renato's OK: a calendar event (Reach 2), a
+ * skill (#116) or an email draft (#120). Only the first button acts; the reply
+ * is worded by code and goes into the history with what really ran.
+ * @param {{ id: string, label: string, kind?: "calendar" | "skill" | "email" }} proposal
  */
 const confirmCard = (proposal) => {
-  const skill = proposal.kind === "skill";
+  const kind = proposal.kind ?? "calendar";
+  const c = CARDS[kind];
   const card = document.createElement("div");
   card.className = "confirm";
   const what = document.createElement("p");
-  what.textContent = skill ? `New skill: ${proposal.label}. Approve it?` : `Add to your calendar: ${proposal.label}?`;
+  what.textContent = c.ask(proposal.label);
   const choices = document.createElement("div");
   choices.className = "choices";
   /** @param {"yes" | "no"} decision @param {string} label */
@@ -218,22 +226,23 @@ const confirmCard = (proposal) => {
       /** @type {{ ok?: boolean, text?: string, tool?: string }} */
       let result;
       try {
-        const res = skill
-          ? decision === "yes"
-            ? await fetch("/skills/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision: "approve" }) })
-            : undefined
-          : await fetch("/calendar/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision }) });
-        result = res ? await res.json().catch(() => ({})) : { ok: true, text: "Okay, it stays a draft. You'll find it in ✨ Skills." };
+        if (kind === "skill" && decision === "no") {
+          result = { ok: true, text: "Okay, it stays a draft. You'll find it in ✨ Skills." };
+        } else {
+          const body = kind === "skill" ? { id: proposal.id, decision: "approve" } : { id: proposal.id, decision };
+          const res = await fetch(c.endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+          result = await res.json().catch(() => ({}));
+        }
       } catch {
-        result = { ok: false, text: "I can't reach Jarvis, so nothing was added." };
+        result = { ok: false, text: `I can't reach Jarvis, so ${c.failed}.` };
       }
-      const text = typeof result.text === "string" ? result.text : "Something went wrong, so nothing was added.";
+      const text = typeof result.text === "string" ? result.text : `Something went wrong, so ${c.failed}.`;
       addMessage(result.ok ? "answer" : "error", text);
       state.history = appendTurn(state.history, "assistant", text, typeof result.tool === "string" ? [result.tool] : []);
     });
     return b;
   };
-  choices.append(button("yes", skill ? "Approve skill" : "Add it"), button("no", skill ? "Not now" : "Don't add"));
+  choices.append(button("yes", c.yes), button("no", c.no));
   card.append(what, choices);
   return card;
 };

@@ -330,6 +330,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and the 🧠 Memories panel lets you delete anything. Never secrets or
        EC work; health, money and others' private details only when you
        say "remember". "Off the record" keeps a conversation out.
+     - **Email drafts and sending (`GMAIL_WRITE=on`).** Ask Jarvis to write
+       or reply to an email: it's saved in your Gmail Drafts, and a card
+       asks **Send it** / **Keep as draft**. Nothing is sent until you press
+       Send it. Never to europa.eu or about EC work. Reconnect each account
+       once with write access:
+       `GMAIL_WRITE=on npm run gmail:connect -- personal` (and
+       `noisysource`), then add `GMAIL_WRITE=on` to `.env`.
      - **Introspection (`INTROSPECTION=on`, with `MEMORY=on`).** Every
        night at 03:30, while Jarvis runs, he reviews his short-term memory:
        drops what's done, makes lasting things long-term, merges updates,
