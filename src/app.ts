@@ -8,7 +8,8 @@ import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
 import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google.js";
 import { makeAccessTokens } from "./calendar/oauth.js";
-import { isEcEvent } from "./calendar/read.js";
+import { isEcEvent, localDate } from "./calendar/read.js";
+import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
 import { loadContexts } from "./contexts.js";
@@ -41,6 +42,8 @@ export type AppInputs = {
   readonly background?: BackgroundTasks;
   /** The calendar (CALENDAR=on, #100); defaults to Google with this Mac's tokens. */
   readonly calendarReader?: CalendarReader;
+  /** Tests: creates events instead of Google (Reach 2). */
+  readonly eventCreator?: EventCreator;
 };
 
 /**
@@ -121,12 +124,17 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   });
   // Your personal calendar (#100), read-only, for both brains. EC-looking events reach a brain only as "EC work, handled by Kiro".
   const precheck = makePrecheck(contexts.value);
+  const accessToken = makeAccessTokens({ clientPath: config.calendar.clientPath, tokensPath: config.calendar.tokensPath });
+  // Reach 2 (CALENDAR_WRITE=on): Claude proposes, the page asks, and only "yes" creates.
+  const pending = config.calendar.write ? makePendingProposals() : undefined;
+  const creator = config.calendar.write ? (inputs.eventCreator ?? makeGoogleEventCreator({ accessToken, timeZone: config.timeZone })) : undefined;
+  const isEcText = (text: string): boolean => precheck(text).kind === "handoff";
   const calendar = config.calendar.enabled
     ? {
         read:
           inputs.calendarReader ??
           makeGoogleCalendarReader({
-            accessToken: makeAccessTokens({ clientPath: config.calendar.clientPath, tokensPath: config.calendar.tokensPath }),
+            accessToken,
             timeZone: config.timeZone,
             isEc: (event) => isEcEvent(event, precheck),
           }),
@@ -134,6 +142,27 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         now,
       }
     : undefined;
+  const calendarConfirm =
+    pending && creator
+      ? async (id: string, decision: "yes" | "no") => {
+          const proposal = pending.take(id);
+          if (!proposal) return { ok: false, text: "That proposal has expired or was already answered, so nothing was added. Ask me again if you still want it." };
+          if (decision === "no") {
+            log.info("calendar create", { outcome: "declined" });
+            return { ok: true, text: "Okay, I won't add it." };
+          }
+          const created = await creator(proposal);
+          if (!created.ok) {
+            log.warn("calendar create failed", { code: created.error.code, reason: created.error.message });
+            return {
+              ok: false,
+              text: created.error.code === "auth" ? "I couldn't add it: Google didn't allow writing to your calendar. Connect it again with write access (CALENDAR_WRITE=on npm run calendar:connect), tick the box for editing events, then restart Jarvis." : "I couldn't add it: Google Calendar didn't answer properly. Nothing was added.",
+            };
+          }
+          log.info("calendar create", { outcome: "added", allDay: created.value.allDay });
+          return { ok: true, text: addedSentence(created.value, config.timeZone, localDate(now(), config.timeZone)), tool: `calendar_create ${proposalPathLabel(proposal)} → added` };
+        }
+      : undefined;
   const answerers = personalWith(answerLlm.value);
   const localAnswerers = personalWith(localLlm.value);
   const background = inputs.background ?? makeBackgroundTasks({ log });
@@ -142,6 +171,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     contexts: contexts.value,
     precheck,
     calendarEnabled: calendar !== undefined,
+    nativeTools: calendar !== undefined && config.toolCalling,
+    ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
@@ -157,7 +188,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               spokenSentences: config.turn.spokenSentences,
               pauses: config.turn.punctuationStyle,
               ...(config.bareProfile ? { profile } : {}),
-              ...(calendar ? { calendar } : {}),
+              ...(calendar ? { calendar: { ...calendar, ...(pending ? { create: { pending, isEc: isEcText } } : {}) } } : {}),
               log,
             }),
             local: makeBareAnswerer({

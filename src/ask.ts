@@ -232,6 +232,9 @@ export const handleAsk = async (deps: Deps, request: AskRequest, outer: AskMeta 
   // Not when the question names a day: that day may not have been read, so it needs a read of its own.
   const namesADay = resolveDatePhrase(request.question, "2026-01-01") !== undefined;
   if (!namesADay && (request.history ?? []).some((t) => t.role === "assistant" && cameFromRead(t))) guard.resultsKnown();
+  // Claude with native tools: no calendar-claims check (it dropped true answers, e.g. about an event
+  // Jarvis had just added). Fake actions, promises and perception are still dropped.
+  if (deps.nativeTools === true && (request.brain ?? "claude") === "claude") guard.resultsKnown();
   const streaming = outer.onText !== undefined || outer.onSentence !== undefined;
   const { onText: rawText, ...rest } = outer;
   const meta: AskMeta = streaming

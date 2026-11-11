@@ -126,6 +126,12 @@ export type PathStep =
       readonly result?: string;
       /** When it failed: a fixed code, e.g. "not_connected". */
       readonly error?: string;
+      /**
+       * An action waiting for Renato's OK (Reach 2): the page shows `label` on a
+       * card with "Add it" / "Don't add", and POSTs `id` to /calendar/confirm.
+       * Page only: the path is never logged.
+       */
+      readonly confirm?: { readonly id: string; readonly label: string };
     }
   | {
       readonly kind: "guard";
@@ -136,6 +142,14 @@ export type PathStep =
       readonly toolResult: number;
       readonly replaced: boolean;
     };
+
+export type CalendarConfirmResult = {
+  readonly ok: boolean;
+  /** What Jarvis says, worded by code. */
+  readonly text: string;
+  /** For the page's history record (#104), when something was added: "calendar_create Wed 11 Nov 21:00–22:00 → added". */
+  readonly tool?: string;
+};
 
 export type AskResponse =
   | { readonly type: "answer"; readonly context: ContextId; readonly answer: string; readonly brain?: Brain; readonly path?: readonly PathStep[] }
@@ -290,6 +304,19 @@ export type Deps = {
   readonly log: Logger;
   /** CALENDAR=on (#100): the calendar can be read; the honesty guard then offers to check instead of "can't". */
   readonly calendarEnabled?: boolean;
+  /**
+   * Claude reads the calendar itself, with native tools (#104). Its answers
+   * about the calendar then rest on the record of what really ran, so the
+   * honesty guard's calendar-claims check (built for the local brain, which
+   * invented calendar contents) is off for Claude. The rest of the guard stays.
+   */
+  readonly nativeTools?: boolean;
+  /**
+   * Reach 2: Renato's answer to a proposed event (POST /calendar/confirm).
+   * "yes" creates it through Google and returns a sentence built from
+   * Google's answer; "no" drops it. Unknown or expired ids create nothing.
+   */
+  readonly calendarConfirm?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
   readonly stickyContext?: boolean;
   /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */

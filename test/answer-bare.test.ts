@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asksForDetail, barePrompt, isReaction, makeBareAnswerer, makeSentenceCap, openingHint, REACTIONS } from "../src/answer/bare.js";
+import { asksForDetail, barePrompt, isReaction, makeBareAnswerer, makeLeadStripper, makeSentenceCap, openingHint, REACTIONS } from "../src/answer/bare.js";
 import { streamedFrom } from "../src/llm/stream.js";
 import type { LlmCall, LlmRequest } from "../src/llm/types.js";
 import { err, ok } from "../src/result.js";
@@ -251,5 +251,30 @@ describe("the profile back in bare mode (#98, PROFILE=on)", () => {
     expect(await ask(makeBareAnswerer({ llm, log, profile: missing }))).toEqual(err({ code: "config", message: "I can't read your profile right now." }));
     expect(requests).toEqual([]);
     expect(logged).toEqual([{ m: "profile unavailable", f: { code: "missing", reason: "No profile at data/profile.md." } }]);
+  });
+});
+
+describe("makeLeadStripper: no repeating what code already said (Local)", () => {
+  const run = (lead: string, text: string, chunk = 7): string => {
+    const s = makeLeadStripper(lead);
+    let out = "";
+    for (let i = 0; i < text.length; i += chunk) out += s.feed(text.slice(i, i + chunk));
+    return out + s.flush();
+  };
+  const lead = "Yes, that answer came from a real check of your calendar. I've checked now: looking at Friday 13 November.";
+
+  it("drops Qwen's repeat of the whole \"did you check?\" lead, seen on Renato's Mac", () => {
+    const qwen = "Yes, that answer came from a real check of your calendar. I've checked now: looking at Friday 13 November. Nothing's on then, it's completely clear.";
+    for (const chunk of [1, 5, 40, 500]) expect(run(lead, qwen, chunk)).toBe("Nothing's on then, it's completely clear.");
+  });
+
+  it("drops a reworded check claim and a restated date, keeps what's new", () => {
+    expect(run(lead, "Yes, I really did check it. Friday 13 November is clear.")).toBe("Friday 13 November is clear.");
+    expect(run("Looking at Wednesday 11 November.", "Looking at Wednesday 11 November. You have one meeting at eight.")).toBe("You have one meeting at eight.");
+  });
+
+  it("leaves a reply that doesn't repeat anything alone", () => {
+    expect(run(lead, "Nothing's on then. Want me to look at the weekend?")).toBe("Nothing's on then. Want me to look at the weekend?");
+    expect(run("Looking at Wednesday 11 November.", "You have one meeting at eight.")).toBe("You have one meeting at eight.");
   });
 });

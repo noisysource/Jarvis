@@ -603,13 +603,34 @@ with the evals, to see which jobs they can take. One PR at a time:
      answer 1: calendar_read Wed 11 Nov → 1 event"). Without this, Claude
      saw only the text of its old answers and wrongly "confessed" it had
      never checked, though every answer came from a real read.
-   - The honesty guard stays a narrow safety net: calendar claims pass when
-     a read ran this turn, or ran earlier in the conversation and the
-     question names no new day.
+   - The honesty guard stays a narrow safety net. Its calendar-claims check
+     (built for the local brain, which invented calendar contents) is **off
+     for Claude**: it kept dropping true answers, e.g. about an event Jarvis
+     had just added. Fake actions, promises and perception are still dropped
+     for every brain. For Local, calendar claims pass when a read (or an add)
+     ran this turn, or earlier in the conversation and the question names no
+     new day.
    - `TOOL_CALLING=off` brings back the code-driven path. The local brain
      always uses it (our Ollama provider doesn't do tools yet).
-2. **Calendar: creating events**, always after your explicit OK; the
-   confirmation is built from the tool's result (was Trust 3b).
+2. **Calendar: creating events (#110), always after your explicit OK**
+   (`CALENDAR_WRITE=on`, with Claude's tools; was Trust 3b).
+   - Claude gets `calendar_create` (title, date, start/end or all day).
+     Code checks it (a real date, today or later, sensible times, a title,
+     never EC work, which is Kiro's) and keeps it as a **pending
+     proposal** in memory: random id, single use, gone after 15 minutes.
+     Nothing is written to the calendar at this point.
+   - The answer's path carries the proposal; the page shows a card,
+     "Add to your calendar: “Work”, Wednesday 11 November, 21:00–22:00?",
+     with **Add it** / **Don't add**.
+   - Only **Add it** (`POST /calendar/confirm`) creates the event, with the
+     one non-GET calendar call. Jarvis's reply is worded by code from
+     Google's answer ("Added “Work” on Wednesday 11 November,
+     21:00–22:00.") and goes into the history with its tool record.
+   - The honesty guard still drops "I've added it" from the model: a
+     proposal isn't an action.
+   - Write access needs `CALENDAR_WRITE=on npm run calendar:connect`
+     (scope `calendar.events`: events only, never settings or sharing).
+     A read-only token gets a clear "connect again" message.
 3. **Gmail:** read and search first, then drafts. Sending only with your OK.
 4. **Skills:** saved playbooks that use tools (the Jarvis Builder backlog).
 5. Later: Vendus, the daily brief (#49), phone access.

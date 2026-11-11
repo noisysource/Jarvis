@@ -25,6 +25,7 @@ import {
 } from "../calendar/read.js";
 import { rangeLabel, readSentence, resolveDatePhrase, shortRangeLabel } from "../calendar/dates.js";
 import { calendarIntent } from "../calendar/intent.js";
+import { CALENDAR_CREATE_TOOL, checkCreateRequest, proposalLabel, proposalPathLabel, type PendingProposals } from "../calendar/create.js";
 import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
@@ -162,6 +163,8 @@ export const barePrompt = (
     readonly calendar?: boolean;
     /** It reads the calendar itself, with the calendar_read tool (#104), instead of the app reading it. */
     readonly tools?: boolean;
+    /** It can propose new events with calendar_create (Reach 2); only Renato's OK adds them. */
+    readonly create?: boolean;
   } = {},
 ): string => {
   const you = userName ?? "the person you're talking to";
@@ -183,7 +186,12 @@ export const barePrompt = (
           "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           ...(options.tools
             ? [
-                "When answering needs their calendar, call the calendar_read tool, without announcing it first. Answer about their calendar only from what a read returned, and if a read fails or is refused, say so plainly. You can't add, move or delete events yet.",
+                `When answering needs their calendar, call the calendar_read tool, without announcing it first. Answer about their calendar only from what a read returned, and if a read fails or is refused, say so plainly. ${options.create ? "You can't move or delete events yet." : "You can't add, move or delete events yet."}`,
+                ...(options.create
+                  ? [
+                      "When they want an event added, call calendar_create with the title, the day and the times (work them out from today's date at the end of this prompt). That doesn't add it: the app shows them the event and only their yes adds it. Then say in one short sentence what you'd add and that it needs their OK. Never say it's added. If something is unclear (the day, the time), ask first.",
+                    ]
+                  : []),
                 "What you really did for earlier answers is listed at the end of this prompt; trust that list. To talk about a day you haven't read, read it.",
               ]
             : [
@@ -235,28 +243,62 @@ export const nowLine = (now: Date, timeZone: string): string => {
 };
 
 /**
- * Takes a restated date sentence off the start of the model's text (#102):
- * the reply already opens with the one code wrote. Text is held back only
- * until the first sentence is known.
+ * Takes what code already said off the start of the model's text (#102):
+ * the reply opens with code's sentence (the date read, or "did you check?"),
+ * and models tend to say it again. Opening sentences that repeat it, or
+ * restate the date, are dropped; text is held only until the first sentence
+ * that's new. `lead`: what code said (none: only restated dates are dropped).
  */
-export const makeLeadStripper = () => {
+export const makeLeadStripper = (lead = "") => {
+  const norm = (t: string): string => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const leadSentences = lead
+    .split(/(?<=[.!?:])\s+/)
+    .map(norm)
+    .filter((x) => x.length > 0);
+  const aboutChecking = /\bcheck/i.test(lead);
+  const RESTATED = /^\s*(?:(?:okay|ok|sure|right|alright)[,.!]?\s+)?(?:looking at|i(?:'ve| have)? (?:just )?checked|i(?:'m| am) looking at|for|on)\b[^.!?\n]{0,80}?\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:\s+\d{4})?\s*[.!:]$/i;
+  const CHECK_CLAIM = /\b(?:real check|came from a (?:real )?(?:check|read)|i(?:'ve| have)? (?:just |now |already )?checked|i did check|i really did)\b/i;
+  /** A sentence that only repeats what code already said. */
+  const repeats = (sentence: string): boolean => {
+    const n = norm(sentence);
+    if (n === "") return true;
+    if (leadSentences.some((l) => l === n || (n.length > 12 && l.includes(n)) || (l.length > 12 && n.includes(l)))) return true;
+    if (RESTATED.test(sentence.trim())) return true;
+    return aboutChecking && CHECK_CLAIM.test(sentence) && n.split(" ").length <= 16;
+  };
   let held = "";
   let decided = false;
-  const RESTATED = /^\s*(?:(?:okay|ok|sure|right|alright)[,.!]?\s+)?(?:looking at|i(?:'ve| have)? (?:just )?checked|i(?:'m| am) looking at|for|on)\b[^.!?\n]{0,80}?\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:\s+\d{4})?\s*[.!:]\s+/i;
+  /** Drops repeated opening sentences; true once a new one starts the text. */
+  const settle = (final: boolean): boolean => {
+    for (;;) {
+      const m = /^\s*[^]*?[.!?:](?=\s+\S)/.exec(held);
+      if (!m) {
+        if (!final) return false;
+        if (repeats(held)) held = "";
+        return true;
+      }
+      if (!repeats(m[0])) return true;
+      held = held.slice(m[0].length).replace(/^\s+/, "");
+    }
+  };
   return {
     feed: (delta: string): string => {
       if (decided) return delta;
       held += delta;
-      // Enough to tell: a sentence end with something after it, or plenty of text.
-      if (!/[.!?:]\s+\S/.test(held) && held.length < 120) return "";
+      if (!settle(false) && held.length < 400) return "";
       decided = true;
-      return held.replace(RESTATED, "");
+      const out = held;
+      held = "";
+      return out;
     },
     /** The rest, at the end. */
     flush: (): string => {
       if (decided) return "";
       decided = true;
-      return held.replace(/^\s*(?:looking at|i(?:'ve| have)? (?:just )?checked)\b[^.!?\n]{0,80}[.!:]\s*$/i, "").replace(RESTATED, "");
+      settle(true);
+      const out = held;
+      held = "";
+      return out;
     },
   };
 };
@@ -281,7 +323,13 @@ export const makeBareAnswerer = (deps: {
   /** Where they are, for "now" in every prompt (#102). Defaults to Europe/Lisbon. */
   readonly timeZone?: string;
   /** CALENDAR=on (#100): it can read their personal calendar, in this time zone. */
-  readonly calendar?: { readonly read: CalendarReader; readonly timeZone: string; readonly now?: () => Date };
+  readonly calendar?: {
+    readonly read: CalendarReader;
+    readonly timeZone: string;
+    readonly now?: () => Date;
+    /** Reach 2: proposals for new events wait here for Renato's OK; `isEc` keeps EC work off his calendar. With tools only. */
+    readonly create?: { readonly pending: PendingProposals; readonly isEc: (text: string) => boolean };
+  };
   /**
    * Native tool calling (#104): the brain decides itself when to read the
    * calendar, through the calendar_read tool; code checks every call. Only
@@ -295,7 +343,7 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}) };
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
@@ -424,10 +472,10 @@ export const makeBareAnswerer = (deps: {
     const lead = calendar?.lead;
     const withLead = (text: string): string => (lead ? `${lead} ${text}`.trim() : text);
     // The model sometimes restates the date sentence: it's taken off.
-    const strip = lead ? makeLeadStripper() : undefined;
+    const strip = lead ? makeLeadStripper(lead) : undefined;
     const unrestated = (text: string): string => {
       if (!lead) return text;
-      const s = makeLeadStripper();
+      const s = makeLeadStripper(lead);
       return s.feed(text) + s.flush();
     };
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
@@ -449,7 +497,7 @@ export const makeBareAnswerer = (deps: {
         return { systemSuffix: suffix.join("\n\n") };
       })(),
       messages: [...historyMessages(history), { role: "user", text: question }],
-      ...(tools ? { tools: [CALENDAR_READ_TOOL] } : {}),
+      ...(tools ? { tools: deps.calendar?.create ? [CALENDAR_READ_TOOL, CALENDAR_CREATE_TOOL] : [CALENDAR_READ_TOOL] } : {}),
       effort: "low",
       // A conversation: answer without thinking first (Claude; Ollama has its own think setting).
       thinking: "off",
@@ -459,6 +507,25 @@ export const makeBareAnswerer = (deps: {
     /** Runs one tool call the brain asked for (#104). Code checks it; the result goes back to the brain. */
     const runTool = async (call: LlmToolCall): Promise<LlmToolResult> => {
       const cal = deps.calendar;
+      if (call.name === CALENDAR_CREATE_TOOL.name && cal?.create) {
+        // Reach 2: never written here. Code checks it and keeps it for Renato's OK.
+        const today = localDate((cal.now ?? (() => new Date()))(), cal.timeZone);
+        const checked = checkCreateRequest(call.input, today, cal.create.isEc);
+        if (!checked.ok) {
+          deps.log?.info("calendar create refused", { why: checked.error });
+          onStep?.({ kind: "tool", name: "calendar_create", args: "", by: "model", ok: false, error: `refused: ${checked.error}` });
+          return {
+            callId: call.id,
+            content: checked.error === "EC work is for Kiro" ? "Refused: that's EC work, which Kiro handles, not Jarvis. Say so." : `Refused: ${checked.error}. Ask them what's missing, or fix it.`,
+            isError: true,
+          };
+        }
+        const id = cal.create.pending.add(checked.value);
+        const label = proposalLabel(checked.value, today);
+        deps.log?.info("calendar create proposed", { allDay: checked.value.start === undefined });
+        onStep?.({ kind: "tool", name: "calendar_create", args: proposalPathLabel(checked.value), by: "model", ok: true, result: "waiting for your OK", confirm: { id, label } });
+        return { callId: call.id, content: `Not added yet. The app is showing them this event to confirm: ${label}. Say in one short sentence what you'd add and that it needs their OK. Never say it's added.` };
+      }
       if (call.name !== CALENDAR_READ_TOOL.name || !cal) {
         onStep?.({ kind: "tool", name: call.name.slice(0, 40), args: "", by: "model", ok: false, error: "not an allowed tool" });
         return { callId: call.id, content: "That tool doesn't exist. Answer without it.", isError: true };

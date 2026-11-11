@@ -94,7 +94,13 @@ export type Config = {
    * CALENDAR=on (#100, bare mode, this Mac only): reading your personal
    * Google Calendar. The OAuth client and tokens are gitignored files here.
    */
-  readonly calendar: { readonly enabled: boolean; readonly clientPath: string; readonly tokensPath: string };
+  readonly calendar: {
+    readonly enabled: boolean;
+    /** CALENDAR_WRITE=on (Reach 2): Claude may propose new events; only your OK adds them. Needs calendar:connect with write access. */
+    readonly write: boolean;
+    readonly clientPath: string;
+    readonly tokensPath: string;
+  };
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
@@ -232,6 +238,7 @@ const EnvSchema = z.object({
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
   TOOL_CALLING: onOff,
+  CALENDAR_WRITE: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -328,6 +335,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (production) errors.push("CALENDAR: local only for now (its tokens are files on this Mac, not in Secret Manager)");
     if (raw("BARE_MODE") !== "on") errors.push("CALENDAR: needs BARE_MODE=on for now");
   }
+  if (raw("CALENDAR_WRITE") === "on" && raw("CALENDAR") !== "on") errors.push("CALENDAR_WRITE: needs CALENDAR=on");
 
   if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl || !ollamaUrl) {
     return err(errors.join("\n"));
@@ -354,6 +362,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     bareProfile: e.PROFILE === "on",
     calendar: {
       enabled: e.CALENDAR === "on",
+      write: e.CALENDAR === "on" && e.CALENDAR_WRITE === "on",
       clientPath: e.GOOGLE_OAUTH_CLIENT_PATH ?? DEFAULTS.googleOAuthClientPath,
       tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
     },

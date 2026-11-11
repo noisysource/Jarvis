@@ -322,6 +322,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        before. I've checked now: looking at Wednesday 11 November. …"
      - **Today.** Jarvis always knows today's date, weekday and time in
        Lisbon.
+     - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
+       meeting called Work tomorrow at 9pm". Claude proposes it; a card
+       shows the event with **Add it** / **Don't add**, and nothing is
+       added until you press Add it. EC events are never added (Kiro's).
+       Connect once with write access:
+       `CALENDAR_WRITE=on npm run calendar:connect`, then add
+       `CALENDAR_WRITE=on` to `.env`.
      - **EC events** (the EC precheck matches the title or place, or anyone
        invited is at europa.eu) reach the brain only as "EC work, handled
        by Kiro", with their time.
