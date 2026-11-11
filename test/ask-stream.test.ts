@@ -71,6 +71,41 @@ const setup = (options: { classifyAs?: string; answer?: (input: AnswerInput) => 
   return { app, ask, spoken, wrapUps, lines, turns };
 };
 
+describe("POST /ask, streamed: live path (#130)", () => {
+  it("sends reach when a tool starts and step when it ends, before the answer", async () => {
+    const lines: string[] = [];
+    const log = makeJsonLogger({ write: (l) => lines.push(l) });
+    const deps: Deps = {
+      contexts,
+      precheck: makePrecheck(contexts),
+      classify: async () => ({ kind: "context", contextId: "personal" as ContextId }),
+      answer: async () => ok({ kind: "answer", text: "unused" }),
+      bare: async (input) => {
+        input.onReach?.("calendar_read");
+        input.onStep?.({ kind: "tool", name: "calendar_read", args: "Fri 13 Nov", by: "model", ok: true, result: "2 events" });
+        input.onText?.("You have two things on Friday.");
+        return ok({ kind: "answer", text: "You have two things on Friday." });
+      },
+      memory: { loadMemories: async () => [], wrapUp: async () => undefined },
+      isAnswered: (id) => id === "personal",
+      afterReply: (_name, task) => void task(),
+      now: () => new Date("2026-11-08T10:00:00Z"),
+      log,
+    };
+    const app = makeServer(deps, { newTurnId: () => "turn-1", turns: makeTurnRegistry({ log, holdMs: 60_000 }) });
+    const res = await app.request("/ask", { method: "POST", headers: { "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify({ question: "What's on Friday?" }) });
+    const events = parseSse(await res.text());
+    const names = events.map((e) => e.event);
+    expect(names.indexOf("reach")).toBeGreaterThan(names.indexOf("start"));
+    expect(names.indexOf("step")).toBeGreaterThan(names.indexOf("reach"));
+    expect(names.indexOf("done")).toBeGreaterThan(names.indexOf("step"));
+    expect(events.find((e) => e.event === "reach")?.data).toEqual({ tool: "calendar_read" });
+    expect(events.find((e) => e.event === "step")?.data).toMatchObject({ kind: "tool", name: "calendar_read", ok: true, result: "2 events" });
+    // The final path still carries the same step.
+    expect((events.find((e) => e.event === "done")?.data as { path?: unknown[] }).path).toContainEqual(expect.objectContaining({ name: "calendar_read" }));
+  });
+});
+
 describe("POST /ask, streamed", () => {
   it("sends start, each sentence as it completes, then done", async () => {
     const { ask } = setup();
