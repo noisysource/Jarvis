@@ -183,6 +183,7 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(meta.signal ? { signal: meta.signal } : {}),
     ...(request.brain ? { brain: request.brain } : {}),
     ...(request.spoken === true ? { spoken: true } : {}),
+    ...(request.remember === false ? { remember: false } : {}),
     onToolSucceeded: guard.toolSucceeded,
     onStep: (step) => {
       path.push(step);

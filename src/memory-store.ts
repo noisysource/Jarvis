@@ -22,6 +22,8 @@ export type MemoryChanges = {
   readonly text?: string;
   readonly origin?: MemoryOrigin;
   readonly expiresAt?: Date;
+  /** Makes it long-term: no expiry (#107). */
+  readonly clearExpiry?: boolean;
 };
 
 export type MemoryFilter = {
@@ -145,7 +147,9 @@ export const makeMemoryStoreInMemory = (
     update: async (id, changes) => {
       const existing = memories.get(id);
       if (!existing) return undefined;
-      return put({ ...existing, ...changes, updatedAt: now(), seen: false });
+      const { clearExpiry, ...rest } = changes;
+      const updated: Memory = { ...existing, ...rest, updatedAt: now(), seen: false };
+      return put(clearExpiry === true ? (Object.fromEntries(Object.entries(updated).filter(([k]) => k !== "expiresAt")) as Memory) : updated);
     },
     get: async (id) => memories.get(id),
     search: async ({ contextId, text, kinds, limit }) => {

@@ -322,6 +322,14 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        before. I've checked now: looking at Wednesday 11 November. …"
      - **Today.** Jarvis always knows today's date, weekday and time in
        Lisbon.
+     - **Memory (`MEMORY=on`, ☁️ Claude).** Jarvis remembers across
+       conversations, like a person: short-term things (plans, what
+       happened) fade in about two weeks, or the day after a dated event;
+       long-term facts and preferences last. He notes things himself and
+       searches his memory when he needs it; the path line shows each one,
+       and the 🧠 Memories panel lets you delete anything. Never secrets or
+       EC work; health, money and others' private details only when you
+       say "remember". "Off the record" keeps a conversation out.
      - **Gmail (`GMAIL=on`, ☁️ Claude), read-only.** Two accounts:
        `personal` and `noisysource`. In Google Cloud, enable the **Gmail
        API** on the same project (and, with an "External" consent screen,
