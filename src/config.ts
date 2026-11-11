@@ -107,6 +107,12 @@ export type Config = {
    * (npm run gmail:connect -- <account>); its token file is under data/.
    */
   readonly gmail: { readonly enabled: boolean; readonly tokensPath: (account: string) => string };
+  /**
+   * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
+   * across conversations like a person (short-term that fades, long-term that
+   * lasts), saving and recalling with tools. Memories live in MEMORY_DB.
+   */
+  readonly bareMemory: boolean;
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
@@ -246,6 +252,7 @@ const EnvSchema = z.object({
   TOOL_CALLING: onOff,
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
+  MEMORY: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -343,6 +350,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("BARE_MODE") !== "on") errors.push("CALENDAR: needs BARE_MODE=on for now");
   }
   if (raw("CALENDAR_WRITE") === "on" && raw("CALENDAR") !== "on") errors.push("CALENDAR_WRITE: needs CALENDAR=on");
+  if (raw("MEMORY") === "on" && raw("BARE_MODE") !== "on") errors.push("MEMORY: needs BARE_MODE=on (without it, the older memory runs on its own)");
   if (raw("GMAIL") === "on") {
     if (production) errors.push("GMAIL: local only for now");
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
@@ -378,6 +386,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
     },
     toolCalling: e.TOOL_CALLING !== "off",
+    bareMemory: e.MEMORY === "on",
     gmail: { enabled: e.GMAIL === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,

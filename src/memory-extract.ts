@@ -176,6 +176,11 @@ export type FilterInput = {
   /** For one-off events: "today" and expiries are worked out in this time zone. */
   readonly now?: Date;
   readonly timeZone?: string;
+  /**
+   * Layered memory (#107): dated, one-off things may be kept without an
+   * explicit "remember", as short-term memories that fade the day after.
+   */
+  readonly layered?: boolean;
 };
 
 export type FilterResult = ExtractResult & { readonly dropped: Readonly<Partial<Record<DropReason, number>>> };
@@ -259,7 +264,7 @@ export const filterSuggestions = (input: FilterInput): FilterResult => {
     // after the event. Words like "tomorrow" make it a one-off whatever the
     // model said.
     const oneOff = s.oneOff || mentionsRelativeDay(s.text);
-    if (oneOff && !explicit) return drop("one_off_not_explicit");
+    if (oneOff && !explicit && input.layered !== true) return drop("one_off_not_explicit");
     const expiry = oneOff ? oneOffExpiry(s) : undefined;
     if (expiry === "past") return drop("event_in_past");
     const expires = expiry ? { expiresAt: expiry } : {};

@@ -199,7 +199,7 @@ export const openSqliteMemoryStore = async (options: {
       db.prepare("UPDATE memories SET text = ?, origin = ?, expires_at = ?, updated_at = ?, seen = 0 WHERE id = ?").run(
         changes.text ?? existing.text,
         changes.origin ?? existing.origin,
-        (changes.expiresAt ?? existing.expiresAt)?.getTime() ?? null,
+        changes.clearExpiry === true ? null : ((changes.expiresAt ?? existing.expiresAt)?.getTime() ?? null),
         now().getTime(),
         id,
       );

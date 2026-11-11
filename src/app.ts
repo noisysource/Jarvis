@@ -20,7 +20,7 @@ import type { LlmCall } from "./llm/types.js";
 import { makeBackgroundTasks, type BackgroundTasks } from "./background.js";
 import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
 import { makeModelExtract } from "./memory-extract.js";
-import { parseNeverRemember } from "./memory-rules.js";
+import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
@@ -188,7 +188,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     contexts: contexts.value,
     precheck,
     calendarEnabled: calendar !== undefined,
-    nativeTools: (calendar !== undefined || gmail !== undefined) && config.toolCalling,
+    nativeTools: (calendar !== undefined || gmail !== undefined || config.bareMemory) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
@@ -208,6 +208,10 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(calendar ? { calendar: { ...calendar, ...(pending ? { create: { pending, isEc: isEcText } } : {}) } } : {}),
               // Gmail needs tools (Claude); the local brain doesn't get it.
               ...(gmail && config.toolCalling ? { gmail } : {}),
+              // #107: memory across conversations, with tools (Claude); every rule enforced in code.
+              ...(config.bareMemory && config.toolCalling
+                ? { memory: { store: memoryStore, contexts: contexts.value, ec: makeEcMatchers(contexts.value, neverRemember), timeZone: config.timeZone, log } }
+                : {}),
               log,
             }),
             local: makeBareAnswerer({

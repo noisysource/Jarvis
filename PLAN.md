@@ -786,6 +786,28 @@ each behind its own switch and checked with evals.
 | **Long-term** | Stable facts and preferences | Until changed or deleted | The SQLite memory and the profile |
 | **Routine** (#108) | How things are done: playbooks, later learned skills | Until changed | Playbooks; skills in the Builder backlog |
 
+**Built (#107, `MEMORY=on`, Claude's tools).** Jarvis remembers and recalls
+by himself, and code enforces every memory rule (the same `filterSuggestions`
+as before):
+- `memory_remember` (text, short or long term, fact or routine, context,
+  sensitivity, optionally the id it replaces). Short-term fades in 14 days,
+  or the day after a dated event; long-term has no expiry. At most 3 new
+  per message. "Off the record" and the page's Remembering toggle stop it.
+  A real save lets "noted" through the honesty guard; a claim without one
+  is still dropped.
+- `memory_recall` (a few words) searches every context he works in (never
+  EC/HRT) and strengthens what it finds (`touch`).
+- `memory_forget` (an id it was shown), only when he asks to forget.
+- Recent short-term memories are always in the prompt; long-term ones are
+  recalled on demand. The path line shows every save, recall and forget.
+- The older automatic wrap-up stays off in bare mode. Local doesn't get
+  memory yet (no tool calling).
+
+**Introspection (#108, decided by Renato):** a nightly job decides, for each
+short-term memory, whether to drop it, make it long-term, or turn it into a
+skill. Memories it may change on its own (visible and deletable in the
+Memories panel); a skill or tool that would run code is a draft for his OK.
+
 **Before each answer**, a little from each layer is loaded: all of working
 memory, the most recent short-term items, the long-term facts that match the
 question, and the routines that apply. The prompt stays small.

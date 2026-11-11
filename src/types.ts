@@ -253,6 +253,8 @@ export type AnswerInput = {
   readonly spoken?: boolean;
   /** Which brain answers (#88). */
   readonly brain?: Brain;
+  /** false: the page's Remembering is off, so nothing new is saved this turn (#107). */
+  readonly remember?: boolean;
   /** A tool ran and succeeded this turn (#96): the honesty guard then lets its claims through. Called by a tool loop. */
   readonly onToolSucceeded?: () => void;
   /** Reports a tool or skill step for the answer's path (#102). */
