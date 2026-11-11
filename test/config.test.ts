@@ -32,6 +32,7 @@ describe("loadConfig", () => {
       toolCalling: true,
       gmail: { enabled: false, tokensPath: expect.any(Function) },
       bareMemory: false,
+      introspection: false,
       ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",

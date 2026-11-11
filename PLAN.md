@@ -803,10 +803,24 @@ as before):
 - The older automatic wrap-up stays off in bare mode. Local doesn't get
   memory yet (no tool calling).
 
-**Introspection (#108, decided by Renato):** a nightly job decides, for each
-short-term memory, whether to drop it, make it long-term, or turn it into a
-skill. Memories it may change on its own (visible and deletable in the
-Memories panel); a skill or tool that would run code is a draft for his OK.
+**Introspection (#108, built; `INTROSPECTION=on`, decided by Renato):** every
+night at 03:30 Lisbon time, while Jarvis runs (or now, with
+`npm run memory:reflect`), faded memories are purged, then the answer model
+(Claude) reviews up to 60 short-term memories, with when each fades and
+whether it was recalled, next to up to 80 long-term ones. For each it decides:
+- **drop** (deleted now), **promote** (a new long-term fact or routine, in
+  lasting wording, then the short-term one goes), **merge** (updates a
+  long-term memory in the same context), or **keep** (it fades on its own).
+- Every new wording goes through the memory rules again (`filterSuggestions`,
+  with the model's own sensitivity flag); a memory he explicitly asked to
+  remember keeps that permission. At most 15 changes a night; unknown ids,
+  other contexts and rule breaks are refused and counted.
+- **Skills and tools are drafts** in the report: nothing is switched on.
+- The report (`data/introspection/<date>.md`, mode 600, gitignored, refused
+  by CI) lists what changed. Logs carry counts only.
+- Next: approving a drafted skill from the page (it becomes a routine Jarvis
+  follows), and a log of tool sequences, so repeated procedures can be
+  spotted from what Jarvis did, not only from what he noted.
 
 **Before each answer**, a little from each layer is loaded: all of working
 memory, the most recent short-term items, the long-term facts that match the

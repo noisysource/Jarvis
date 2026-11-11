@@ -21,3 +21,5 @@ data/google-oauth-client.json
 data/google-tokens.json
 # Gmail (Reach 3): one refresh token per account, local only, never commit
 data/google-gmail-*.json
+# Introspection reports (#108): your memories, local only, never commit
+data/introspection/

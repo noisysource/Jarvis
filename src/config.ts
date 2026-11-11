@@ -113,6 +113,8 @@ export type Config = {
    * lasts), saving and recalling with tools. Memories live in MEMORY_DB.
    */
   readonly bareMemory: boolean;
+  /** INTROSPECTION=on (#108), with MEMORY=on: every night at 03:30, Jarvis reviews his short-term memory. Report in data/introspection/. */
+  readonly introspection: boolean;
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
@@ -253,6 +255,7 @@ const EnvSchema = z.object({
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
   MEMORY: onOff,
+  INTROSPECTION: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -350,6 +353,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("BARE_MODE") !== "on") errors.push("CALENDAR: needs BARE_MODE=on for now");
   }
   if (raw("CALENDAR_WRITE") === "on" && raw("CALENDAR") !== "on") errors.push("CALENDAR_WRITE: needs CALENDAR=on");
+  if (raw("INTROSPECTION") === "on" && raw("MEMORY") !== "on") errors.push("INTROSPECTION: needs MEMORY=on");
   if (raw("MEMORY") === "on" && raw("BARE_MODE") !== "on") errors.push("MEMORY: needs BARE_MODE=on (without it, the older memory runs on its own)");
   if (raw("GMAIL") === "on") {
     if (production) errors.push("GMAIL: local only for now");
@@ -387,6 +391,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     },
     toolCalling: e.TOOL_CALLING !== "off",
     bareMemory: e.MEMORY === "on",
+    introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
