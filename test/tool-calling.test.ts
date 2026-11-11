@@ -263,7 +263,7 @@ describe("native tool calling (#104)", () => {
           "Tools the app really ran for your earlier answers in this conversation (counting your answers from the first):",
           "- Your answer 1: calendar_read Wed 11 Nov → 1 event",
           "- Your answer 3: calendar_read Fri 13 Nov → 0 events",
-          "Those answers came from real reads. Never say you didn't check for them. Answers not listed used no tool.",
+          "Those answers were based on what the tools returned at the time. You can't see those results any more, but they were real, and so were the details you gave from them. Never say you didn't check, and don't correct, doubt or revisit an earlier answer unless they say it's wrong. Answers not listed used no tool.",
         ].join("\n"),
       );
       expect(toolsSoFar([{ role: "assistant", text: "Hi." }])).toBeUndefined();
@@ -273,7 +273,7 @@ describe("native tool calling (#104)", () => {
       const { llm, requests } = scripted([text("Next week is clear.")]);
       await answerer(llm, googleWith([]).read)({ context: personal, question: "Thanks", history, memories: [], now: NOW });
       expect(requests[0]?.systemSuffix).toContain("- Your answer 1: calendar_read Wed 11 Nov → 1 event");
-      expect(requests[0]?.systemSuffix).toContain("Never say you didn't check for them.");
+      expect(requests[0]?.systemSuffix).toContain("don't correct, doubt or revisit an earlier answer unless they say it's wrong");
     });
 
     it("\"did you check?\" says yes when the page recorded a read, even without code's date sentence", () => {

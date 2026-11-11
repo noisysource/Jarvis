@@ -252,7 +252,7 @@ export const toolsSoFar = (history: AnswerInput["history"]): string | undefined 
   return [
     "Tools the app really ran for your earlier answers in this conversation (counting your answers from the first):",
     ...lines,
-    "Those answers came from real reads. Never say you didn't check for them. Answers not listed used no tool.",
+    "Those answers were based on what the tools returned at the time. You can't see those results any more, but they were real, and so were the details you gave from them. Never say you didn't check, and don't correct, doubt or revisit an earlier answer unless they say it's wrong. Answers not listed used no tool.",
   ].join("\n");
 };
 
