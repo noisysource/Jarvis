@@ -243,28 +243,62 @@ export const nowLine = (now: Date, timeZone: string): string => {
 };
 
 /**
- * Takes a restated date sentence off the start of the model's text (#102):
- * the reply already opens with the one code wrote. Text is held back only
- * until the first sentence is known.
+ * Takes what code already said off the start of the model's text (#102):
+ * the reply opens with code's sentence (the date read, or "did you check?"),
+ * and models tend to say it again. Opening sentences that repeat it, or
+ * restate the date, are dropped; text is held only until the first sentence
+ * that's new. `lead`: what code said (none: only restated dates are dropped).
  */
-export const makeLeadStripper = () => {
+export const makeLeadStripper = (lead = "") => {
+  const norm = (t: string): string => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const leadSentences = lead
+    .split(/(?<=[.!?:])\s+/)
+    .map(norm)
+    .filter((x) => x.length > 0);
+  const aboutChecking = /\bcheck/i.test(lead);
+  const RESTATED = /^\s*(?:(?:okay|ok|sure|right|alright)[,.!]?\s+)?(?:looking at|i(?:'ve| have)? (?:just )?checked|i(?:'m| am) looking at|for|on)\b[^.!?\n]{0,80}?\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:\s+\d{4})?\s*[.!:]$/i;
+  const CHECK_CLAIM = /\b(?:real check|came from a (?:real )?(?:check|read)|i(?:'ve| have)? (?:just |now |already )?checked|i did check|i really did)\b/i;
+  /** A sentence that only repeats what code already said. */
+  const repeats = (sentence: string): boolean => {
+    const n = norm(sentence);
+    if (n === "") return true;
+    if (leadSentences.some((l) => l === n || (n.length > 12 && l.includes(n)) || (l.length > 12 && n.includes(l)))) return true;
+    if (RESTATED.test(sentence.trim())) return true;
+    return aboutChecking && CHECK_CLAIM.test(sentence) && n.split(" ").length <= 16;
+  };
   let held = "";
   let decided = false;
-  const RESTATED = /^\s*(?:(?:okay|ok|sure|right|alright)[,.!]?\s+)?(?:looking at|i(?:'ve| have)? (?:just )?checked|i(?:'m| am) looking at|for|on)\b[^.!?\n]{0,80}?\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:\s+\d{4})?\s*[.!:]\s+/i;
+  /** Drops repeated opening sentences; true once a new one starts the text. */
+  const settle = (final: boolean): boolean => {
+    for (;;) {
+      const m = /^\s*[^]*?[.!?:](?=\s+\S)/.exec(held);
+      if (!m) {
+        if (!final) return false;
+        if (repeats(held)) held = "";
+        return true;
+      }
+      if (!repeats(m[0])) return true;
+      held = held.slice(m[0].length).replace(/^\s+/, "");
+    }
+  };
   return {
     feed: (delta: string): string => {
       if (decided) return delta;
       held += delta;
-      // Enough to tell: a sentence end with something after it, or plenty of text.
-      if (!/[.!?:]\s+\S/.test(held) && held.length < 120) return "";
+      if (!settle(false) && held.length < 400) return "";
       decided = true;
-      return held.replace(RESTATED, "");
+      const out = held;
+      held = "";
+      return out;
     },
     /** The rest, at the end. */
     flush: (): string => {
       if (decided) return "";
       decided = true;
-      return held.replace(/^\s*(?:looking at|i(?:'ve| have)? (?:just )?checked)\b[^.!?\n]{0,80}[.!:]\s*$/i, "").replace(RESTATED, "");
+      settle(true);
+      const out = held;
+      held = "";
+      return out;
     },
   };
 };
@@ -438,10 +472,10 @@ export const makeBareAnswerer = (deps: {
     const lead = calendar?.lead;
     const withLead = (text: string): string => (lead ? `${lead} ${text}`.trim() : text);
     // The model sometimes restates the date sentence: it's taken off.
-    const strip = lead ? makeLeadStripper() : undefined;
+    const strip = lead ? makeLeadStripper(lead) : undefined;
     const unrestated = (text: string): string => {
       if (!lead) return text;
-      const s = makeLeadStripper();
+      const s = makeLeadStripper(lead);
       return s.feed(text) + s.flush();
     };
     // Spoken and not asking for detail: the reply is cut off after the limit, whatever the model does (#92).
