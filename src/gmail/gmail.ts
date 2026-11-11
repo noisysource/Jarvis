@@ -216,9 +216,11 @@ export const makeGmailReader = (deps: {
       const list = await get(r.account, `${API}?${new URLSearchParams({ q: r.query, maxResults: String(r.max) }).toString()}`, signal);
       if (!list.ok) return list;
       const ids = ((list.value as { messages?: { id?: unknown }[] }).messages ?? []).map((m) => m.id).filter((id): id is string => typeof id === "string");
+      // All at once, not one by one (on Renato's Mac, 10 in a row took ~14 s). The list call
+      // above already got (and cached) the access token, so these don't each refresh it.
+      const all = await Promise.all(ids.slice(0, r.max).map((id) => get(r.account, `${API}/${encodeURIComponent(id)}?${metadata}`, signal)));
       const messages: GmailMessage[] = [];
-      for (const id of ids.slice(0, r.max)) {
-        const one = await get(r.account, `${API}/${encodeURIComponent(id)}?${metadata}`, signal);
+      for (const one of all) {
         if (!one.ok) return one;
         messages.push(toMessage(one.value as RawMessage));
       }

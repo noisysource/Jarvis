@@ -115,6 +115,31 @@ describe("Gmail itself", () => {
     expect(calls.every((c) => c.method === "GET")).toBe(true);
   });
 
+  it("fetches the found emails at the same time, in Gmail's order, with one token", async () => {
+    let inFlight = 0;
+    let most = 0;
+    let tokens = 0;
+    const reader = makeGmailReader({
+      accessToken: async () => {
+        tokens += 1;
+        return ok("tok");
+      },
+      fetch: (async (url: string) => {
+        if (url.includes("messages?")) return new Response(JSON.stringify({ messages: ["m1", "m2", "m3"].map((id) => ({ id })) }));
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        const id = url.split("/messages/")[1]?.split("?")[0] ?? "";
+        await new Promise((r) => setTimeout(r, id === "m1" ? 30 : 5)); // the first one is slowest
+        inFlight -= 1;
+        return new Response(JSON.stringify({ id, payload: { headers: [{ name: "Subject", value: id }] } }));
+      }) as unknown as typeof fetch,
+    });
+    const found = await reader.search({ account: "personal", query: "x", max: 3 });
+    expect(found.ok && found.value.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(most).toBe(3);
+    expect(tokens).toBe(4); // asked per call; the token helper caches it
+  });
+
   it("a refused token says how to reconnect that account", async () => {
     const reader = makeGmailReader({ accessToken: async () => ok("tok"), fetch: (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch });
     const r = await reader.search({ account: "noisysource", query: "x", max: 1 });
