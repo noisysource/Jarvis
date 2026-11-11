@@ -127,6 +127,11 @@ const server = serve({ fetch: app.fetch, hostname: cfg.host, port: cfg.port }, (
     memory: cfg.memoryStore.kind === "sqlite" ? `sqlite:${cfg.memoryStore.path}` : "memory (not kept after a restart)",
     // Fixed words only, never the profile itself.
     bare: cfg.bareMode ? (cfg.bareProfile ? "on, with the profile" : "on") : "off",
+    // Which tools Claude gets (Reach): fixed words, so a missing setting is easy to spot.
+    tools:
+      [cfg.calendar.enabled ? (cfg.calendar.write ? "calendar (read, add with your OK)" : "calendar (read)") : undefined, cfg.gmail.enabled ? "gmail (read)" : undefined]
+        .filter((t): t is string => t !== undefined)
+        .join(", ") || "none",
   });
   warm(); // listening now: warm the model connection before the first question
 });

@@ -19,3 +19,5 @@ data/whisper-hints.txt
 # Google Calendar (#100): the OAuth client and your refresh token, local only, never commit
 data/google-oauth-client.json
 data/google-tokens.json
+# Gmail (Reach 3): one refresh token per account, local only, never commit
+data/google-gmail-*.json

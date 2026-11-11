@@ -41,6 +41,13 @@ jobs:
             exit 1
           fi
 
+      - name: Google tokens are not committed
+        run: |
+          if git ls-files 'data/google-tokens.json' 'data/google-oauth-client.json' 'data/google-gmail-*.json' | grep -q .; then
+            echo "::error::Google OAuth files (data/google-*.json) hold secrets and must not be committed. Remove them with 'git rm --cached'."
+            exit 1
+          fi
+
       - name: Memory database is not committed
         run: |
           if git ls-files 'data/*.sqlite' 'data/*.sqlite-*' | grep -q .; then
