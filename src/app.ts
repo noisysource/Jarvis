@@ -171,6 +171,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     contexts: contexts.value,
     precheck,
     calendarEnabled: calendar !== undefined,
+    nativeTools: calendar !== undefined && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,

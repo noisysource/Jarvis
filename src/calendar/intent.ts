@@ -20,7 +20,7 @@ export type ChatTurn = { readonly role: "user" | "assistant"; readonly text: str
 
 /** The answer came from a real read: the page says calendar_read ran for it (#104), or it opens with code's sentence. */
 export const cameFromRead = (turn: ChatTurn | undefined): boolean =>
-  turn !== undefined && ((turn.tools ?? []).some((t) => t.startsWith("calendar_read")) || READ_MARK.test(turn.text));
+  turn !== undefined && ((turn.tools ?? []).some((t) => t.startsWith("calendar_read") || (t.startsWith("calendar_create") && t.endsWith("added"))) || READ_MARK.test(turn.text));
 
 export type CalendarIntent = {
   /** The question whose days are read: this one, or the earlier one it refers to. */

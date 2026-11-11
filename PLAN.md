@@ -603,9 +603,13 @@ with the evals, to see which jobs they can take. One PR at a time:
      answer 1: calendar_read Wed 11 Nov → 1 event"). Without this, Claude
      saw only the text of its old answers and wrongly "confessed" it had
      never checked, though every answer came from a real read.
-   - The honesty guard stays a narrow safety net: calendar claims pass when
-     a read ran this turn, or ran earlier in the conversation and the
-     question names no new day.
+   - The honesty guard stays a narrow safety net. Its calendar-claims check
+     (built for the local brain, which invented calendar contents) is **off
+     for Claude**: it kept dropping true answers, e.g. about an event Jarvis
+     had just added. Fake actions, promises and perception are still dropped
+     for every brain. For Local, calendar claims pass when a read (or an add)
+     ran this turn, or earlier in the conversation and the question names no
+     new day.
    - `TOOL_CALLING=off` brings back the code-driven path. The local brain
      always uses it (our Ollama provider doesn't do tools yet).
 2. **Calendar: creating events (#110), always after your explicit OK**

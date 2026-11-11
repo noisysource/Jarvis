@@ -642,6 +642,29 @@ describe("the answer's path, for the page only (#102)", () => {
     });
   });
 
+  it("with Claude's native tools, true calendar talk isn't dropped; fake actions still are", async () => {
+    const made = makeDeps();
+    const history: Turn[] = [
+      { role: "user", text: "add a test meeting for tomorrow 09h30" },
+      { role: "assistant", text: "Added “Test meeting” on Thursday 12 November, 09:30–10:30.", tools: ["calendar_create Thu 12 Nov 09:30–10:30 → added"] },
+    ];
+    const claude: Deps = {
+      ...made.deps,
+      calendarEnabled: true,
+      nativeTools: true,
+      bare: async () => ok({ kind: "answer", text: "Quick heads-up: you have a test meeting tomorrow from 09:30 to 10:30, so 9:45 overlaps it. What should I call the new one?" }),
+    };
+    expect(await handleAsk(claude, { question: "can you add a meeting for tomorrow at 9:45", history, brain: "claude" })).toMatchObject({
+      answer: "Quick heads-up: you have a test meeting tomorrow from 09:30 to 10:30, so 9:45 overlaps it. What should I call the new one?",
+    });
+    const faking: Deps = { ...claude, bare: async () => ok({ kind: "answer", text: "I've added it to your calendar. Anything else?" }) };
+    const r = await handleAsk(faking, { question: "add lunch tomorrow at one", history, brain: "claude" });
+    expect(r.type === "answer" ? r.answer : "").not.toContain("I've added it");
+    // The local brain keeps the check.
+    const l = await handleAsk(claude, { question: "can you add a meeting for tomorrow at 9:45", history, brain: "local" });
+    expect(l.type === "answer" ? l.answer : "").not.toContain("you have a test meeting");
+  });
+
   it("what an earlier real read found may be said again, when no new day is asked about (#104)", async () => {
     const made = makeDeps();
     const history: Turn[] = [

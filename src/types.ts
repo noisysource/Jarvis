@@ -305,6 +305,13 @@ export type Deps = {
   /** CALENDAR=on (#100): the calendar can be read; the honesty guard then offers to check instead of "can't". */
   readonly calendarEnabled?: boolean;
   /**
+   * Claude reads the calendar itself, with native tools (#104). Its answers
+   * about the calendar then rest on the record of what really ran, so the
+   * honesty guard's calendar-claims check (built for the local brain, which
+   * invented calendar contents) is off for Claude. The rest of the guard stays.
+   */
+  readonly nativeTools?: boolean;
+  /**
    * Reach 2: Renato's answer to a proposed event (POST /calendar/confirm).
    * "yes" creates it through Google and returns a sentence built from
    * Google's answer; "no" drops it. Unknown or expired ids create nothing.
