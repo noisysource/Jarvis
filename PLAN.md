@@ -55,7 +55,7 @@ means a sales commission.
 ## Request flow (M0)
 
 ```
-Chat page (GET /)                         Hono server (npm run dev, localhost)
+Chat page (GET /)                         Hono server (npm run jarvis / dev, localhost)
  ├ text box / mic (SpeechRecognition)      POST /ask { question, context?, history[] }
  ├ history[] in page memory only   ───────►  precheck(question)            ← cues in contexts.md, no model
  │                                           ├ EC cue + invoicing word → noisysource

@@ -69,11 +69,18 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
    npm run ask "When is my daughter's birthday?"
    ```
 
-5. Start the dev server:
+5. Start everything with one command:
 
    ```bash
-   npm run dev
+   npm run jarvis
    ```
+
+   It starts the voice services (if they're set up and not already running),
+   checks Ollama, starts the server and opens the page, all in one terminal
+   with each line marked `[voice]` or `[jarvis]`. Ctrl-C stops everything.
+   `npm run jarvis -- --no-voice` skips the voice services; `--no-open`
+   doesn't open the browser. For coding, `npm run dev` starts just the
+   server and restarts it when a file changes.
 
    Then open **http://localhost:8080** for the chat page: type, or press
    🎤 Speak and talk (Chrome or Safari; the browser asks for microphone
