@@ -30,7 +30,7 @@ const fail = (message: string): never => {
   process.exit(1);
 };
 
-const configResult = loadConfig({ ...process.env, CALENDAR: "off" });
+const configResult = loadConfig({ ...process.env, CALENDAR: "off", CALENDAR_WRITE: "off" });
 const config = configResult.ok ? configResult.value : fail(configResult.ok ? "" : configResult.error);
 if (config.env === "production") fail("The calendar is local only: run this on your Mac, not in production.");
 const { clientPath, tokensPath } = config.calendar;
