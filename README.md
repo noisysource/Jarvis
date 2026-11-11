@@ -336,6 +336,11 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and lets the rest fade. He may also draft skills and tools; those are
        only proposals. Run it now with `npm run memory:reflect`; the report
        is in `data/introspection/<date>.md` (readable only by you).
+     - **Skills (with `MEMORY=on`).** Routines Jarvis follows: say "make
+       that a skill" (or let introspection draft them overnight), approve
+       the card or use the ✨ Skills panel, and from then on he follows the
+       steps when a request matches. A skill only uses tools he already has;
+       actions still need your OK.
      - **Gmail (`GMAIL=on`, ☁️ Claude), read-only.** Two accounts:
        `personal` and `noisysource`. In Google Cloud, enable the **Gmail
        API** on the same project (and, with an "External" consent screen,

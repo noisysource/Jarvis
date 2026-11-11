@@ -30,6 +30,7 @@
         <button id="memories" type="button" aria-haspopup="dialog">
           Memories <span id="memories-badge" class="badge" hidden></span>
         </button>
+        <button id="skills" type="button" aria-haspopup="dialog" hidden>✨ Skills</button>
         <button id="new-conversation" type="button">New conversation</button>
       </div>
     </header>
@@ -45,6 +46,19 @@
       </p>
       <p id="memories-status" class="note" role="status"></p>
       <div id="memories-list"></div>
+    </dialog>
+
+    <dialog id="skills-panel" aria-labelledby="skills-title">
+      <div class="panel-head">
+        <h2 id="skills-title">Jarvis's skills</h2>
+        <button id="skills-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <p class="note">
+        Routines Jarvis follows, drafted from his memory at night or taught in chat. Only approved skills are used, and
+        a skill never adds powers: actions still need your OK.
+      </p>
+      <p id="skills-status" class="note" role="status"></p>
+      <div id="skills-list"></div>
     </dialog>
 
     <main>

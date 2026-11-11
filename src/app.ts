@@ -22,7 +22,8 @@ import { makeMemoryHooks, makeSafeMemoryHooks } from "./memory.js";
 import { makeModelExtract } from "./memory-extract.js";
 import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
 import { runIntrospection } from "./introspection.js";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { makeSkillStore, type SkillStore } from "./skills.js";
+import { chmod, mkdir, readFile as readFileFs, writeFile } from "node:fs/promises";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
@@ -47,6 +48,8 @@ export type AppInputs = {
   readonly calendarReader?: CalendarReader;
   /** Tests: creates events instead of Google (Reach 2). */
   readonly eventCreator?: EventCreator;
+  /** Tests: skills without a file (#116). */
+  readonly skillStore?: SkillStore;
   /** Tests: where the introspection report goes (#108). */
   readonly writeIntrospectionReport?: (date: string, markdown: string) => Promise<void>;
   /** Tests: reads email instead of Gmail (Reach 3). */
@@ -136,6 +139,19 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const pending = config.calendar.write ? makePendingProposals() : undefined;
   const creator = config.calendar.write ? (inputs.eventCreator ?? makeGoogleEventCreator({ accessToken, timeZone: config.timeZone })) : undefined;
   const isEcText = (text: string): boolean => precheck(text).kind === "handoff";
+  // #116: skills, with memory. data/skills.json, gitignored, readable only by him.
+  const skillStore = config.bareMemory
+    ? (inputs.skillStore ??
+      makeSkillStore({
+        read: () => readFileFs("data/skills.json", "utf8").catch(() => undefined),
+        write: async (text) => {
+          await writeFile("data/skills.json", text, { mode: 0o600 });
+          await chmod("data/skills.json", 0o600);
+        },
+        now,
+      }))
+    : undefined;
+  const memoryEc = makeEcMatchers(contexts.value, neverRemember);
   // Reach 3 (GMAIL=on): each account has its own connection, read on first use.
   const gmailTokens = new Map<GmailAccount, ReturnType<typeof makeAccessTokens>>();
   const gmailToken = (account: GmailAccount) => {
@@ -200,10 +216,11 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               store: memoryStore,
               llm: answerLlm.value,
               contexts: contexts.value,
-              ec: makeEcMatchers(contexts.value, neverRemember),
+              ec: memoryEc,
               timeZone: config.timeZone,
               now,
               log,
+              ...(skillStore ? { skills: skillStore } : {}),
               writeReport:
                 inputs.writeIntrospectionReport ??
                 (async (date, markdown) => {
@@ -215,6 +232,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
             }),
         }
       : {}),
+    ...(skillStore ? { skills: skillStore } : {}),
     nativeTools: (calendar !== undefined || gmail !== undefined || config.bareMemory) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
@@ -237,8 +255,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(gmail && config.toolCalling ? { gmail } : {}),
               // #107: memory across conversations, with tools (Claude); every rule enforced in code.
               ...(config.bareMemory && config.toolCalling
-                ? { memory: { store: memoryStore, contexts: contexts.value, ec: makeEcMatchers(contexts.value, neverRemember), timeZone: config.timeZone, log } }
+                ? { memory: { store: memoryStore, contexts: contexts.value, ec: memoryEc, timeZone: config.timeZone, log } }
                 : {}),
+              ...(skillStore && config.toolCalling ? { skills: { store: skillStore, ec: memoryEc } } : {}),
               log,
             }),
             local: makeBareAnswerer({

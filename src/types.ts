@@ -131,7 +131,7 @@ export type PathStep =
        * card with "Add it" / "Don't add", and POSTs `id` to /calendar/confirm.
        * Page only: the path is never logged.
        */
-      readonly confirm?: { readonly id: string; readonly label: string };
+      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" };
     }
   | {
       readonly kind: "guard";
@@ -145,6 +145,7 @@ export type PathStep =
 
 export type { IntrospectionReport } from "./introspection.js";
 import type { IntrospectionReport } from "./introspection.js";
+import type { SkillStore } from "./skills.js";
 
 export type CalendarConfirmResult = {
   readonly ok: boolean;
@@ -322,6 +323,8 @@ export type Deps = {
    * Google's answer; "no" drops it. Unknown or expired ids create nothing.
    */
   readonly calendarConfirm?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
+  /** #116: skills, with MEMORY=on: drafts and approved routines. */
+  readonly skills?: SkillStore;
   /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */
   readonly introspect?: () => Promise<IntrospectionReport>;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */

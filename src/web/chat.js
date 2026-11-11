@@ -48,10 +48,12 @@ export const appendTurn = (history, role, text, tools) => {
 /**
  * Actions waiting for Renato's OK (Reach 2): each one gets a card with
  * "Add it" / "Don't add".
- * @param {readonly PathStep[]} path @returns {{ id: string, label: string }[]}
+ * @param {readonly PathStep[]} path @returns {{ id: string, label: string, kind?: "calendar" | "skill" }[]}
  */
 export const confirmsOf = (path) =>
-  path.flatMap((step) => (step.kind === "tool" && step.ok && step.confirm && typeof step.confirm.id === "string" && typeof step.confirm.label === "string" ? [step.confirm] : []));
+  path.flatMap((step) =>
+    (step.kind === "tool" || step.kind === "skill") && step.ok && step.confirm && typeof step.confirm.id === "string" && typeof step.confirm.label === "string" ? [step.confirm] : [],
+  );
 
 /**
  * The tool calls that ran and worked for an answer, from its path (#104):
@@ -355,7 +357,7 @@ export const voiceNoteVisible = ({ note, voiceInUse }) => note !== "" && voiceIn
 /**
  * @typedef {{ kind: "precheck", result: "none" | "handoff" | "route" }
  *   | { kind: "brain", brain: "claude" | "local" }
- *   | { kind: "tool" | "skill", name: string, args: string, by: "code" | "model", ok: boolean, result?: string, error?: string, confirm?: { id: string, label: string } }
+ *   | { kind: "tool" | "skill", name: string, args: string, by: "code" | "model", ok: boolean, result?: string, error?: string, confirm?: { id: string, label: string, kind?: "calendar" | "skill" } }
  *   | { kind: "guard", claimedAction: number, promise: number, perception: number, toolResult?: number, replaced: boolean }} PathStep
  */
 

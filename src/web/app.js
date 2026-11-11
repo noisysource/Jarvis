@@ -194,16 +194,17 @@ const copyText = async (text) => {
 };
 
 /**
- * A card for an event waiting for Renato's OK (Reach 2). Only "Add it" creates
- * it, through POST /calendar/confirm; Jarvis's reply is worded by code from
- * Google's answer, and goes into the history with what really ran.
- * @param {{ id: string, label: string }} proposal
+ * A card for something waiting for Renato's OK: a calendar event (Reach 2) or a
+ * skill (#116). Only "Add it" / "Approve skill" acts; the reply is worded by
+ * code and goes into the history with what really ran.
+ * @param {{ id: string, label: string, kind?: "calendar" | "skill" }} proposal
  */
 const confirmCard = (proposal) => {
+  const skill = proposal.kind === "skill";
   const card = document.createElement("div");
   card.className = "confirm";
   const what = document.createElement("p");
-  what.textContent = `Add to your calendar: ${proposal.label}?`;
+  what.textContent = skill ? `New skill: ${proposal.label}. Approve it?` : `Add to your calendar: ${proposal.label}?`;
   const choices = document.createElement("div");
   choices.className = "choices";
   /** @param {"yes" | "no"} decision @param {string} label */
@@ -217,8 +218,12 @@ const confirmCard = (proposal) => {
       /** @type {{ ok?: boolean, text?: string, tool?: string }} */
       let result;
       try {
-        const res = await fetch("/calendar/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision }) });
-        result = await res.json().catch(() => ({}));
+        const res = skill
+          ? decision === "yes"
+            ? await fetch("/skills/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision: "approve" }) })
+            : undefined
+          : await fetch("/calendar/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: proposal.id, decision }) });
+        result = res ? await res.json().catch(() => ({})) : { ok: true, text: "Okay, it stays a draft. You'll find it in ✨ Skills." };
       } catch {
         result = { ok: false, text: "I can't reach Jarvis, so nothing was added." };
       }
@@ -228,7 +233,7 @@ const confirmCard = (proposal) => {
     });
     return b;
   };
-  choices.append(button("yes", "Add it"), button("no", "Don't add"));
+  choices.append(button("yes", skill ? "Approve skill" : "Add it"), button("no", skill ? "Not now" : "Don't add"));
   card.append(what, choices);
   return card;
 };
@@ -1510,6 +1515,84 @@ const openMemories = async () => {
     setMemoriesStatus(`Couldn't load memories: ${e instanceof Error ? e.message : "unknown error"}`);
   }
 };
+
+// ---- skills panel (#116) ----
+
+const skillsButton = /** @type {HTMLButtonElement} */ (byId("skills"));
+const skillsPanel = /** @type {HTMLDialogElement} */ (byId("skills-panel"));
+const skillsList = byId("skills-list");
+const skillsStatus = byId("skills-status");
+
+/** @typedef {{ id: string, title: string, when: string, steps: string[], status: "draft" | "active", source: string }} SkillView */
+
+/** @param {"approve" | "delete"} decision @param {string} id */
+const decideSkill = async (decision, id) => {
+  try {
+    const body = await memoryRequest("/skills/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, decision }) });
+    skillsStatus.textContent = typeof body.text === "string" ? body.text : "";
+    await renderSkills();
+  } catch (e) {
+    skillsStatus.textContent = `Couldn't do that: ${e instanceof Error ? e.message : "unknown error"}`;
+  }
+};
+
+const renderSkills = async () => {
+  /** @type {SkillView[]} */
+  const skills = (await memoryRequest("/skills")).skills;
+  if (skills.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "No skills yet. Ask Jarvis to make something a skill, or let him draft them overnight.";
+    skillsList.replaceChildren(empty);
+    return;
+  }
+  skillsList.replaceChildren(
+    ...skills.map((s) => {
+      const item = document.createElement("section");
+      item.className = "memory-group";
+      const head = document.createElement("h3");
+      head.textContent = `${s.status === "draft" ? "Draft · " : "✨ "}${s.title}`;
+      const when = document.createElement("p");
+      when.className = "memory-meta";
+      when.textContent = `When: ${s.when} · ${s.source === "introspection" ? "drafted overnight" : "taught in chat"}`;
+      const steps = document.createElement("ol");
+      for (const step of s.steps) steps.append(Object.assign(document.createElement("li"), { textContent: step }));
+      const actions = document.createElement("div");
+      actions.className = "choices";
+      if (s.status === "draft") {
+        const approve = Object.assign(document.createElement("button"), { type: "button", textContent: "Approve" });
+        approve.addEventListener("click", () => void decideSkill("approve", s.id));
+        actions.append(approve);
+      }
+      const remove = Object.assign(document.createElement("button"), { type: "button", textContent: "Delete" });
+      remove.addEventListener("click", () => void decideSkill("delete", s.id));
+      actions.append(remove);
+      item.append(head, when, steps, actions);
+      return item;
+    }),
+  );
+};
+
+const openSkills = async () => {
+  skillsStatus.textContent = "Loading…";
+  skillsList.replaceChildren();
+  skillsPanel.showModal();
+  try {
+    await renderSkills();
+    skillsStatus.textContent = "";
+  } catch (e) {
+    skillsStatus.textContent = `Couldn't load skills: ${e instanceof Error ? e.message : "unknown error"}`;
+  }
+};
+
+skillsButton.addEventListener("click", () => void openSkills());
+byId("skills-close").addEventListener("click", () => skillsPanel.close());
+skillsPanel.addEventListener("close", () => input.focus());
+// The button shows only when the server has skills (MEMORY=on).
+fetch("/skills")
+  .then((res) => {
+    skillsButton.hidden = !res.ok;
+  })
+  .catch(() => undefined);
 
 memoriesButton.addEventListener("click", () => void openMemories());
 memoriesClose.addEventListener("click", () => memoriesPanel.close());
