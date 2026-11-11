@@ -322,6 +322,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        before. I've checked now: looking at Wednesday 11 November. …"
      - **Today.** Jarvis always knows today's date, weekday and time in
        Lisbon.
+     - **Gmail (`GMAIL=on`, ☁️ Claude), read-only.** Two accounts:
+       `personal` and `noisysource`. In Google Cloud, enable the **Gmail
+       API** on the same project (and, with an "External" consent screen,
+       add each address as a test user). Then connect each once:
+       `npm run gmail:connect -- personal` and
+       `npm run gmail:connect -- noisysource`, put `GMAIL=on` in `.env`
+       and restart. Ask "anything from the school this week?" or "unread
+       at Noisy Source?". Jarvis can't send, delete or label; EC email shows
+       only as "EC email, handled by Kiro".
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

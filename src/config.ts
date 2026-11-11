@@ -101,6 +101,12 @@ export type Config = {
     readonly clientPath: string;
     readonly tokensPath: string;
   };
+  /**
+   * GMAIL=on (Reach 3): Claude can search and read the "personal" and
+   * "noisysource" Gmail accounts, read-only. Each is connected separately
+   * (npm run gmail:connect -- <account>); its token file is under data/.
+   */
+  readonly gmail: { readonly enabled: boolean; readonly tokensPath: (account: string) => string };
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
@@ -239,6 +245,7 @@ const EnvSchema = z.object({
   ),
   TOOL_CALLING: onOff,
   CALENDAR_WRITE: onOff,
+  GMAIL: onOff,
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -336,6 +343,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("BARE_MODE") !== "on") errors.push("CALENDAR: needs BARE_MODE=on for now");
   }
   if (raw("CALENDAR_WRITE") === "on" && raw("CALENDAR") !== "on") errors.push("CALENDAR_WRITE: needs CALENDAR=on");
+  if (raw("GMAIL") === "on") {
+    if (production) errors.push("GMAIL: local only for now");
+    if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
+  }
 
   if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl || !ollamaUrl) {
     return err(errors.join("\n"));
@@ -367,6 +378,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
     },
     toolCalling: e.TOOL_CALLING !== "off",
+    gmail: { enabled: e.GMAIL === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

@@ -631,7 +631,21 @@ with the evals, to see which jobs they can take. One PR at a time:
    - Write access needs `CALENDAR_WRITE=on npm run calendar:connect`
      (scope `calendar.events`: events only, never settings or sharing).
      A read-only token gets a clear "connect again" message.
-3. **Gmail:** read and search first, then drafts. Sending only with your OK.
+3. **Gmail (#112), read-only first, two accounts** (`GMAIL=on`, Claude's
+   tools): `personal` and `noisysource`, each connected separately
+   (`npm run gmail:connect -- <account>`, scope `gmail.readonly`, token in
+   `data/google-gmail-<account>.json`, gitignored and refused by CI).
+   - Claude gets `gmail_search` (account, a Gmail search, at most 10
+     results: id, date, sender, subject, snippet) and `gmail_read` (one
+     email's text, cut to 6,000 characters). GET calls only.
+   - Code checks every call (a known account, a short query, a real id).
+   - **EC email is Kiro's:** EC cues in the sender or subject, or anyone at
+     `europa.eu` in From, To or Cc. It reaches Claude only as "EC email,
+     handled by Kiro" (no sender, subject or id) and can't be opened.
+   - Email text is marked as data, never instructions. Nothing is stored;
+     logs carry counts and fixed words only. The path line shows each call.
+   - Local doesn't get Gmail (no tool calling yet).
+   - Later: drafts, then sending only with your OK.
 4. **Skills:** saved playbooks that use tools (the Jarvis Builder backlog).
 5. Later: Vendus, the daily brief (#49), phone access.
 

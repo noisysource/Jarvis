@@ -30,6 +30,7 @@ describe("loadConfig", () => {
       bareProfile: false,
       calendar: { enabled: false, write: false, clientPath: "data/google-oauth-client.json", tokensPath: "data/google-tokens.json" },
       toolCalling: true,
+      gmail: { enabled: false, tokensPath: expect.any(Function) },
       ollamaThink: false,
       userName: undefined,
       contextsPath: "contexts.md",

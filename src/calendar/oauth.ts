@@ -137,11 +137,14 @@ export const makeAccessTokens = (deps: {
   readonly files?: TokenFiles;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
+  /** What's connected, for the "not connected" message (default: the calendar). */
+  readonly what?: { readonly name: string; readonly connect: string };
 }): (() => Promise<Result<string, CalendarError>>) => {
   const files = deps.files ?? nodeTokenFiles;
   const now = deps.now ?? Date.now;
   let current: { token: string; expiresAt: number } | undefined;
-  const notConnected: CalendarError = { code: "not_connected", message: "The calendar isn't connected: run npm run calendar:connect" };
+  const what = deps.what ?? { name: "The calendar", connect: "npm run calendar:connect" };
+  const notConnected: CalendarError = { code: "not_connected", message: `${what.name} isn't connected: run ${what.connect}` };
 
   return async () => {
     if (current && current.expiresAt - 60_000 > now()) return ok(current.token);
@@ -150,7 +153,7 @@ export const makeAccessTokens = (deps: {
     if (clientText === undefined || tokensText === undefined) return err(notConnected);
     const client = parseClientFile(clientText);
     const tokens = parseTokensFile(tokensText);
-    if (!client.ok || !tokens.ok) return err({ code: "not_connected", message: `The calendar files aren't valid: run npm run calendar:connect again` });
+    if (!client.ok || !tokens.ok) return err({ code: "not_connected", message: `${what.name}'s files aren't valid: run ${what.connect} again` });
     const res = await postToken(deps.fetch ?? fetch, {
       client_id: client.value.clientId,
       client_secret: client.value.clientSecret,

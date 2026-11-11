@@ -9,6 +9,7 @@ import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
 import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google.js";
 import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate } from "./calendar/read.js";
+import { makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
@@ -44,6 +45,8 @@ export type AppInputs = {
   readonly calendarReader?: CalendarReader;
   /** Tests: creates events instead of Google (Reach 2). */
   readonly eventCreator?: EventCreator;
+  /** Tests: reads email instead of Gmail (Reach 3). */
+  readonly gmailReader?: GmailReader;
 };
 
 /**
@@ -129,6 +132,20 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const pending = config.calendar.write ? makePendingProposals() : undefined;
   const creator = config.calendar.write ? (inputs.eventCreator ?? makeGoogleEventCreator({ accessToken, timeZone: config.timeZone })) : undefined;
   const isEcText = (text: string): boolean => precheck(text).kind === "handoff";
+  // Reach 3 (GMAIL=on): each account has its own connection, read on first use.
+  const gmailTokens = new Map<GmailAccount, ReturnType<typeof makeAccessTokens>>();
+  const gmailToken = (account: GmailAccount) => {
+    const existing = gmailTokens.get(account);
+    if (existing) return existing();
+    const made = makeAccessTokens({
+      clientPath: config.calendar.clientPath,
+      tokensPath: config.gmail.tokensPath(account),
+      what: { name: `The ${account} Gmail`, connect: `npm run gmail:connect -- ${account}` },
+    });
+    gmailTokens.set(account, made);
+    return made();
+  };
+  const gmail = config.gmail.enabled ? { reader: inputs.gmailReader ?? makeGmailReader({ accessToken: gmailToken }), isEc: isEcText } : undefined;
   const calendar = config.calendar.enabled
     ? {
         read:
@@ -171,7 +188,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     contexts: contexts.value,
     precheck,
     calendarEnabled: calendar !== undefined,
-    nativeTools: calendar !== undefined && config.toolCalling,
+    nativeTools: (calendar !== undefined || gmail !== undefined) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
@@ -189,6 +206,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               pauses: config.turn.punctuationStyle,
               ...(config.bareProfile ? { profile } : {}),
               ...(calendar ? { calendar: { ...calendar, ...(pending ? { create: { pending, isEc: isEcText } } : {}) } } : {}),
+              // Gmail needs tools (Claude); the local brain doesn't get it.
+              ...(gmail && config.toolCalling ? { gmail } : {}),
               log,
             }),
             local: makeBareAnswerer({
