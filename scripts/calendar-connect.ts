@@ -85,6 +85,15 @@ const tokens = await exchangeCode({ client: oauthClient, code, verifier, redirec
 if (!tokens.ok) fail(tokens.error.message);
 await nodeTokenFiles.writeFile(tokensPath, JSON.stringify(tokens.ok ? tokens.value : {}, null, 2));
 console.log(`✓ Saved the calendar's refresh token to ${tokensPath} (only you can read it; gitignored).`);
+// Google's consent screen lets you untick a permission: say what was really granted.
+const granted = tokens.ok ? tokens.value.scope.split(" ") : [];
+if (write) {
+  console.log(
+    granted.includes(CALENDAR_WRITE_SCOPE)
+      ? "✓ Write access granted: Jarvis can add events, always after your OK."
+      : "✗ Write access was NOT granted (the box for editing events was probably unticked on Google's screen). Run this again and tick it.",
+  );
+}
 
 // A quick read of today, counting only: no titles.
 const read = makeGoogleCalendarReader({
@@ -95,4 +104,4 @@ const read = makeGoogleCalendarReader({
 const today = localDate(new Date(), config.timeZone);
 const events = await read({ from: today, to: today });
 console.log(events.ok ? `✓ Read today's calendar: ${events.value.length} event(s).` : `✗ Reading it failed: ${events.error.message}`);
-console.log("\nNow put CALENDAR=on in .env (with BARE_MODE=on) and restart Jarvis.");
+console.log(`\nNow put CALENDAR=on${write ? " and CALENDAR_WRITE=on" : ""} in .env (with BARE_MODE=on) and restart Jarvis: a running Jarvis keeps using the old connection until it restarts.`);

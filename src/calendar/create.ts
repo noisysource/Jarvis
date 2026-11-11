@@ -125,7 +125,7 @@ export const makeGoogleEventCreator = (deps: {
       return err({ code: "network", message: "Couldn't reach Google Calendar" });
     }
     if (res.status === 401 || res.status === 403)
-      return err({ code: "auth", message: `Google Calendar refused to add it (${res.status}): connect again with write access (CALENDAR_WRITE=on npm run calendar:connect)` });
+      return err({ code: "auth", message: `Google Calendar refused to add it (${res.status}): connect again with write access (CALENDAR_WRITE=on npm run calendar:connect), then restart Jarvis` });
     if (!res.ok) return err({ code: "api", message: `Google Calendar answered ${res.status}` });
     const body = (await res.json().catch(() => ({}))) as { summary?: unknown; start?: { date?: unknown; dateTime?: unknown }; end?: { date?: unknown; dateTime?: unknown } };
     const start = typeof body.start?.dateTime === "string" ? body.start.dateTime : typeof body.start?.date === "string" ? body.start.date : "";

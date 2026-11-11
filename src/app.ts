@@ -156,7 +156,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
             log.warn("calendar create failed", { code: created.error.code, reason: created.error.message });
             return {
               ok: false,
-              text: created.error.code === "auth" ? "I couldn't add it: Google didn't allow writing to your calendar. Connect it again with write access (CALENDAR_WRITE=on npm run calendar:connect)." : "I couldn't add it: Google Calendar didn't answer properly. Nothing was added.",
+              text: created.error.code === "auth" ? "I couldn't add it: Google didn't allow writing to your calendar. Connect it again with write access (CALENDAR_WRITE=on npm run calendar:connect), tick the box for editing events, then restart Jarvis." : "I couldn't add it: Google Calendar didn't answer properly. Nothing was added.",
             };
           }
           log.info("calendar create", { outcome: "added", allDay: created.value.allDay });
