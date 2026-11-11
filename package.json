@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "jarvis": "tsx --env-file-if-exists=.env scripts/jarvis.ts",
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "smoke:llm": "tsx --env-file-if-exists=.env scripts/smoke-llm.ts",
     "eval:classifier": "tsx --env-file-if-exists=.env scripts/eval-classifier.ts",
