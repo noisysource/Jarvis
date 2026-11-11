@@ -23,3 +23,5 @@ data/google-tokens.json
 data/google-gmail-*.json
 # Introspection reports (#108): your memories, local only, never commit
 data/introspection/
+# Skills (#116): your routines, local only, never commit
+data/skills.json

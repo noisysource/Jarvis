@@ -13,6 +13,7 @@
 import { filterSuggestions, type Suggestion } from "./memory-extract.js";
 import { type EcMatchers } from "./memory-rules.js";
 import type { MemoryStore } from "./memory-store.js";
+import { checkSkill, type SkillStore } from "./skills.js";
 import type { JsonObjectSchema, LlmCall } from "./llm/types.js";
 import type { Context, Logger, Memory } from "./types.js";
 
@@ -139,6 +140,8 @@ export type IntrospectionDeps = {
   readonly timeZone: string;
   readonly now?: () => Date;
   readonly log?: Logger;
+  /** #116: where drafted skills go, for his approval. */
+  readonly skills?: SkillStore;
   /** Saves the report (personal data: gitignored, readable only by him). */
   readonly writeReport?: (date: string, markdown: string) => Promise<void>;
 };
@@ -230,6 +233,11 @@ export const runIntrospection = async (deps: IntrospectionDeps): Promise<Introsp
     promoted.push(text);
     changes += 1;
   }
+  // #116: drafted skills go to the Skills panel for his OK (checked like any skill: no secrets, no EC).
+  for (const s of skills) {
+    const checked = checkSkill(s, deps.ec);
+    if (deps.skills && checked.ok) await deps.skills.propose({ ...checked.value, source: "introspection" });
+  }
   const kept = short.length - promoted.length - merged.length - dropped.length;
   const report: IntrospectionReport = { date, kept, promoted, merged, dropped, refused, skills, tools };
   deps.log?.info("introspection", { shortTerm: short.length, kept, promoted: promoted.length, merged: merged.length, dropped: dropped.length, refused, skills: skills.length, tools: tools.length });
@@ -254,7 +262,7 @@ export const reportMarkdown = (r: IntrospectionReport): string => {
     "## Dropped",
     ...list(r.dropped),
     "",
-    "## Proposed skills (drafts: nothing is switched on)",
+    "## Proposed skills (drafts: approve them in the ✨ Skills panel)",
     ...(r.skills.length === 0
       ? ["- (none)"]
       : r.skills.flatMap((s) => [`### ${s.title}`, `When: ${s.when}`, ...s.steps.map((step, i) => `${i + 1}. ${step}`), ""])),

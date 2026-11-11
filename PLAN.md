@@ -818,9 +818,21 @@ whether it was recalled, next to up to 80 long-term ones. For each it decides:
 - **Skills and tools are drafts** in the report: nothing is switched on.
 - The report (`data/introspection/<date>.md`, mode 600, gitignored, refused
   by CI) lists what changed. Logs carry counts only.
-- Next: approving a drafted skill from the page (it becomes a routine Jarvis
-  follows), and a log of tool sequences, so repeated procedures can be
-  spotted from what Jarvis did, not only from what he noted.
+- Next: a log of tool sequences, so repeated procedures can be spotted from
+  what Jarvis did, not only from what he noted.
+
+**Skills (#116, built, with `MEMORY=on`):** routines Jarvis follows.
+- A skill is text: a title, when to use it, and up to 12 short steps using
+  tools he already has. It can't add powers; actions still need Renato's OK.
+  Rules in code: sensible lengths, never secrets, never EC work.
+- **Drafts** come from the nightly introspection, or from chat: Claude's
+  `skill_propose` ("make that a skill"), which shows an **Approve skill /
+  Not now** card. The ✨ Skills panel lists drafts and approved skills, with
+  Approve and Delete (`GET /skills`, `POST /skills/decide`).
+- **Approved** skills are listed in the prompt; Claude calls `skill_follow`
+  to get one's steps, and the path line shows ✨ with its title.
+- Stored in `data/skills.json` (mode 600, gitignored, refused by CI). A
+  skill with the same title is updated, not duplicated.
 
 **Before each answer**, a little from each layer is loaded: all of working
 memory, the most recent short-term items, the long-term facts that match the

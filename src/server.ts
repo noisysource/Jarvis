@@ -19,6 +19,7 @@ import { z } from "zod";
 import { handleAsk } from "./ask.js";
 import { withLogFields } from "./log.js";
 import { registerMemoryRoutes } from "./memory-routes.js";
+import { registerSkillRoutes } from "./skill-routes.js";
 import type { MemoryStore } from "./memory-store.js";
 import { makeTurnRegistry, type TurnRegistry } from "./turns.js";
 import type { TtsConfig, TurnConfig } from "./config.js";
@@ -377,6 +378,7 @@ export const makeServer = (
     });
   }
   if (options.memories) registerMemoryRoutes(app, { store: options.memories, contexts: deps.contexts, log: deps.log });
+  if (deps.skills) registerSkillRoutes(app, { store: deps.skills, log: deps.log });
 
   app.notFound((c) => c.json(errorBody("Not found."), 404));
 

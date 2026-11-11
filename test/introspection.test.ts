@@ -71,7 +71,7 @@ describe("introspection", () => {
     expect(promoted?.expiresAt).toBeUndefined();
     expect(left.find((x) => x.id === m.swimLong.id)?.text).toBe("Diniz swims on Thursdays");
     expect(report).toMatchObject({ date: "2026-11-12", kept: 1, refused: 0 });
-    expect(saved).toContain("## Proposed skills (drafts: nothing is switched on)");
+    expect(saved).toContain("## Proposed skills (drafts: approve them in the ✨ Skills panel)");
     expect(saved).toContain("1. Check the calendar for free days");
     expect(saved).toContain("**Train timetables**");
   });

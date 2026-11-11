@@ -50,8 +50,8 @@ jobs:
 
       - name: Introspection reports are not committed
         run: |
-          if git ls-files 'data/introspection/*' | grep -q .; then
-            echo "::error::data/introspection/ holds your memories and must not be committed. Remove it with 'git rm -r --cached data/introspection'."
+          if git ls-files 'data/introspection/*' 'data/skills.json' | grep -q .; then
+            echo "::error::data/introspection/ and data/skills.json hold your memories and routines and must not be committed. Remove them with 'git rm -r --cached'."
             exit 1
           fi
 
