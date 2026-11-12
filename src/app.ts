@@ -8,7 +8,8 @@ import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
 import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google.js";
 import { makeAccessTokens } from "./calendar/oauth.js";
-import { isEcEvent, localDate } from "./calendar/read.js";
+import { isEcEvent, localDate, type CalendarError } from "./calendar/read.js";
+import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type CalendarReaders } from "./calendar/accounts.js";
 import { makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
@@ -135,12 +136,23 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       spokenThinking: config.turn.spokenThinking,
     }),
   });
-  // Your personal calendar (#100), read-only, for both brains. EC-looking events reach a brain only as "EC work, handled by Kiro".
+  // Your calendars (#100, #137: personal and noisysource, each its own connection), read-only, for both brains.
+  // EC-looking events reach a brain only as "EC work, handled by Kiro".
   const precheck = makePrecheck(contexts.value);
-  const accessToken = makeAccessTokens({ clientPath: config.calendar.clientPath, tokensPath: config.calendar.tokensPath });
+  const calendarTokens = new Map(
+    CALENDAR_ACCOUNTS.map((account) => [
+      account,
+      makeAccessTokens({
+        clientPath: config.calendar.clientPath,
+        tokensPath: calendarTokensPath(config.calendar.tokensPath, account),
+        ...(account === "personal" ? {} : { what: { name: `The ${account} calendar`, connect: `npm run calendar:connect -- ${account}` } }),
+      }),
+    ]),
+  );
+  const calendarToken = (account: CalendarAccount) => calendarTokens.get(account)?.() ?? Promise.resolve(err<CalendarError>({ code: "not_connected", message: "not connected" }));
   // Reach 2 (CALENDAR_WRITE=on): Claude proposes, the page asks, and only "yes" creates.
   const pending = config.calendar.write ? makePendingProposals() : undefined;
-  const creator = config.calendar.write ? (inputs.eventCreator ?? makeGoogleEventCreator({ accessToken, timeZone: config.timeZone })) : undefined;
+  const creator = config.calendar.write ? (inputs.eventCreator ?? makeGoogleEventCreator({ accessToken: calendarToken, timeZone: config.timeZone })) : undefined;
   const isEcText = (text: string): boolean => precheck(text).kind === "handoff";
   // #116: skills, with memory. data/skills.json, gitignored, readable only by him.
   const skillStore = config.bareMemory
@@ -196,15 +208,18 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         return { ok: true, text: `Sent “${draft.subject}” to ${draft.to.join(", ")}.`, tool: `gmail_send ${draft.account} → sent` };
       }
     : undefined;
+  const calendarReader = (account: CalendarAccount) =>
+    makeGoogleCalendarReader({
+      accessToken: () => calendarToken(account),
+      timeZone: config.timeZone,
+      isEc: (event) => isEcEvent(event, precheck),
+      account,
+    });
   const calendar = config.calendar.enabled
     ? {
-        read:
-          inputs.calendarReader ??
-          makeGoogleCalendarReader({
-            accessToken,
-            timeZone: config.timeZone,
-            isEc: (event) => isEcEvent(event, precheck),
-          }),
+        read: inputs.calendarReader ?? calendarReader("personal"),
+        // Tests give one reader (personal); the real app reads every account.
+        ...(inputs.calendarReader ? {} : { accounts: Object.fromEntries(CALENDAR_ACCOUNTS.map((a) => [a, calendarReader(a)])) as CalendarReaders }),
         timeZone: config.timeZone,
         now,
       }

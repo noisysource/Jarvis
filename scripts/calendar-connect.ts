@@ -1,18 +1,23 @@
-// Connects your Google Calendar to Jarvis (#100), once, on this Mac.
+// Connects a Google Calendar to Jarvis (#100), once per account, on this Mac.
 //
-//   npm run calendar:connect
+//   npm run calendar:connect                  your personal Google account
+//   npm run calendar:connect -- noisysource   Noisy Source's Google account (#137)
+//
+// On Google's screen, pick the account you're connecting. With the consent
+// screen in testing, that address must be a test user.
 //
 // 1. In Google Cloud, create an OAuth client of type "Desktop app" with the
 //    Google Calendar API enabled, download its JSON, and save it as
 //    data/google-oauth-client.json (gitignored).
 // 2. Run this. It opens Google's sign-in in your browser and listens on
 //    127.0.0.1 for the answer. Allow read access to your calendar's events.
-// 3. The refresh token is saved to data/google-tokens.json (gitignored,
-//    readable only by you). Then set CALENDAR=on and restart Jarvis.
+// 3. The refresh token is saved to data/google-tokens.json for personal, or
+//    data/google-calendar-<account>.json (gitignored, readable only by you).
+//    Then set CALENDAR=on and restart Jarvis.
 //
 // To let Jarvis add events (always after your OK), connect with write access:
 //
-//   CALENDAR_WRITE=on npm run calendar:connect
+//   CALENDAR_WRITE=on npm run calendar:connect [-- noisysource]
 //
 // Nothing here prints a token, the client secret, or an event's title.
 
@@ -23,6 +28,7 @@ import type { AddressInfo } from "node:net";
 import { makeGoogleCalendarReader } from "../src/calendar/google.js";
 import { authorizationUrl, CALENDAR_SCOPE, CALENDAR_WRITE_SCOPE, exchangeCode, makeAccessTokens, makePkce, nodeTokenFiles, parseClientFile } from "../src/calendar/oauth.js";
 import { localDate } from "../src/calendar/read.js";
+import { CALENDAR_ACCOUNTS, calendarTokensPath, isCalendarAccount } from "../src/calendar/accounts.js";
 import { loadConfig } from "../src/config.js";
 
 const fail = (message: string): never => {
@@ -33,7 +39,11 @@ const fail = (message: string): never => {
 const configResult = loadConfig({ ...process.env, CALENDAR: "off", CALENDAR_WRITE: "off" });
 const config = configResult.ok ? configResult.value : fail(configResult.ok ? "" : configResult.error);
 if (config.env === "production") fail("The calendar is local only: run this on your Mac, not in production.");
-const { clientPath, tokensPath } = config.calendar;
+const asked = process.argv[2] ?? "personal";
+if (!isCalendarAccount(asked)) fail(`Say which account: npm run calendar:connect -- ${CALENDAR_ACCOUNTS.join(" | ")}`);
+const account = isCalendarAccount(asked) ? asked : fail("");
+const { clientPath } = config.calendar;
+const tokensPath = calendarTokensPath(config.calendar.tokensPath, account);
 
 const clientText = await nodeTokenFiles.readFile(clientPath).catch(() =>
   fail(`No OAuth client at ${clientPath}. In Google Cloud: enable the Google Calendar API, create an OAuth client ID of type "Desktop app", download its JSON and save it there.`),
@@ -51,7 +61,8 @@ const redirectUri = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 const write = process.env.CALENDAR_WRITE === "on";
 const scope = write ? CALENDAR_WRITE_SCOPE : CALENDAR_SCOPE;
 const url = authorizationUrl({ clientId: oauthClient.clientId, redirectUri, challenge, state, scope });
-console.log(write ? "Asking for read and add access to your calendar's events (Jarvis adds only after your OK).\n" : "Asking for read-only access to your calendar's events.\n");
+console.log(`Connecting the "${account}" calendar. On Google's screen, pick that account.`);
+console.log(write ? "Asking for read and add access to its events (Jarvis adds only after your OK).\n" : "Asking for read-only access to its events.\n");
 
 console.log("Opening Google's sign-in in your browser. If it doesn't open, visit:\n");
 console.log(`  ${url}\n`);
@@ -84,7 +95,7 @@ server.close();
 const tokens = await exchangeCode({ client: oauthClient, code, verifier, redirectUri });
 if (!tokens.ok) fail(tokens.error.message);
 await nodeTokenFiles.writeFile(tokensPath, JSON.stringify(tokens.ok ? tokens.value : {}, null, 2));
-console.log(`✓ Saved the calendar's refresh token to ${tokensPath} (only you can read it; gitignored).`);
+console.log(`✓ Saved the ${account} calendar's refresh token to ${tokensPath} (only you can read it; gitignored).`);
 // Google's consent screen lets you untick a permission: say what was really granted.
 const granted = tokens.ok ? tokens.value.scope.split(" ") : [];
 if (write) {
@@ -103,5 +114,5 @@ const read = makeGoogleCalendarReader({
 });
 const today = localDate(new Date(), config.timeZone);
 const events = await read({ from: today, to: today });
-console.log(events.ok ? `✓ Read today's calendar: ${events.value.length} event(s).` : `✗ Reading it failed: ${events.error.message}`);
+console.log(events.ok ? `✓ Read today's ${account} calendar: ${events.value.length} event(s).` : `✗ Reading it failed: ${events.error.message}`);
 console.log(`\nNow put CALENDAR=on${write ? " and CALENDAR_WRITE=on" : ""} in .env (with BARE_MODE=on) and restart Jarvis: a running Jarvis keeps using the old connection until it restarts.`);
