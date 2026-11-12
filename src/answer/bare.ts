@@ -157,6 +157,29 @@ const TYPED_STYLE = [
 ];
 
 /** The whole system prompt in bare mode: who is who, what it can do, and how to talk (typed or spoken). */
+/** Which accounts are connected right now (#146), per service. */
+export type Connected = {
+  readonly calendar?: readonly { readonly name: string; readonly connected: boolean }[];
+  readonly gmail?: readonly { readonly name: string; readonly connected: boolean }[];
+};
+
+/**
+ * One line for the end of the prompt (#146), so "which calendars can you
+ * see?" is answered from the truth, not guessed. Names only.
+ */
+export const connectedLine = (c: Connected): string | undefined => {
+  const part = (what: string, accounts: Connected["calendar"]) => {
+    if (!accounts || accounts.length === 0) return undefined;
+    const on = accounts.filter((a) => a.connected).map((a) => a.name);
+    const off = accounts.filter((a) => !a.connected).map((a) => a.name);
+    return `${what}: ${on.length > 0 ? on.join(" and ") : "none"} connected${off.length > 0 ? `; ${off.join(" and ")} not connected` : ""}`;
+  };
+  const parts = [part("Calendars", c.calendar), part("Gmail", c.gmail)].filter((p): p is string => p !== undefined);
+  return parts.length === 0
+    ? undefined
+    : `Connected right now (checked this turn): ${parts.join(". ")}. When they ask what you can see, answer from this. You can't see an account that isn't connected; to connect it, they run the command shown in its node's panel.`;
+};
+
 export const barePrompt = (
   userName?: string,
   options: {
@@ -209,7 +232,7 @@ export const barePrompt = (
     "",
     ...(options.calendar
       ? [
-          "What you can do right now: talk, and read their Google Calendars (personal, and Noisy Source's when it's connected). You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
+          "What you can do right now: talk, and read their Google Calendars (which ones are connected is at the end of this prompt). You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           ...(options.tools
             ? [
                 `When answering needs their calendar, call the calendar_read tool, without announcing it first. Answer about their calendar only from what a read returned, and if a read fails or is refused, say so plainly. ${options.create ? "You can't move or delete events yet." : "You can't add, move or delete events yet."}`,
@@ -410,6 +433,8 @@ export const makeBareAnswerer = (deps: {
    * for brains whose provider does tools (Claude). Otherwise code decides.
    */
   readonly tools?: boolean;
+  /** #146: which calendar and Gmail accounts are connected, checked each turn. */
+  readonly connected?: () => Promise<Connected>;
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
   const random = deps.random ?? Math.random;
@@ -549,6 +574,8 @@ export const makeBareAnswerer = (deps: {
     const skillTurn = memoryTurn && deps.skills ? makeSkillTurn({ ...deps.skills, ...(deps.log ? { log: deps.log } : {}) }, { ...(onStep ? { onStep } : {}) }) : undefined;
     const skillList = skillTurn && deps.skills ? skillsForPrompt(await deps.skills.store.list()) : undefined;
     const calendar = tools ? undefined : await calendarTurn(question, history, signal, onStep);
+    // #146: which accounts are connected, checked now (a cheap file check), for "what can you see?".
+    const connected = deps.connected ? connectedLine(await deps.connected().catch(() => ({}))) : undefined;
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
     const lead = calendar?.lead;
@@ -570,6 +597,7 @@ export const makeBareAnswerer = (deps: {
         // Always: today's date, weekday and time where they are (#102).
         const suffix = [
           nowLine(now, deps.timeZone ?? deps.calendar?.timeZone ?? DEFAULT_TIME_ZONE),
+          connected,
           toolsSoFar(history),
           memoryCore,
           skillList,
