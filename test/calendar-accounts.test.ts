@@ -169,3 +169,48 @@ describe("the calendar_read tool across accounts (#137)", () => {
     expect(steps[0]).toMatchObject({ ok: false, error: "refused: unknown calendar" });
   });
 });
+
+describe("which accounts are connected, told every turn (#146)", () => {
+  it("names connected and missing accounts, nothing more", async () => {
+    const { connectedLine } = await import("../src/answer/bare.js");
+    expect(
+      connectedLine({
+        calendar: [
+          { name: "personal", connected: true },
+          { name: "noisysource", connected: false },
+        ],
+        gmail: [
+          { name: "personal", connected: true },
+          { name: "noisysource", connected: true },
+        ],
+      }),
+    ).toBe(
+      "Connected right now (checked this turn): Calendars: personal connected; noisysource not connected. Gmail: personal and noisysource connected. When they ask what you can see, answer from this. You can't see an account that isn't connected; to connect it, they run the command shown in its node's panel.",
+    );
+    expect(connectedLine({})).toBeUndefined();
+  });
+
+  it("goes in the part of the prompt that changes each turn, checked each time", async () => {
+    let calls = 0;
+    const requests: LlmRequest[] = [];
+    const llm: LlmCall = async (r) => {
+      requests.push(r);
+      return ok({ servedBy: "claude-test", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, payload: { provider: "anthropic", data: "x" }, kind: "text", text: "Both." });
+    };
+    const answer = makeBareAnswerer({
+      llm,
+      tools: true,
+      calendar: { read: reader([]), timeZone: TZ, now: () => NOW },
+      connected: async () => {
+        calls += 1;
+        return { calendar: [{ name: "personal", connected: true }, { name: "noisysource", connected: calls > 1 }] };
+      },
+    });
+    const ask = () => answer({ context: personal, question: "Which calendars can you see?", history: [], memories: [], now: NOW });
+    await ask();
+    await ask();
+    expect(requests[0]?.systemSuffix).toContain("Calendars: personal connected; noisysource not connected.");
+    expect(requests[1]?.systemSuffix).toContain("Calendars: personal and noisysource connected.");
+    expect(requests[0]?.system).toBe(requests[1]?.system); // the cached part doesn't change
+  });
+});

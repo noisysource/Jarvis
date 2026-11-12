@@ -10,7 +10,7 @@ import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google
 import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate, type CalendarError } from "./calendar/read.js";
 import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type CalendarReaders } from "./calendar/accounts.js";
-import { makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
+import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
 import { makeClassifier } from "./classify.js";
@@ -238,6 +238,18 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           return { ok: true, text: `Deleted the draft “${draft.subject}”.`, tool: `gmail_draft_delete ${draft.account} → deleted` };
         }
       : undefined;
+  // #146: which accounts are connected, checked each turn (does the token file exist), for the brain's prompt.
+  const fileExists = (path: string) =>
+    access(path).then(
+      () => true,
+      () => false,
+    );
+  const connected = async () => ({
+    ...(config.calendar.enabled
+      ? { calendar: await Promise.all(CALENDAR_ACCOUNTS.map(async (name) => ({ name, connected: await fileExists(calendarTokensPath(config.calendar.tokensPath, name)) }))) }
+      : {}),
+    ...(config.gmail.enabled ? { gmail: await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await fileExists(config.gmail.tokensPath(name)) }))) } : {}),
+  });
   const calendarReader = (account: CalendarAccount) =>
     makeGoogleCalendarReader({
       accessToken: () => calendarToken(account),
@@ -313,10 +325,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     reach: () =>
       reachView({
         config,
-        exists: (path) => access(path).then(
-          () => true,
-          () => false,
-        ),
+        exists: fileExists,
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
     ...(gmailSend ? { gmailSend } : {}),
@@ -344,6 +353,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
                 ? { memory: { store: memoryStore, contexts: contexts.value, ec: memoryEc, timeZone: config.timeZone, log } }
                 : {}),
               ...(skillStore && config.toolCalling ? { skills: { store: skillStore, ec: memoryEc } } : {}),
+              // Tests give their own calendar reader: no token files to check then.
+              ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
               log,
             }),
             local: makeBareAnswerer({
