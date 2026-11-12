@@ -189,6 +189,11 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(request.remember === false ? { remember: false } : {}),
     onToolSucceeded: guard.toolSucceeded,
     ...(meta.onReach ? { onReach: meta.onReach } : {}),
+    onOffered: (tools) => {
+      const step: PathStep = { kind: "tools", offered: tools };
+      path.push(step);
+      meta.onStep?.(step);
+    },
     onStep: (step) => {
       path.push(step);
       meta.onStep?.(step);

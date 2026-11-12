@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, NODES, applyReach, applyStep, isReaching, lineGeometry, mesh, nodeOfTool, nodePosition, reachOfStep, settle, stateOfPath } from "../src/web/brain-lib.js";
+import { EMPTY, NODES, offeredNodes, applyReach, applyStep, isReaching, lineGeometry, mesh, nodeOfTool, nodePosition, reachOfStep, settle, stateOfPath } from "../src/web/brain-lib.js";
 
 type Step = Parameters<typeof applyStep>[1];
 const tool = (name: string, ok = true, extra: Record<string, unknown> = {}): Step => ({ kind: "tool", name, args: "", by: "model", ok, ...extra }) as Step;
@@ -80,5 +80,12 @@ describe("brain view: geometry (#131)", () => {
   it("the mesh is the same on every load", () => {
     expect(mesh()).toEqual(mesh());
     expect(mesh().dots).toHaveLength(22);
+  });
+});
+
+describe("brain view: what it was offered (#141)", () => {
+  it("maps offered tools to nodes; Profile and Kiro always count", () => {
+    expect([...offeredNodes(["calendar_read", "gmail_search", "gmail_read"])].sort()).toEqual(["calendar", "gmail", "kiro", "profile"]);
+    expect([...offeredNodes([])].sort()).toEqual(["kiro", "profile"]);
   });
 });

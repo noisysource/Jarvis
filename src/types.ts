@@ -114,6 +114,8 @@ export type PathStep =
   /** The local EC precheck: "handoff" went to Kiro with no model. */
   | { readonly kind: "precheck"; readonly result: "none" | "handoff" | "route" }
   | { readonly kind: "brain"; readonly brain: Brain }
+  /** The tools the brain was offered this turn (#141), so a missing tool call can be told from a missing tool. */
+  | { readonly kind: "tools"; readonly offered: readonly string[] }
   /** A tool call (something done or fetched), or a skill (a way of working), when those exist. */
   | {
       readonly kind: "tool" | "skill";
@@ -266,6 +268,8 @@ export type AnswerInput = {
   readonly onStep?: (step: PathStep) => void;
   /** A tool call is starting (#130): its name, one of the tools offered this turn. For the page's brain view. */
   readonly onReach?: (tool: string) => void;
+  /** The tools offered to the brain this turn (#141), once, before it answers. */
+  readonly onOffered?: (tools: readonly string[]) => void;
 };
 
 /**

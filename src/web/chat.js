@@ -357,6 +357,7 @@ export const voiceNoteVisible = ({ note, voiceInUse }) => note !== "" && voiceIn
 /**
  * @typedef {{ kind: "precheck", result: "none" | "handoff" | "route" }
  *   | { kind: "brain", brain: "claude" | "local" }
+ *   | { kind: "tools", offered: readonly string[] }
  *   | { kind: "tool" | "skill", name: string, args: string, by: "code" | "model", ok: boolean, result?: string, error?: string, confirm?: { id: string, label: string, kind?: "calendar" | "skill" | "email" } }
  *   | { kind: "guard", claimedAction: number, promise: number, perception: number, toolResult?: number, replaced: boolean }} PathStep
  */
@@ -365,7 +366,7 @@ export const voiceNoteVisible = ({ note, voiceInUse }) => note !== "" && voiceIn
 export const pathOf = (body) => {
   const path = body && typeof body === "object" && "path" in body ? body.path : undefined;
   if (!Array.isArray(path)) return [];
-  return path.filter((s) => s && typeof s === "object" && ["precheck", "brain", "tool", "skill", "guard"].includes(s.kind));
+  return path.filter((s) => s && typeof s === "object" && ["precheck", "brain", "tools", "tool", "skill", "guard"].includes(s.kind) && (s.kind !== "tools" || Array.isArray(s.offered)));
 };
 
 /** Tools do or fetch something; skills are ways of working. They're marked differently. @param {PathStep & { kind: "tool" | "skill" }} step */
@@ -389,6 +390,9 @@ export const pathSummary = (path) =>
           return step.result === "handoff" ? ["🚦 EC precheck → Kiro"] : [];
         case "brain":
           return [step.brain === "claude" ? "☁️ Claude" : "🧠 Local"];
+        case "tools":
+          // #141: say so when it had no tools, or had them and used none.
+          return step.offered.length === 0 ? ["🧰 no tools"] : path.some((s) => s.kind === "tool" || s.kind === "skill") ? [] : [`🧰 ${count(step.offered.length, "tool")}, none used`];
         case "tool":
         case "skill":
           return [`${toolIcon(step)} ${step.kind === "skill" ? "skill " : ""}${step.name}${step.args ? ` ${step.args}` : ""} → ${step.ok ? (step.result ?? "ok") : `failed (${step.error ?? "error"})`}`];
@@ -415,6 +419,8 @@ export const pathLines = (path, brainLabels = {}) =>
             : "🚦 EC precheck: not EC work.";
       case "brain":
         return `${step.brain === "claude" ? "☁️" : "🧠"} Brain: ${brainLabels[step.brain] ?? (step.brain === "claude" ? "Claude" : "Local")}`;
+      case "tools":
+        return step.offered.length === 0 ? "🧰 No tools offered this turn." : `🧰 Tools offered: ${step.offered.join(", ")}`;
       case "tool":
       case "skill": {
         const who = step.by === "code" ? "worked out by code" : "chosen by the model, checked by code";
