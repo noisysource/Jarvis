@@ -109,6 +109,8 @@ export type GmailWriter = {
   readonly draft: (d: DraftRequest, original?: { readonly threadId: string; readonly messageId: string; readonly references: string }) => Promise<Result<SavedDraft, CalendarError>>;
   /** Sends a saved draft: only after his "Send it". */
   readonly send: (account: GmailAccount, draftId: string) => Promise<Result<{ readonly messageId: string }, CalendarError>>;
+  /** #124: deletes a draft Jarvis wrote, only after his "Delete it". Drafts only: never a sent or received email. */
+  readonly discard?: (account: GmailAccount, draftId: string) => Promise<Result<undefined, CalendarError>>;
 };
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -136,6 +138,21 @@ export const makeGmailWriter = (deps: { readonly accessToken: (account: GmailAcc
       const id = (r.value as { id?: unknown }).id;
       return typeof id === "string" ? ok({ draftId: id }) : err({ code: "api", message: "Gmail's answer had no draft id" });
     },
+    discard: async (account, draftId) => {
+      const token = await deps.accessToken(account);
+      if (!token.ok) return token;
+      let res: Response;
+      try {
+        res = await doFetch(`${API}/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE", headers: { authorization: `Bearer ${token.value}` } });
+      } catch {
+        return err({ code: "network", message: "Couldn't reach Gmail" });
+      }
+      if (res.status === 401 || res.status === 403)
+        return err({ code: "auth", message: `Gmail refused (${res.status}): connect ${account} again with write access (GMAIL_WRITE=on npm run gmail:connect -- ${account}), then restart Jarvis` });
+      if (res.status === 404) return err({ code: "api", message: "That draft isn't in Gmail any more" });
+      if (!res.ok) return err({ code: "api", message: `Gmail answered ${res.status}` });
+      return ok(undefined);
+    },
     send: async (account, draftId) => {
       const r = await post(account, "/drafts/send", { id: draftId });
       if (!r.ok) return r;
@@ -148,7 +165,14 @@ export const makeGmailWriter = (deps: { readonly accessToken: (account: GmailAcc
 };
 
 /** A saved draft waiting for "Send it": in memory, single use, 30 minutes. */
-export type PendingDraft = { readonly account: GmailAccount; readonly draftId: string; readonly to: readonly string[]; readonly subject: string };
+export type PendingDraft = {
+  readonly account: GmailAccount;
+  readonly draftId: string;
+  readonly to: readonly string[];
+  readonly subject: string;
+  /** #124: its ref in the draft book, for a deletion. */
+  readonly ref?: string;
+};
 
 export const makePendingDrafts = (deps: { readonly now?: () => number; readonly ttlMs?: number; readonly newId?: () => string } = {}) => {
   const now = deps.now ?? Date.now;
@@ -174,6 +198,52 @@ export const makePendingDrafts = (deps: { readonly now?: () => number; readonly 
   };
 };
 export type PendingDrafts = ReturnType<typeof makePendingDrafts>;
+
+/**
+ * #124: the drafts Jarvis wrote since he started, by a short ref the brain
+ * can name ("delete that draft"). In memory, a day at most. Only these can
+ * be deleted: never a draft he didn't write, never other email.
+ */
+export const makeDraftBook = (deps: { readonly now?: () => number; readonly ttlMs?: number; readonly newRef?: () => string } = {}) => {
+  const now = deps.now ?? Date.now;
+  const ttl = deps.ttlMs ?? 24 * 60 * 60_000;
+  const newRef = deps.newRef ?? (() => randomBytes(4).toString("hex"));
+  const book = new Map<string, { readonly draft: PendingDraft; readonly until: number }>();
+  const sweep = (): void => {
+    for (const [ref, b] of book) if (b.until <= now()) book.delete(ref);
+  };
+  return {
+    add: (draft: PendingDraft): string => {
+      sweep();
+      const ref = newRef();
+      book.set(ref, { draft, until: now() + ttl });
+      return ref;
+    },
+    get: (ref: string): PendingDraft | undefined => {
+      sweep();
+      return book.get(ref)?.draft;
+    },
+    remove: (ref: string): void => {
+      book.delete(ref);
+    },
+  };
+};
+export type DraftBook = ReturnType<typeof makeDraftBook>;
+
+export const GMAIL_DRAFT_DELETE_TOOL: LlmTool = {
+  name: "gmail_draft_delete",
+  description:
+    "Propose deleting a draft you wrote, by the ref gmail_draft gave it. Nothing is deleted by this call: the app asks them, and only their \"Delete it\" deletes it. Only drafts you wrote can be deleted.",
+  inputSchema: {
+    type: "object",
+    properties: { ref: { type: "string", description: "The draft's ref, from gmail_draft" } },
+    required: ["ref"],
+    additionalProperties: false,
+  },
+};
+
+/** A ref as makeDraftBook makes them. */
+export const isDraftRef = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{8}$/.test(v);
 
 /** For the card: "To sam@example.com: “Running late”". */
 export const draftLabel = (d: Pick<DraftRequest, "to" | "subject">): string => `To ${d.to.join(", ")}: “${d.subject}”`;
