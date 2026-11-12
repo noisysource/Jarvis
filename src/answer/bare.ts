@@ -520,7 +520,7 @@ export const makeBareAnswerer = (deps: {
       ].join("\n"),
     };
   };
-  return async ({ question, history, onText, signal, spoken, onStep, onReach, now, remember, onToolSucceeded }) => {
+  return async ({ question, history, onText, signal, spoken, onStep, onReach, onOffered, now, remember, onToolSucceeded }) => {
     let system = withoutProfile;
     if (deps.profile) {
       const profile = await deps.profile();
@@ -595,6 +595,8 @@ export const makeBareAnswerer = (deps: {
 
     /** Runs one tool call the brain asked for (#104). Code checks it; the result goes back to the brain. */
     const offered = new Set((request.tools ?? []).map((t) => t.name));
+    // #141: what it had to work with this turn, on the path and the brain view.
+    onOffered?.([...offered]);
     const runTool = async (call: LlmToolCall): Promise<LlmToolResult> => {
       // The page's brain view (#130): only names Jarvis offered, never the model's free text.
       if (offered.has(call.name)) onReach?.(call.name);

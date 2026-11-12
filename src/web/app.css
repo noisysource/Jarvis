@@ -1074,3 +1074,8 @@ button.brain-node:focus-visible {
 .brain-badge[hidden] {
   display: none;
 }
+
+/* #141: nodes the brain wasn't offered this turn. */
+.brain-node[data-offered="no"] {
+  opacity: 0.38;
+}

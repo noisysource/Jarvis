@@ -53,6 +53,22 @@ export const reachOfStep = (step) => {
 
 /** @typedef {Readonly<Partial<Record<NodeId, Reach>>>} BrainState */
 
+/**
+ * The nodes whose tools the brain was offered this turn (#141). Profile and
+ * Kiro aren't tools: they're never "not offered".
+ * @param {readonly string[]} tools
+ * @returns {Set<NodeId>}
+ */
+export const offeredNodes = (tools) => {
+  /** @type {Set<NodeId>} */
+  const nodes = new Set(["profile", "kiro"]);
+  for (const t of tools) {
+    const n = nodeOfTool(t);
+    if (n) nodes.add(n);
+  }
+  return nodes;
+};
+
 /** @type {BrainState} */
 export const EMPTY = {};
 

@@ -2,7 +2,7 @@
 // node Jarvis reaches for in the current answer. States come from brain-lib.js;
 // this file only draws them.
 
-import { EMPTY, NODES, NODE_TAGS, applyReach, applyStep, connectCommand, isReaching, lineGeometry, mesh, nodePosition, restOf, settle, stateOfPath } from "./brain-lib.js";
+import { EMPTY, NODES, NODE_TAGS, applyReach, applyStep, connectCommand, isReaching, lineGeometry, mesh, nodePosition, offeredNodes, restOf, settle, stateOfPath } from "./brain-lib.js";
 
 /** @typedef {import("./brain-lib.js").BrainState} BrainState */
 /** @typedef {import("./chat.js").PathStep} PathStep */
@@ -215,6 +215,8 @@ export const makeBrainView = (root, options = {}) => {
   /** @type {BrainState} */
   let state = EMPTY;
   let working = false;
+  /** #141: the nodes offered this turn; undefined until the answer says. @type {Set<string> | undefined} */
+  let offered;
 
   const draw = () => {
     lines.replaceChildren();
@@ -224,7 +226,9 @@ export const makeBrainView = (root, options = {}) => {
       if (!node) continue;
       const shown = reach ?? node.rest;
       node.box.dataset.state = shown;
-      node.tag.textContent = NODE_TAGS[shown];
+      const notOffered = offered !== undefined && !offered.has(n.id) && !reach;
+      node.box.dataset.offered = offered === undefined ? "" : notOffered ? "no" : "yes";
+      node.tag.textContent = notOffered && (shown === "idle" || shown === "off") ? "not offered" : NODE_TAGS[shown];
       if (!reach) continue;
       const g = lineGeometry(n.angle, reach);
       const line = el("span", `brain-line brain-line-${reach}`);
@@ -279,6 +283,7 @@ export const makeBrainView = (root, options = {}) => {
     /** A new question: the lines of the last answer go. */
     begin: () => {
       state = EMPTY;
+      offered = undefined;
       working = true;
       draw();
     },
@@ -289,6 +294,7 @@ export const makeBrainView = (root, options = {}) => {
     },
     /** A step ended. @param {PathStep} step */
     step: (step) => {
+      if (step.kind === "tools") offered = offeredNodes(step.offered);
       state = applyStep(state, step);
       draw();
     },
@@ -300,6 +306,8 @@ export const makeBrainView = (root, options = {}) => {
     finish: (path) => {
       working = false;
       state = path.length > 0 ? stateOfPath(path) : settle(state);
+      const tools = path.find((s) => s.kind === "tools");
+      if (tools && tools.kind === "tools") offered = offeredNodes(tools.offered);
       draw();
     },
   };
