@@ -13,6 +13,7 @@ import { streamOrCall } from "../llm/stream.js";
 import { makeSentenceSplitter } from "../sentences.js";
 import type { ProfileSource } from "../profile.js";
 import type { CalendarReader } from "../calendar/google.js";
+import { isCalendarAccount, readAccounts, type CalendarReaders } from "../calendar/accounts.js";
 import {
   CALENDAR_READ_TOOL,
   CALENDAR_REQUEST_SCHEMA,
@@ -208,7 +209,7 @@ export const barePrompt = (
     "",
     ...(options.calendar
       ? [
-          "What you can do right now: talk, and read their personal Google Calendar. You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
+          "What you can do right now: talk, and read their Google Calendars (personal, and Noisy Source's when it's connected). You can chat, answer questions from what you know, think things through together, and tell them what's on their calendar.",
           ...(options.tools
             ? [
                 `When answering needs their calendar, call the calendar_read tool, without announcing it first. Answer about their calendar only from what a read returned, and if a read fails or is refused, say so plainly. ${options.create ? "You can't move or delete events yet." : "You can't add, move or delete events yet."}`,
@@ -375,9 +376,12 @@ export const makeBareAnswerer = (deps: {
   readonly profile?: ProfileSource;
   /** Where they are, for "now" in every prompt (#102). Defaults to Europe/Lisbon. */
   readonly timeZone?: string;
-  /** CALENDAR=on (#100): it can read their personal calendar, in this time zone. */
+  /** CALENDAR=on (#100): it can read their calendars (#137: personal and noisysource), in this time zone. */
   readonly calendar?: {
+    /** The personal calendar; used alone when `accounts` isn't given. */
     readonly read: CalendarReader;
+    /** #137: one reader per connected account; a read covers them all unless the brain names one. */
+    readonly accounts?: CalendarReaders;
     readonly timeZone: string;
     readonly now?: () => Date;
     /** Reach 2: proposals for new events wait here for Renato's OK; `isEc` keeps EC work off his calendar. With tools only. */
@@ -490,7 +494,7 @@ export const makeBareAnswerer = (deps: {
       deps.log?.info("calendar not needed", { ms: Math.round(performance.now() - started) });
       return undefined;
     }
-    const read = await calendar.read(range, signal);
+    const read = await readAccounts(calendar.accounts ?? { personal: calendar.read }, range, undefined, signal);
     if (!read.ok) {
       deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
       failed(read.error.code, shortRangeLabel(range));
@@ -498,18 +502,20 @@ export const makeBareAnswerer = (deps: {
     }
     deps.log?.info("calendar read", {
       days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
-      events: read.value.length,
-      ec: read.value.filter((e) => e.ec).length,
+      events: read.value.events.length,
+      ec: read.value.events.filter((e) => e.ec).length,
+      accounts: read.value.read.length,
+      unread: read.value.unread.length,
       by,
       ms: Math.round(performance.now() - started),
     });
-    const count = read.value.length;
+    const count = read.value.events.length;
     onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by, ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
     const lead = before ? `${before} I've checked now: looking at ${rangeLabel(range, today)}.` : readSentence(range, today);
     return {
       lead,
       text: [
-        calendarForBrain(range, read.value, calendar.timeZone),
+        calendarForBrain(range, read.value.events, calendar.timeZone, read.value),
         `Your reply already starts with "${lead}" Continue straight on with what's on then. Don't say "Looking at", don't restate the date, don't say again that you checked, and don't open with a reaction.`,
       ].join("\n"),
     };
@@ -639,23 +645,37 @@ export const makeBareAnswerer = (deps: {
         return { callId: call.id, content: `Refused: ${why}. Read at most 14 days, as YYYY-MM-DD, or ask them which days they mean.`, isError: true };
       }
       const range = checked.value;
+      if (input.account !== undefined && !isCalendarAccount(input.account)) {
+        onStep?.({ kind: "tool", name: "calendar_read", args: "", by: "model", ok: false, error: "refused: unknown calendar" });
+        return { callId: call.id, content: 'Refused: unknown calendar. Use "personal" or "noisysource", or leave account out to read all.', isError: true };
+      }
+      const which = isCalendarAccount(input.account) ? input.account : undefined;
+      const label = `${which ? `${which} · ` : ""}${shortRangeLabel(range)}`;
       const started = performance.now();
-      const read = await cal.read(range, signal);
+      const read = await readAccounts(cal.accounts ?? { personal: cal.read }, range, which, signal);
       if (!read.ok) {
         deps.log?.warn("calendar read failed", { code: read.error.code, reason: read.error.message });
-        onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by: "model", ok: false, error: read.error.code });
-        return { callId: call.id, content: calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed"), isError: true };
+        onStep?.({ kind: "tool", name: "calendar_read", args: label, by: "model", ok: false, error: read.error.code });
+        const content =
+          which && read.error.code === "not_connected"
+            ? `The ${which} calendar isn't connected to Jarvis yet (npm run calendar:connect -- ${which}). Say so plainly; don't guess what's on it.`
+            : calendarUnavailable(read.error.code === "not_connected" ? "not_connected" : "failed");
+        return { callId: call.id, content, isError: true };
       }
-      const count = read.value.length;
+      const { events, unread } = read.value;
+      const count = events.length;
       deps.log?.info("calendar read", {
         days: Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1,
         events: count,
-        ec: read.value.filter((e) => e.ec).length,
+        ec: events.filter((e) => e.ec).length,
+        accounts: read.value.read.length,
+        unread: unread.length,
         by: "model",
         ms: Math.round(performance.now() - started),
       });
-      onStep?.({ kind: "tool", name: "calendar_read", args: shortRangeLabel(range), by: "model", ok: true, result: `${count} ${count === 1 ? "event" : "events"}` });
-      return { callId: call.id, content: calendarForBrain(range, read.value, cal.timeZone) };
+      const missing = unread.length > 0 ? ` (${unread.map((u) => `${u.account}: ${u.code === "not_connected" ? "not connected" : u.code}`).join(", ")})` : "";
+      onStep?.({ kind: "tool", name: "calendar_read", args: label, by: "model", ok: true, result: `${count} ${count === 1 ? "event" : "events"}${missing}` });
+      return { callId: call.id, content: calendarForBrain(range, events, cal.timeZone, read.value) };
     };
 
     /** Reach 3: Gmail, read-only. Code checks each call; EC email is never shown or opened. */

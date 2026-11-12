@@ -285,8 +285,11 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
      Local, it stays on your Mac.
    - **`CALENDAR=on` (with `BARE_MODE=on`, on your Mac only): reading your
      Google Calendar.** Ask "What's on tomorrow?" or "Am I free on
-     Friday?". Only your personal (primary) calendar is read, and only
-     read: nothing is added or changed yet. Set it up once:
+     Friday?". It reads the primary calendar of each connected Google
+     account: `personal`, and `noisysource` (#137), each connected
+     separately. A read covers both unless you ask about one, every event
+     says which calendar it's from, and if one isn't connected Jarvis says
+     so instead of treating it as empty. Set it up once:
      1. In [Google Cloud](https://console.cloud.google.com/), enable the
         **Google Calendar API**. Create an **OAuth client ID** of type
         **Desktop app**, download its JSON, and save it as
@@ -295,7 +298,12 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
         read-only access to your events, and saves the refresh token to
         `data/google-tokens.json` (gitignored, readable only by you). It
         then counts today's events to check it works.
-     3. Put `CALENDAR=on` in `.env` and restart.
+     3. For Noisy Source's calendar: `npm run calendar:connect -- noisysource`
+        and pick that Google account (with the consent screen in testing,
+        add it as a test user). Add `CALENDAR_WRITE=on` before the command
+        for adding events there too. Its token goes to
+        `data/google-calendar-noisysource.json`.
+     4. Put `CALENDAR=on` in `.env` and restart.
 
      How it works:
      - **With ☁️ Claude, Claude decides (#104).** Claude gets a

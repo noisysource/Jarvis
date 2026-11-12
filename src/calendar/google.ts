@@ -1,5 +1,5 @@
-// The Google Calendar API, read-only (#100): the events of your primary
-// (personal) calendar between two days. GET only. Only the fields Jarvis
+// The Google Calendar API, read-only (#100): the events of one account's
+// primary calendar between two days (#137: one reader per account). GET only. Only the fields Jarvis
 // uses are asked for; the organiser's and invitees' addresses are used to
 // spot EC work and never go further.
 
@@ -30,6 +30,8 @@ export const makeGoogleCalendarReader = (deps: {
   readonly accessToken: () => Promise<Result<string, CalendarError>>;
   readonly timeZone: string;
   readonly isEc: (event: GoogleEvent) => boolean;
+  /** Which account this reads (#137), for the message when Google refuses. */
+  readonly account?: string;
   readonly fetch?: typeof fetch;
 }): CalendarReader => {
   const doFetch = deps.fetch ?? fetch;
@@ -46,7 +48,7 @@ export const makeGoogleCalendarReader = (deps: {
     } catch {
       return err({ code: "network", message: "Couldn't reach Google Calendar" });
     }
-    if (res.status === 401 || res.status === 403) return err({ code: "auth", message: `Google Calendar refused access (${res.status}): run npm run calendar:connect again` });
+    if (res.status === 401 || res.status === 403) return err({ code: "auth", message: `Google Calendar refused access (${res.status}): run npm run calendar:connect${deps.account && deps.account !== "personal" ? ` -- ${deps.account}` : ""} again` });
     if (!res.ok) return err({ code: "api", message: `Google Calendar answered ${res.status}` });
     const body = (await res.json().catch(() => ({}))) as { items?: unknown };
     const items = Array.isArray(body.items) ? (body.items as GoogleEvent[]) : [];
