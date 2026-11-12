@@ -372,6 +372,14 @@ export const makeServer = (
 
   if (options.tts) registerTtsRoutes(app, { ...options.tts, language: "en", log: deps.log });
   if (options.stt) registerSttRoutes(app, { provider: options.stt, language: "en", log: deps.log });
+  // #133: the brain view's node panels. Names, on/off and counts only.
+  const reach = deps.reach;
+  if (reach) {
+    app.get("/reach", async (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({ nodes: await reach() });
+    });
+  }
   const brains = options.brains;
   if (brains) {
     app.get("/brains", (c) => {

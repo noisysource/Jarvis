@@ -7,7 +7,7 @@
 /** @typedef {import("./chat.js").PathStep} PathStep */
 /** @typedef {"profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "code" | "kiro"} NodeId */
 /** @typedef {"reaching" | "used" | "waiting" | "failed" | "handoff"} Reach */
-/** @typedef {"idle" | "soon" | "kiro"} Rest */
+/** @typedef {"idle" | "off" | "soon" | "kiro"} Rest */
 
 /** Around the core, clockwise from the top. `soon`: not connected yet. */
 export const NODES = /** @type {const} */ ([
@@ -142,9 +142,25 @@ export const NODE_TAGS = {
   failed: "failed",
   handoff: "handed to Kiro",
   idle: "",
+  off: "off",
   soon: "coming",
   kiro: "EC → Kiro",
 };
+
+/**
+ * A node at rest, from what /reach says about it (#133).
+ * @param {string} id @param {string} status "on" | "off" | "soon"
+ * @returns {Rest}
+ */
+export const restOf = (id, status) => (id === "kiro" ? "kiro" : status === "soon" ? "soon" : status === "off" ? "off" : "idle");
+
+/**
+ * The command that connects an account, for a panel. Personal is the
+ * calendar's first connection, so it needs no name.
+ * @param {string} node @param {string} account
+ */
+export const connectCommand = (node, account) =>
+  node === "gmail" ? `npm run gmail:connect -- ${account}` : account === "personal" ? "npm run calendar:connect" : `npm run calendar:connect -- ${account}`;
 
 /**
  * A faint network inside the brain: fixed dots and links (no randomness at

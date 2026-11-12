@@ -904,3 +904,173 @@ button.brain-node:focus-visible {
     animation: none;
   }
 }
+
+/* ---- node panels and badges (#133) ---- */
+
+.brain-node[data-state="off"] .brain-disc {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.brain-node[aria-expanded="true"] .brain-disc {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--reach) 35%, transparent);
+}
+
+.brain-badge {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  min-width: 1.3rem;
+  height: 1.3rem;
+  padding: 0 0.3rem;
+  box-sizing: border-box;
+  border-radius: 0.65rem;
+  border: 2px solid var(--bg);
+  background: var(--wait);
+  color: var(--bg);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brain-disc {
+  position: relative;
+}
+
+.brain-panel {
+  margin-top: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.brain-panel[hidden] {
+  display: none;
+}
+
+.brain-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.brain-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.brain-panel h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.brain-panel h3 {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.brain-status {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.brain-status-on {
+  border-color: var(--reach);
+  color: var(--reach);
+}
+
+.brain-panel-close {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.brain-panel-about,
+.brain-panel-hint,
+.brain-panel-waiting {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.brain-panel-hint {
+  color: var(--muted);
+}
+
+.brain-panel-waiting {
+  color: var(--wait);
+}
+
+.brain-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.brain-panel-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.2rem 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.55rem;
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.brain-panel-list li span:last-child {
+  color: var(--muted);
+}
+
+.brain-panel-list li.connected span:last-child {
+  color: var(--reach);
+}
+
+.brain-panel-list li.not-connected span:last-child {
+  color: var(--wait);
+}
+
+.brain-panel-list code {
+  font-size: 0.8rem;
+}
+
+.brain-panel > button {
+  align-self: flex-start;
+}
+
+@media (max-width: 52rem) {
+  .brain-badge {
+    min-width: 1.05rem;
+    height: 1.05rem;
+    font-size: 0.6rem;
+    top: -0.35rem;
+    right: -0.35rem;
+  }
+}
+
+.brain-badge[hidden] {
+  display: none;
+}

@@ -16,11 +16,12 @@ import { err, ok, type Result } from "../result.js";
 import type { LlmTool } from "../llm/types.js";
 import { dayLabel, shortRangeLabel } from "./dates.js";
 import { addDays, localDate, MAX_DAYS_AHEAD, type CalendarError } from "./read.js";
+import { isCalendarAccount, type CalendarAccount } from "./accounts.js";
 
 export const CALENDAR_CREATE_TOOL: LlmTool = {
   name: "calendar_create",
   description:
-    "Propose adding one event to their personal Google Calendar. Nothing is added by this call: the app shows them the event and only their explicit yes adds it. Give a date and either a start and end time, or all_day.",
+    'Propose adding one event to one of their Google Calendars: "personal" (Renato\'s own, the default) or "noisysource" (his company\'s). Nothing is added by this call: the app shows them the event and only their explicit yes adds it. Give a date and either a start and end time, or all_day.',
   inputSchema: {
     type: "object",
     properties: {
@@ -29,6 +30,7 @@ export const CALENDAR_CREATE_TOOL: LlmTool = {
       start: { type: "string", description: "Start time, HH:MM (24-hour). Leave empty for an all-day event." },
       end: { type: "string", description: "End time, HH:MM (24-hour). Leave empty for one hour after the start." },
       all_day: { type: "boolean", description: "True for an all-day event" },
+      account: { type: "string", enum: ["personal", "noisysource"], description: "Which calendar; personal if they don't say" },
     },
     required: ["title", "date"],
     additionalProperties: false,
@@ -43,6 +45,8 @@ export type Proposal = {
   /** "HH:MM", both or neither (all day). */
   readonly start?: string;
   readonly end?: string;
+  /** Which calendar (#137); personal when absent. */
+  readonly account?: CalendarAccount;
 };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,7 +62,9 @@ const hhmm = (m: number): string => `${String(Math.floor(m / 60)).padStart(2, "0
  */
 export const checkCreateRequest = (value: unknown, today: string, isEc: (text: string) => boolean): Result<Proposal, string> => {
   if (typeof value !== "object" || value === null) return err("not an object");
-  const { title, date, start, end, all_day: allDay } = value as Record<string, unknown>;
+  const { title, date, start, end, all_day: allDay, account } = value as Record<string, unknown>;
+  if (account !== undefined && !isCalendarAccount(account)) return err("unknown calendar");
+  const which = account === "noisysource" ? { account } : {};
   if (typeof title !== "string") return err("no title");
   const cleanTitle = [...title]
     .map((c) => (c.charCodeAt(0) < 32 ? " " : c))
@@ -75,21 +81,22 @@ export const checkCreateRequest = (value: unknown, today: string, isEc: (text: s
   const endText = typeof end === "string" ? end.trim() : "";
   if (allDay === true || (startText === "" && endText === "")) {
     if (allDay !== true) return err("give a start time, or all_day");
-    return ok({ title: cleanTitle, date });
+    return ok({ title: cleanTitle, date, ...which });
   }
   if (!TIME.test(startText)) return err("start isn't HH:MM");
   if (endText !== "" && !TIME.test(endText)) return err("end isn't HH:MM");
   const endTime = endText === "" ? hhmm(Math.min(minutes(startText) + 60, 23 * 60 + 59)) : endText;
   if (minutes(endTime) <= minutes(startText)) return err("end isn't after start");
-  return ok({ title: cleanTitle, date, start: startText, end: endTime });
+  return ok({ title: cleanTitle, date, start: startText, end: endTime, ...which });
 };
 
 /** For the card and the brain: "“Work”, Wednesday 11 November, 21:00–22:00". */
 export const proposalLabel = (p: Proposal, today: string): string =>
-  `“${p.title}”, ${dayLabel(p.date, today)}, ${p.start && p.end ? `${p.start}–${p.end}` : "all day"}`;
+  `“${p.title}”, ${dayLabel(p.date, today)}, ${p.start && p.end ? `${p.start}–${p.end}` : "all day"}${p.account && p.account !== "personal" ? `, on the ${p.account} calendar` : ""}`;
 
 /** For the path line: dates and times only, never the title. */
-export const proposalPathLabel = (p: Proposal): string => `${shortRangeLabel({ from: p.date, to: p.date })}${p.start && p.end ? ` ${p.start}–${p.end}` : " all day"}`;
+export const proposalPathLabel = (p: Proposal): string =>
+  `${p.account && p.account !== "personal" ? `${p.account} · ` : ""}${shortRangeLabel({ from: p.date, to: p.date })}${p.start && p.end ? ` ${p.start}–${p.end}` : " all day"}`;
 
 /** Google's event body. Local times with the time zone, so Google works out the offset (summer and winter). */
 export const googleEventBody = (p: Proposal, timeZone: string): Record<string, unknown> =>
@@ -104,15 +111,16 @@ export type EventCreator = (p: Proposal) => Promise<Result<CreatedEvent, Calenda
 
 const EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-/** Creates one event in the primary calendar: the only non-GET calendar call, and only after the OK. */
+/** Creates one event in the chosen account's primary calendar: the only non-GET calendar call, and only after the OK. */
 export const makeGoogleEventCreator = (deps: {
-  readonly accessToken: () => Promise<Result<string, CalendarError>>;
+  readonly accessToken: (account: CalendarAccount) => Promise<Result<string, CalendarError>>;
   readonly timeZone: string;
   readonly fetch?: typeof fetch;
 }): EventCreator => {
   const doFetch = deps.fetch ?? fetch;
   return async (p) => {
-    const token = await deps.accessToken();
+    const account = p.account ?? "personal";
+    const token = await deps.accessToken(account);
     if (!token.ok) return token;
     let res: Response;
     try {
@@ -125,7 +133,7 @@ export const makeGoogleEventCreator = (deps: {
       return err({ code: "network", message: "Couldn't reach Google Calendar" });
     }
     if (res.status === 401 || res.status === 403)
-      return err({ code: "auth", message: `Google Calendar refused to add it (${res.status}): connect again with write access (CALENDAR_WRITE=on npm run calendar:connect), then restart Jarvis` });
+      return err({ code: "auth", message: `Google Calendar refused to add it (${res.status}): connect again with write access (CALENDAR_WRITE=on npm run calendar:connect -- ${account}), then restart Jarvis` });
     if (!res.ok) return err({ code: "api", message: `Google Calendar answered ${res.status}` });
     const body = (await res.json().catch(() => ({}))) as { summary?: unknown; start?: { date?: unknown; dateTime?: unknown }; end?: { date?: unknown; dateTime?: unknown } };
     const start = typeof body.start?.dateTime === "string" ? body.start.dateTime : typeof body.start?.date === "string" ? body.start.date : "";

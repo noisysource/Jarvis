@@ -295,7 +295,7 @@ describe("reading the calendar in bare mode, with either brain (#100)", () => {
     expect(requests[0]?.outputSchema).toBeUndefined();
     expect(new URL(google.urls[0] ?? "").searchParams.get("timeMin")).toBe("2026-11-11T00:00:00+00:00");
     const answerRequest = requests[0];
-    expect(answerRequest?.system).toContain("What you can do right now: talk, and read their personal Google Calendar.");
+    expect(answerRequest?.system).toContain("What you can do right now: talk, and read their Google Calendars (personal, and Noisy Source's when it's connected).");
     expect(answerRequest?.system).toContain("You can't add, move or delete events yet.");
     expect(answerRequest?.system).toContain("never say what's on it, or that it can or can't be reached");
     expect(answerRequest?.systemSuffix).toContain("- Wednesday 11 November 2026, 11:00–12:00: Dentist");

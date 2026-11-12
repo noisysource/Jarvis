@@ -944,6 +944,13 @@ Confirmed for the page (2026-11-11):
   responsive so it works on a phone later; no animation when reduced motion
   is set. Mockup: the "Jarvis brain UI" artifact.
 
+Confirmed (2026-11-12):
+
+- **Calendar accounts (#137):** like Gmail, `personal` and `noisysource` are
+  separate Google accounts, each connected on its own. A read covers every
+  connected account unless the brain names one; an account that can't be
+  read is reported, never treated as an empty calendar.
+
 ## Out of scope for M0
 
 Vendus, Cloud Run deployment or the Pi (#53), real memory (#24, #56),

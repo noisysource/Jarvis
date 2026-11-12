@@ -2,10 +2,14 @@
 // node Jarvis reaches for in the current answer. States come from brain-lib.js;
 // this file only draws them.
 
-import { EMPTY, NODES, NODE_TAGS, applyReach, applyStep, isReaching, lineGeometry, mesh, nodePosition, settle, stateOfPath } from "./brain-lib.js";
+import { EMPTY, NODES, NODE_TAGS, applyReach, applyStep, connectCommand, isReaching, lineGeometry, mesh, nodePosition, restOf, settle, stateOfPath } from "./brain-lib.js";
 
 /** @typedef {import("./brain-lib.js").BrainState} BrainState */
 /** @typedef {import("./chat.js").PathStep} PathStep */
+/**
+ * One node as GET /reach describes it (#133): names, on/off and counts only.
+ * @typedef {{ id: string, status: string, about: string, tools: { name: string, does: string }[], accounts?: { name: string, connected: boolean }[], hint?: string, waiting?: number }} ReachNode
+ */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -43,9 +47,10 @@ const el = (tag, className) => {
 
 /**
  * Draws the brain into `root` and returns the calls that move it.
- * `open`: what clicking a node does, for the nodes that have something to open.
+ * Clicking a node opens its panel (#133); `open` adds a button there for
+ * nodes with a fuller view of their own (Memory, Skills).
  * @param {HTMLElement} root
- * @param {{ open?: Partial<Record<string, () => void>> }} [options]
+ * @param {{ open?: Partial<Record<string, { label: string, run: () => void }>> }} [options]
  */
 export const makeBrainView = (root, options = {}) => {
   root.replaceChildren();
@@ -76,24 +81,26 @@ export const makeBrainView = (root, options = {}) => {
   face.append(name, sub);
   core.append(face);
 
-  /** @type {Map<string, { box: HTMLElement, tag: HTMLElement, rest: import("./brain-lib.js").Rest }>} */
+  /** @type {Map<string, { box: HTMLButtonElement, tag: HTMLElement, badge: HTMLElement, rest: import("./brain-lib.js").Rest }>} */
   const nodes = new Map();
   const list = el("ul", "brain-nodes");
   for (const n of NODES) {
     const item = el("li", "brain-node-item");
     const pos = nodePosition(n.angle);
     item.style.cssText = `left:${pos.left}%;top:${pos.top}%`;
-    const open = options.open?.[n.id];
-    const box = /** @type {HTMLElement} */ (open ? document.createElement("button") : document.createElement("div"));
+    const box = document.createElement("button");
+    box.type = "button";
     box.className = "brain-node";
     box.dataset.node = n.id;
     box.dataset.state = n.rest;
-    if (open && box instanceof HTMLButtonElement) {
-      box.type = "button";
-      box.addEventListener("click", open);
-    }
+    box.setAttribute("aria-expanded", "false");
+    box.setAttribute("aria-controls", "brain-panel");
+    box.addEventListener("click", () => togglePanel(n.id));
     const disc = el("span", "brain-disc");
     disc.append(icon(n.id));
+    const badge = el("span", "brain-badge");
+    badge.hidden = true;
+    disc.append(badge);
     const label = el("span", "brain-label");
     label.textContent = n.label;
     const tag = el("span", "brain-tag");
@@ -101,11 +108,109 @@ export const makeBrainView = (root, options = {}) => {
     box.append(disc, label, tag);
     item.append(box);
     list.append(item);
-    nodes.set(n.id, { box, tag, rest: n.rest });
+    nodes.set(n.id, { box, tag, badge, rest: n.rest });
   }
 
+  const panel = el("section", "brain-panel");
+  panel.id = "brain-panel";
+  panel.hidden = true;
+
   stage.append(net, lines, core, list);
-  root.append(stage);
+  root.append(stage, panel);
+
+  /** @type {Map<string, ReachNode>} */
+  let known = new Map();
+  /** @type {string | undefined} */
+  let shown;
+  /** Cards waiting for an OK, per node (from the page). @type {Record<string, number>} */
+  let pendingCards = {};
+
+  const drawBadges = () => {
+    for (const [id, node] of nodes) {
+      const count = (pendingCards[id] ?? 0) + (known.get(id)?.waiting ?? 0);
+      node.badge.hidden = count === 0;
+      node.badge.textContent = String(count);
+      const label = NODES.find((x) => x.id === id)?.label ?? id;
+      node.box.setAttribute("aria-label", count > 0 ? `${label}, ${count} waiting for you` : label);
+    }
+  };
+
+  /** @param {string} tag @param {string} className @param {string} text */
+  const text = (tag, className, text) => {
+    const e = el(tag, className);
+    e.textContent = text;
+    return e;
+  };
+
+  const drawPanel = () => {
+    panel.replaceChildren();
+    if (!shown) {
+      panel.hidden = true;
+      return;
+    }
+    const id = shown;
+    const info = known.get(id);
+    const label = NODES.find((x) => x.id === id)?.label ?? id;
+    panel.hidden = false;
+    panel.setAttribute("aria-label", label);
+
+    const head = el("div", "brain-panel-head");
+    const title = el("div", "brain-panel-title");
+    title.append(text("h2", "", label));
+    if (info) title.append(text("span", `brain-status brain-status-${info.status}`, info.status === "on" ? "on" : info.status === "off" ? "off" : "coming"));
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "brain-panel-close";
+    close.setAttribute("aria-label", "Close");
+    close.textContent = "×";
+    close.addEventListener("click", () => togglePanel(id));
+    head.append(title, close);
+    panel.append(head);
+
+    if (!info) {
+      panel.append(text("p", "brain-panel-about", "Couldn't load what this can do. Is Jarvis running?"));
+      return;
+    }
+    panel.append(text("p", "brain-panel-about", info.about));
+    if (info.waiting) panel.append(text("p", "brain-panel-waiting", `${info.waiting} waiting for your review.`));
+
+    if (info.tools.length > 0) {
+      panel.append(text("h3", "", "Tools"));
+      const ul = el("ul", "brain-panel-list");
+      for (const t of info.tools) {
+        const li = el("li", "");
+        li.append(text("code", "", t.name), text("span", "", t.does));
+        ul.append(li);
+      }
+      panel.append(ul);
+    }
+    if (info.accounts && info.accounts.length > 0) {
+      panel.append(text("h3", "", "Accounts"));
+      const ul = el("ul", "brain-panel-list");
+      for (const a of info.accounts) {
+        const li = el("li", a.connected ? "connected" : "not-connected");
+        li.append(text("span", "", a.name), text("span", "", a.connected ? "connected" : `not connected: ${connectCommand(id, a.name)}`));
+        ul.append(li);
+      }
+      panel.append(ul);
+    }
+    if (info.hint && info.status !== "on") panel.append(text("p", "brain-panel-hint", info.hint));
+    const open = options.open?.[id];
+    if (open && info.status === "on") {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = open.label;
+      b.addEventListener("click", open.run);
+      panel.append(b);
+    }
+  };
+
+  /** @param {string} id */
+  const togglePanel = (id) => {
+    shown = shown === id ? undefined : id;
+    for (const [nid, node] of nodes) node.box.setAttribute("aria-expanded", String(nid === shown));
+    drawPanel();
+  };
 
   /** @type {BrainState} */
   let state = EMPTY;
@@ -148,6 +253,29 @@ export const makeBrainView = (root, options = {}) => {
 
   return {
     setBrain,
+    /**
+     * What each node can do and what's connected (GET /reach, #133): the
+     * nodes' resting look, the panels and the waiting-for-review badges.
+     * @param {readonly ReachNode[]} list
+     */
+    setReach: (list) => {
+      known = new Map(list.map((n) => [n.id, n]));
+      for (const n of list) {
+        const node = nodes.get(n.id);
+        if (node) node.rest = restOf(n.id, n.status);
+      }
+      draw();
+      drawBadges();
+      drawPanel();
+    },
+    /**
+     * Cards on the page still waiting for an OK, per node.
+     * @param {Record<string, number>} counts
+     */
+    setPending: (counts) => {
+      pendingCards = counts;
+      drawBadges();
+    },
     /** A new question: the lines of the last answer go. */
     begin: () => {
       state = EMPTY;
