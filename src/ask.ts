@@ -92,6 +92,9 @@ export type AskMeta = {
     stage: "route" | "memories",
     fields: { readonly ms: number; readonly how?: RouteHow; readonly speculative?: "used" | "discarded" },
   ) => void;
+  /** Live path (#130): a tool call starting, and each step as it ends. Same content as the final path. */
+  readonly onReach?: (tool: string) => void;
+  readonly onStep?: (step: PathStep) => void;
 };
 
 /** The context answered speculatively while the classifier runs (#76, SPECULATIVE_ANSWER=on). */
@@ -185,8 +188,10 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(request.spoken === true ? { spoken: true } : {}),
     ...(request.remember === false ? { remember: false } : {}),
     onToolSucceeded: guard.toolSucceeded,
+    ...(meta.onReach ? { onReach: meta.onReach } : {}),
     onStep: (step) => {
       path.push(step);
+      meta.onStep?.(step);
       // Only a read that worked lets the reply say what's on the calendar (#102).
       if (step.kind === "tool" && step.name === "calendar_read") (step.ok ? guard.resultsKnown : guard.readFailed)();
     },

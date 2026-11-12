@@ -95,6 +95,13 @@ describe("native tool calling (#104)", () => {
     expect(barePrompt("Alex", { calendar: true })).toContain("the app reads it and gives you the events");
   });
 
+  it("reports each offered tool as it starts (#130), never a name it wasn't offered", async () => {
+    const { llm } = scripted([calls("", read("t1", "2026-11-11", "2026-11-11"), { id: "t2", name: "rm_rf", input: {} }), text("Done.")]);
+    const reached: string[] = [];
+    await answerer(llm, googleWith(events).read)({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, onReach: (t) => reached.push(t) });
+    expect(reached).toEqual(["calendar_read"]);
+  });
+
   it("offers the tool, runs the call the brain asks for, and answers from the result", async () => {
     const { llm, requests } = scripted([calls("", read("t1", "2026-11-11", "2026-11-11")), text("You've got the dentist at eleven.")]);
     const google = googleWith(events);

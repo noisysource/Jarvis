@@ -252,6 +252,9 @@ export const makeServer = (
             firstTokenMs ??= Math.round(performance.now() - started);
           },
           onSentence: (text) => sendSentences([text]),
+          // Live path for the brain view (#130): the same steps the final path carries.
+          onReach: (tool) => send("reach", { tool }),
+          onStep: (step) => send("step", step),
           ...(options.turn ? { firstClauseAfter: options.turn.firstChunkChars } : {}),
           deferWrapUp: (turn) => turns.hold(turnId, turn),
           onStage: (stage, fields) => {

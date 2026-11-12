@@ -263,6 +263,8 @@ export type AnswerInput = {
   readonly onToolSucceeded?: () => void;
   /** Reports a tool or skill step for the answer's path (#102). */
   readonly onStep?: (step: PathStep) => void;
+  /** A tool call is starting (#130): its name, one of the tools offered this turn. For the page's brain view. */
+  readonly onReach?: (tool: string) => void;
 };
 
 /**
