@@ -552,9 +552,9 @@ footer {
 }
 
 .brain {
-  flex: 0 1 32rem;
+  flex: 0 1 37rem;
   min-width: 0;
-  max-width: 34rem;
+  max-width: 38rem;
   margin: 1rem auto 0;
   position: sticky;
   top: 1rem;
@@ -1078,4 +1078,189 @@ button.brain-node:focus-visible {
 /* #141: nodes the brain wasn't offered this turn. */
 .brain-node[data-offered="no"] {
   opacity: 0.38;
+}
+
+/* ---- the reasoning trace (#143) ---- */
+
+.trace {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface);
+}
+
+.trace[hidden] {
+  display: none;
+}
+
+.trace-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.trace-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.t-tree,
+.t-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.t-tree li,
+.t-children li {
+  --t-line: var(--quiet);
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.t-children li[data-status="used"],
+.t-children li[data-status="reaching"] {
+  --t-line: var(--reach);
+}
+
+.t-children li[data-status="waiting"] {
+  --t-line: var(--wait);
+}
+
+.t-children li[data-status="failed"] {
+  --t-line: var(--fail);
+}
+
+/* Children sit to the right of their parent, joined by lines. */
+.t-children {
+  position: relative;
+  margin-left: 0.65rem;
+}
+
+.t-children::before {
+  content: "";
+  position: absolute;
+  left: -0.65rem;
+  top: 50%;
+  width: 0.65rem;
+  border-top: 2px solid var(--t-line);
+}
+
+.t-children > li {
+  padding: 0.18rem 0 0.18rem 0.65rem;
+}
+
+.t-children > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--t-line);
+}
+
+.t-children > li:first-child::before {
+  top: 50%;
+}
+
+.t-children > li:last-child::before {
+  bottom: 50%;
+}
+
+.t-children > li:only-child::before {
+  display: none;
+}
+
+.t-children > li::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0.65rem;
+  border-top: 2px solid var(--t-line);
+}
+
+.t-children li[data-status="reaching"]::after {
+  border-top-style: dashed;
+}
+
+.t-node {
+  flex: none;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.55rem;
+  border: 1.5px solid var(--t-line);
+  background: var(--bg);
+  font-size: 0.76rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.t-brain {
+  border-color: var(--reach);
+  font-weight: 600;
+}
+
+.t-working {
+  box-shadow: 0 0 0.9rem color-mix(in srgb, var(--reach) 40%, transparent);
+}
+
+li[data-status="idle"] > .t-hub {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.t-tool {
+  font-size: 0.72rem;
+}
+
+li[data-status="reaching"] > .t-node {
+  border-style: dashed;
+}
+
+.t-target {
+  font-weight: 600;
+}
+
+.t-result {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+li[data-status="failed"] > .t-leaf .t-result {
+  color: var(--fail);
+}
+
+li[data-status="waiting"] > .t-leaf .t-result {
+  color: var(--wait);
+}
+
+@keyframes t-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-0.4rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.t-new {
+  animation: t-pop 0.35s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-new {
+    animation: none;
+  }
 }
