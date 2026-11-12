@@ -329,6 +329,8 @@ export type Deps = {
   readonly gmailSend?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #116: skills, with MEMORY=on: drafts and approved routines. */
   readonly skills?: SkillStore;
+  /** #133: what each brain-view node can do and what's connected (GET /reach). Names and counts only. */
+  readonly reach?: () => Promise<readonly import("./reach.js").ReachNode[]>;
   /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */
   readonly introspect?: () => Promise<IntrospectionReport>;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */

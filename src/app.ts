@@ -25,7 +25,8 @@ import { makeModelExtract } from "./memory-extract.js";
 import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
 import { runIntrospection } from "./introspection.js";
 import { makeSkillStore, type SkillStore } from "./skills.js";
-import { chmod, mkdir, readFile as readFileFs, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile as readFileFs, writeFile } from "node:fs/promises";
+import { reachView } from "./reach.js";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
 import { makeProfileSource, type ProfileFileSystem } from "./profile.js";
@@ -280,6 +281,15 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(skillStore ? { skills: skillStore } : {}),
     nativeTools: (calendar !== undefined || gmail !== undefined || config.bareMemory) && config.toolCalling,
     ...(calendarConfirm ? { calendarConfirm } : {}),
+    reach: () =>
+      reachView({
+        config,
+        exists: (path) => access(path).then(
+          () => true,
+          () => false,
+        ),
+        ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
+      }),
     ...(gmailSend ? { gmailSend } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,

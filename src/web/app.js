@@ -155,13 +155,39 @@ const state = {
 let brainLabels = { local: "Local", claude: "Claude" };
 
 // The brain view (#131): lines to what Jarvis reaches for in the current answer.
-// Memory and Skills open their panels; the other nodes get theirs later (#133).
+// Each node opens a panel (#133); Memory and Skills link to their full views.
 const brainView = makeBrainView(byId("brain-view"), {
   open: {
-    memory: () => void openMemories(),
-    skills: () => void openSkills(),
+    memory: { label: "Open memories", run: () => void openMemories() },
+    skills: { label: "Open skills", run: () => void openSkills() },
   },
 });
+
+/** What each node can do and what's connected (#133). Refreshed after answers and decisions. */
+const refreshReach = async () => {
+  try {
+    const res = await fetch("/reach", { cache: "no-store" });
+    if (!res.ok) return;
+    const body = /** @type {{ nodes?: unknown }} */ (await res.json());
+    if (Array.isArray(body.nodes)) brainView.setReach(/** @type {import("./brain.js").ReachNode[]} */ (body.nodes));
+  } catch {
+    // The panels say they couldn't load; nothing else depends on it.
+  }
+};
+
+/** Cards still waiting for an OK, counted per node for the badges (#133). */
+const NODE_OF_CARD = { calendar: "calendar", email: "gmail", skill: "skills" };
+const refreshPending = () => {
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const card of document.querySelectorAll('.confirm[data-pending="true"]')) {
+    const kind = /** @type {HTMLElement} */ (card).dataset.kind ?? "calendar";
+    const node = NODE_OF_CARD[/** @type {keyof typeof NODE_OF_CARD} */ (kind)];
+    // A skill card is already counted as a draft by /reach.
+    if (node && node !== "skills") counts[node] = (counts[node] ?? 0) + 1;
+  }
+  brainView.setPending(counts);
+};
 
 // ---- rendering ----
 
@@ -221,6 +247,8 @@ const confirmCard = (proposal) => {
   const c = CARDS[kind];
   const card = document.createElement("div");
   card.className = "confirm";
+  card.dataset.kind = kind;
+  card.dataset.pending = "true";
   const what = document.createElement("p");
   what.textContent = c.ask(proposal.label);
   const choices = document.createElement("div");
@@ -233,6 +261,8 @@ const confirmCard = (proposal) => {
     b.addEventListener("click", async () => {
       for (const other of choices.querySelectorAll("button")) other.disabled = true;
       b.classList.add("picked");
+      card.dataset.pending = "false";
+      refreshPending();
       /** @type {{ ok?: boolean, text?: string, tool?: string }} */
       let result;
       try {
@@ -249,6 +279,7 @@ const confirmCard = (proposal) => {
       const text = typeof result.text === "string" ? result.text : `Something went wrong, so ${c.failed}.`;
       addMessage(result.ok ? "answer" : "error", text);
       state.history = appendTurn(state.history, "assistant", text, typeof result.tool === "string" ? [result.tool] : []);
+      void refreshReach();
     });
     return b;
   };
@@ -935,6 +966,7 @@ const ask = async (question, context) => {
   // The answer's path (#102): one line under the reply that opens to each step. It includes the brain.
   const path = pathOf(final);
   brainView.finish(path);
+  void refreshReach();
   if (path.length > 0 && (view.kind === "answer" || view.kind === "handoff")) {
     const details = document.createElement("details");
     details.className = "path";
@@ -959,6 +991,7 @@ const ask = async (question, context) => {
   showTiming(item, timing, true);
   // Reach 2: an event waiting for Renato's OK. Nothing is added until he presses "Add it".
   for (const proposal of confirmsOf(path)) item.append(confirmCard(proposal));
+  refreshPending();
   if (view.kind === "clarify") {
     const choices = document.createElement("div");
     choices.className = "choices";
@@ -1692,6 +1725,7 @@ renderControls();
 renderVoices();
 void refreshVoice();
 void refreshBadge();
+void refreshReach();
 void fetch("/voice-settings")
   .then((res) => (res.ok ? res.json() : null))
   .then((body) => {
