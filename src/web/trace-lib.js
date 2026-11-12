@@ -38,6 +38,11 @@ export const targetOf = (tool, args) => {
   const m = ACCOUNT.exec(args);
   if (m) return { target: m[1] ?? args, detail: m[2] ?? "" };
   if (tool === "calendar_read" && args !== "") return { target: "all calendars", detail: args };
+  // #125: "owner/repo · path" → the repo, then the rest.
+  if (tool.startsWith("github_") && args !== "") {
+    const [repo, ...rest] = args.split(" · ");
+    return { target: repo ?? args, detail: rest.join(" · ") };
+  }
   return { target: "", detail: args };
 };
 

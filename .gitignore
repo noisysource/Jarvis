@@ -21,6 +21,10 @@ data/google-oauth-client.json
 data/google-tokens.json
 # Gmail (Reach 3): one refresh token per account, local only, never commit
 data/google-gmail-*.json
+# Calendar accounts beyond personal (#139): refresh tokens, local only, never commit
+data/google-calendar-*.json
+# GitHub (#125): read-only tokens, local only, never commit
+data/github-tokens.json
 # Introspection reports (#108): your memories, local only, never commit
 data/introspection/
 # Skills (#116): your routines, local only, never commit

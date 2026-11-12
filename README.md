@@ -372,6 +372,16 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and restart. Ask "anything from the school this week?" or "unread
        at Noisy Source?". Jarvis can't send, delete or label; EC email shows
        only as "EC email, handled by Kiro".
+     - **GitHub (`GITHUB=on`, ☁️ Claude), read-only.** Your repos: files,
+       folders, issues, PRs and CI. Create a **fine-grained token** per owner
+       (your account, the `noisysource` org): Repository access *All*, and
+       *Read-only* for Contents, Issues, Pull requests, Actions and Commit
+       statuses. Then `npm run github:connect -- <owner>` and paste it (it
+       isn't shown or printed; it's saved to `data/github-tokens.json`,
+       gitignored, readable only by you). Put `GITHUB=on` in `.env` and
+       restart. Ask "what's open on Jarvis?" or "is CI green on KidClub?".
+       Jarvis only reads (GET calls); repos that look like EC work show only
+       as "EC repo, handled by Kiro".
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

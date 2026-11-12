@@ -176,7 +176,13 @@ export const restOf = (id, status) => (id === "kiro" ? "kiro" : status === "soon
  * @param {string} node @param {string} account
  */
 export const connectCommand = (node, account) =>
-  node === "gmail" ? `npm run gmail:connect -- ${account}` : account === "personal" ? "npm run calendar:connect" : `npm run calendar:connect -- ${account}`;
+  node === "github"
+    ? `npm run github:connect -- ${account}`
+    : node === "gmail"
+      ? `npm run gmail:connect -- ${account}`
+      : account === "personal"
+        ? "npm run calendar:connect"
+        : `npm run calendar:connect -- ${account}`;
 
 /**
  * A faint network inside the brain: fixed dots and links (no randomness at

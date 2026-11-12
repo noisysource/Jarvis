@@ -30,7 +30,7 @@ describe("GET /reach content (#133)", () => {
     ]);
     expect(byId.gmail?.tools.map((t) => t.name)).toEqual(["gmail_search", "gmail_read"]);
     expect(byId.skills?.waiting).toBe(2);
-    expect(byId.github?.status).toBe("soon");
+    expect(byId.github?.status).toBe("off");
     expect(byId.kiro?.status).toBe("on");
   });
 

@@ -951,6 +951,11 @@ Confirmed (2026-11-12):
   connected account unless the brain names one; an account that can't be
   read is reported, never treated as an empty calendar.
 
+- **GitHub (#125):** read-only, GET only, through fine-grained read-only
+  tokens, one per owner, in `data/github-tokens.json` (local, mode 600).
+  Four tools: repos, read (file or folder), issues/PRs, checks. EC-looking
+  repos are Kiro's. Writing (issues for #138) comes later, behind a card.
+
 ## Out of scope for M0
 
 Vendus, Cloud Run deployment or the Pi (#53), real memory (#24, #56),
