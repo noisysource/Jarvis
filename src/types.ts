@@ -3,6 +3,7 @@
 // Contexts are not hard-coded: they're read from contexts.md (#22), so a
 // context id is a branded string that only the contexts parser should create.
 
+import type { ReachNode } from "./reach.js";
 import type { Result } from "./result.js";
 
 declare const contextIdBrand: unique symbol;
@@ -330,7 +331,7 @@ export type Deps = {
   /** #116: skills, with MEMORY=on: drafts and approved routines. */
   readonly skills?: SkillStore;
   /** #133: what each brain-view node can do and what's connected (GET /reach). Names and counts only. */
-  readonly reach?: () => Promise<readonly import("./reach.js").ReachNode[]>;
+  readonly reach?: () => Promise<readonly ReachNode[]>;
   /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */
   readonly introspect?: () => Promise<IntrospectionReport>;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
