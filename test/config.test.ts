@@ -31,6 +31,7 @@ describe("loadConfig", () => {
       calendar: { enabled: false, write: false, clientPath: "data/google-oauth-client.json", tokensPath: "data/google-tokens.json" },
       toolCalling: true,
       gmail: { enabled: false, write: false, tokensPath: expect.any(Function) },
+      github: { enabled: false, tokensPath: "data/github-tokens.json" },
       bareMemory: false,
       introspection: false,
       ollamaThink: false,

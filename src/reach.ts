@@ -24,11 +24,13 @@ export type ReachNode = {
 };
 
 export type ReachInput = {
-  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail">;
+  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github">;
   /** Whether a token file exists: connected, as far as Jarvis can tell without calling Google. */
   readonly exists: (path: string) => Promise<boolean>;
   /** How many draft skills wait for review. */
   readonly draftSkills?: () => Promise<number>;
+  /** #125: the GitHub owners with a token. */
+  readonly githubOwners?: () => Promise<readonly string[]>;
 };
 
 export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]> => {
@@ -41,6 +43,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
   );
   const gmailAccounts = await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await exists(config.gmail.tokensPath(name)) })));
   const drafts = config.bareMemory && input.draftSkills ? await input.draftSkills().catch(() => 0) : 0;
+  const githubOwners = config.github.enabled && input.githubOwners ? await input.githubOwners().catch(() => []) : [];
 
   return [
     {
@@ -106,7 +109,19 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       accounts: gmailAccounts,
       ...(config.gmail.enabled ? {} : { hint: "GMAIL=on in .env" }),
     },
-    { id: "github", status: "soon", about: "Reading your repos, read-only, the ones you pick.", tools: [], hint: "Coming in #125" },
+    {
+      id: "github",
+      status: onOff(config.github.enabled),
+      about: "Reads your repositories, read-only: files, issues, pull requests and CI. Repos that look like EC work are Kiro's.",
+      tools: [
+        { name: "github_repos", does: "list your repos" },
+        { name: "github_read", does: "read a file or list a folder" },
+        { name: "github_issues", does: "list issues or pull requests" },
+        { name: "github_checks", does: "CI results for a branch" },
+      ],
+      accounts: githubOwners.map((name) => ({ name, connected: true })),
+      ...(config.github.enabled ? (githubOwners.length === 0 ? { hint: "npm run github:connect -- <owner>" } : {}) : { hint: "GITHUB=on in .env" }),
+    },
     { id: "code", status: "soon", about: "Asking a code agent about a repo (Claude Code first, swappable).", tools: [], hint: "Coming in #126" },
     {
       id: "kiro",

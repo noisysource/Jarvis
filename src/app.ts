@@ -10,6 +10,7 @@ import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google
 import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate, type CalendarError } from "./calendar/read.js";
 import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type CalendarReaders } from "./calendar/accounts.js";
+import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
@@ -57,6 +58,8 @@ export type AppInputs = {
   readonly writeIntrospectionReport?: (date: string, markdown: string) => Promise<void>;
   /** Tests: writes drafts and sends instead of Gmail (#120). */
   readonly gmailWriter?: GmailWriter;
+  /** Tests: a GitHub reader instead of the real one (#125). */
+  readonly githubReader?: GithubReader;
   /** Tests: reads email instead of Gmail (Reach 3). */
   readonly gmailReader?: GmailReader;
 };
@@ -238,6 +241,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           return { ok: true, text: `Deleted the draft “${draft.subject}”.`, tool: `gmail_draft_delete ${draft.account} → deleted` };
         }
       : undefined;
+  // #125: GitHub, read-only, one fine-grained token per owner in data/github-tokens.json (mode 600).
+  const githubTokens = makeGithubTokens({ readFile: () => readFileFs(config.github.tokensPath, "utf8") });
+  const github = config.github.enabled ? { reader: inputs.githubReader ?? makeGithubReader({ tokens: githubTokens }), isEc: isEcText } : undefined;
   // #146: which accounts are connected, checked each turn (does the token file exist), for the brain's prompt.
   const fileExists = (path: string) =>
     access(path).then(
@@ -326,6 +332,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       reachView({
         config,
         exists: fileExists,
+        githubOwners: githubTokens.owners,
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
     ...(gmailSend ? { gmailSend } : {}),
@@ -353,6 +360,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
                 ? { memory: { store: memoryStore, contexts: contexts.value, ec: memoryEc, timeZone: config.timeZone, log } }
                 : {}),
               ...(skillStore && config.toolCalling ? { skills: { store: skillStore, ec: memoryEc } } : {}),
+              // #125: his GitHub repos, read-only, with tools (Claude).
+              ...(github && config.toolCalling ? { github } : {}),
               // Tests give their own calendar reader: no token files to check then.
               ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
               log,

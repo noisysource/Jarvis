@@ -109,6 +109,13 @@ export type Config = {
   /** `write` (GMAIL_WRITE=on, #120): drafts, and sending after "Send it". Needs gmail:connect with write access. */
   readonly gmail: { readonly enabled: boolean; readonly write: boolean; readonly tokensPath: (account: string) => string };
   /**
+   * GITHUB=on (#125): Claude can read Renato's repos, read-only (GET calls
+   * only): list repos, read files, issues and PRs, CI status. Tokens are
+   * fine-grained, read-only, one per owner (npm run github:connect -- <owner>),
+   * in a file under data/. Local only for now.
+   */
+  readonly github: { readonly enabled: boolean; readonly tokensPath: string };
+  /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
    * across conversations like a person (short-term that fades, long-term that
    * lasts), saving and recalling with tools. Memories live in MEMORY_DB.
@@ -255,6 +262,7 @@ const EnvSchema = z.object({
   TOOL_CALLING: onOff,
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
+  GITHUB: onOff,
   GMAIL_WRITE: onOff,
   MEMORY: onOff,
   INTROSPECTION: onOff,
@@ -362,6 +370,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (production) errors.push("GMAIL: local only for now");
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
   }
+  if (raw("GITHUB") === "on") {
+    if (production) errors.push("GITHUB: local only for now (its tokens are a file on this Mac, not in Secret Manager)");
+    if (raw("BARE_MODE") !== "on") errors.push("GITHUB: needs BARE_MODE=on");
+  }
 
   if (!parsed.success || errors.length > 0 || !classifier || !answer || !profileSource || !timeZone || !kokoroUrl || !piperUrl || !whisperUrl || !ollamaUrl) {
     return err(errors.join("\n"));
@@ -396,6 +408,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     bareMemory: e.MEMORY === "on",
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
+    github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
