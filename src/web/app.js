@@ -4,6 +4,7 @@
 // lives in this page's memory only; reload or "New conversation" clears it.
 
 import { makeBrainView } from "./brain.js";
+import { makeTraceView } from "./trace.js";
 import {
   CONVERSATION,
   LANGUAGES,
@@ -162,6 +163,9 @@ const brainView = makeBrainView(byId("brain-view"), {
     skills: { label: "Open skills", run: () => void openSkills() },
   },
 });
+
+// #143: how he got there, for the current answer, as a tree that grows while he works.
+const traceView = makeTraceView(brainView.traceSlot);
 
 /** What each node can do and what's connected (#133). Refreshed after answers and decisions. */
 const refreshReach = async () => {
@@ -802,6 +806,7 @@ const ask = async (question, context) => {
   state.busy = true;
   setPhase("thinking");
   brainView.begin();
+  traceView.begin(state.brain === "claude" ? "Claude" : "Local");
   renderControls();
   const userItem = context ? undefined : addMessage("user", text);
   setStatus("");
@@ -929,11 +934,17 @@ const ask = async (question, context) => {
             else appendToMessage(item, sentence);
             // A filler already reacted: don't add the reply's own reaction on top (#92).
             if (!skipSpokenReaction({ usedFiller, first, sentence })) await say(sentence);
-          } else if (ev.event === "reach") brainView.reach(String(data.tool ?? ""));
+          } else if (ev.event === "reach") {
+            brainView.reach(String(data.tool ?? ""));
+            traceView.reach(String(data.tool ?? ""));
+          }
           else if (ev.event === "step") {
             // The same steps the final path carries (#130), drawn as they happen.
             const [step] = pathOf({ path: [data] });
-            if (step) brainView.step(step);
+            if (step) {
+              brainView.step(step);
+              traceView.step(step);
+            }
           } else if (ev.event === "timing") timing.server = data;
           else if (ev.event === "done" || ev.event === "reply") final = data;
         }
@@ -950,6 +961,7 @@ const ask = async (question, context) => {
     sp?.stop("answer-cancelled");
     if (!sp) onPlayback({ interrupted: true, spoken: "", sentences: 0, fellBack: false, reason: "answer-cancelled", played: 0, voiceErrors: 0 });
     brainView.finish([]);
+    traceView.finish([]);
     state.busy = false;
     renderControls();
     return;
@@ -966,6 +978,7 @@ const ask = async (question, context) => {
   // The answer's path (#102): one line under the reply that opens to each step. It includes the brain.
   const path = pathOf(final);
   brainView.finish(path);
+  traceView.finish(path);
   void refreshReach();
   if (path.length > 0 && (view.kind === "answer" || view.kind === "handoff")) {
     const details = document.createElement("details");

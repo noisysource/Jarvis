@@ -116,7 +116,9 @@ export const makeBrainView = (root, options = {}) => {
   panel.hidden = true;
 
   stage.append(net, lines, core, list);
-  root.append(stage, panel);
+  // #143: the reasoning trace goes between the brain and the node panel.
+  const traceSlot = el("div", "");
+  root.append(stage, traceSlot, panel);
 
   /** @type {Map<string, ReachNode>} */
   let known = new Map();
@@ -256,6 +258,7 @@ export const makeBrainView = (root, options = {}) => {
   draw();
 
   return {
+    traceSlot,
     setBrain,
     /**
      * What each node can do and what's connected (GET /reach, #133): the
