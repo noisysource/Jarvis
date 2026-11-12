@@ -134,7 +134,7 @@ export type PathStep =
        * card with "Add it" / "Don't add", and POSTs `id` to /calendar/confirm.
        * Page only: the path is never logged.
        */
-      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" | "email" };
+      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" | "email" | "draft-delete" };
     }
   | {
       readonly kind: "guard";
@@ -332,6 +332,8 @@ export type Deps = {
   readonly calendarConfirm?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #120: his answer to an email draft (POST /gmail/send). "yes" sends it; "no" keeps it as a draft. */
   readonly gmailSend?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
+  /** #124: his answer to deleting a draft Jarvis wrote (POST /gmail/delete). Only "yes" deletes. */
+  readonly gmailDelete?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #116: skills, with MEMORY=on: drafts and approved routines. */
   readonly skills?: SkillStore;
   /** #133: what each brain-view node can do and what's connected (GET /reach). Names and counts only. */

@@ -96,7 +96,12 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       tools: [
         { name: "gmail_search", does: "search one account" },
         { name: "gmail_read", does: "read one email" },
-        ...(config.gmail.write ? [{ name: "gmail_draft", does: "write a draft, sent after your OK" }] : []),
+        ...(config.gmail.write
+          ? [
+              { name: "gmail_draft", does: "write a draft, sent after your OK" },
+              { name: "gmail_draft_delete", does: "delete a draft he wrote, after your OK" },
+            ]
+          : []),
       ],
       accounts: gmailAccounts,
       ...(config.gmail.enabled ? {} : { hint: "GMAIL=on in .env" }),

@@ -196,3 +196,94 @@ describe("Claude drafts, Renato sends", () => {
     expect(!bad.ok && bad.error).toContain("GMAIL_WRITE: needs GMAIL=on");
   });
 });
+
+describe("deleting a draft Jarvis wrote (#124)", () => {
+  it("DELETE on the draft only; a missing draft and a read-only connection are said plainly", async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    const writer = makeGmailWriter({
+      accessToken: async () => ok("tok"),
+      fetch: (async (url: string, init: RequestInit) => {
+        calls.push({ url, method: init.method });
+        return new Response(null, { status: url.endsWith("/gone") ? 404 : 204 });
+      }) as unknown as typeof fetch,
+    });
+    expect(await writer.discard?.("personal", "d1")).toEqual(ok(undefined));
+    expect(calls[0]).toEqual({ url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/d1", method: "DELETE" });
+    const gone = await writer.discard?.("personal", "gone");
+    expect(gone && !gone.ok && gone.error.message).toBe("That draft isn't in Gmail any more");
+    const ro = makeGmailWriter({ accessToken: async () => ok("tok"), fetch: (async () => new Response("{}", { status: 403 })) as unknown as typeof fetch });
+    const refused = await ro.discard?.("noisysource", "d1");
+    expect(refused && !refused.ok && refused.error.message).toContain("GMAIL_WRITE=on npm run gmail:connect -- noisysource");
+  });
+
+  it("end to end: the draft gets a ref; delete needs Delete it; Keep it deletes nothing; unknown refs are refused", async () => {
+    const w = fakeWriter();
+    const discarded: string[] = [];
+    const write: GmailWriter = {
+      ...w.write,
+      discard: async (_a, id) => {
+        discarded.push(id);
+        return ok(undefined);
+      },
+    };
+    let ref = "";
+    const requests: LlmRequest[] = [];
+    let script: LlmResponse[] = [];
+    const claude: LlmCall = async (r) => {
+      requests.push(r);
+      const last = r.messages.at(-1);
+      const toolText = JSON.stringify(last);
+      const m = /draft ref ([a-f0-9]{8})/.exec(toolText);
+      if (m?.[1]) ref = m[1];
+      const next = script.shift();
+      return ok(next ?? { ...common, kind: "text" as const, text: "Okay." });
+    };
+    const config = loadConfig({ BARE_MODE: "on", GMAIL: "on", GMAIL_WRITE: "on" });
+    if (!config.ok) throw new Error(config.error);
+    const made = await buildDeps({
+      config: config.value,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      log: silent,
+      profileFs: { readFile: async () => "Name: Alex", stat: async () => ({ mtimeMs: 1 }) } as never,
+      makeLlm: () => ok(claude),
+      gmailReader: reader,
+      gmailWriter: write,
+      now: () => NOW,
+    });
+    if (!made.ok) throw new Error(made.error);
+    const app = makeServer(made.value);
+    const ask = async (question: string) => {
+      const r = await handleAsk(made.value, { question, brain: "claude" });
+      return r.type === "answer" ? (r.path ?? []) : [];
+    };
+    const decide = async (id: string | undefined, decision: "yes" | "no") =>
+      (await app.request("/gmail/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, decision }) })).json();
+
+    script = [{ ...common, kind: "tool_calls", text: "", calls: [{ id: "t1", name: "gmail_draft", input: late }] }];
+    await ask("Tell Sam I'm running late");
+    expect(ref).toMatch(/^[a-f0-9]{8}$/);
+    expect(requests[0]?.tools?.map((t) => t.name)).toContain("gmail_draft_delete");
+
+    script = [{ ...common, kind: "tool_calls", text: "", calls: [{ id: "t2", name: "gmail_draft_delete", input: { ref } }] }];
+    const path = await ask("Actually, delete that draft");
+    const card = confirmsOf(path)[0];
+    expect(card).toMatchObject({ kind: "draft-delete", label: "To sam@example.com: “Running late”" });
+    expect(discarded).toEqual([]); // nothing until his OK
+    expect(await decide(card?.id, "no")).toEqual({ ok: true, text: "Okay, I kept the draft “Running late”." });
+    expect(discarded).toEqual([]);
+
+    script = [{ ...common, kind: "tool_calls", text: "", calls: [{ id: "t3", name: "gmail_draft_delete", input: { ref } }] }];
+    const again = confirmsOf(await ask("No, really, delete it"))[0];
+    expect(await decide(again?.id, "yes")).toEqual({ ok: true, text: "Deleted the draft “Running late”.", tool: "gmail_draft_delete personal → deleted" });
+    expect(discarded).toEqual(["d1"]);
+    expect(await decide(again?.id, "yes")).toMatchObject({ ok: false }); // single use
+
+    // Once deleted, the ref is gone; a made-up one never reaches Gmail.
+    script = [{ ...common, kind: "tool_calls", text: "", calls: [{ id: "t4", name: "gmail_draft_delete", input: { ref } }] }];
+    const gone = await ask("Delete it again");
+    expect(gone.find((s) => s.kind === "tool")).toMatchObject({ ok: false, error: "refused: unknown draft" });
+    script = [{ ...common, kind: "tool_calls", text: "", calls: [{ id: "t5", name: "gmail_draft_delete", input: { ref: "zz" } }] }];
+    expect((await ask("Delete draft zz")).find((s) => s.kind === "tool")).toMatchObject({ ok: false, error: "refused: not a draft ref" });
+    expect(discarded).toEqual(["d1"]);
+  });
+});

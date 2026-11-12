@@ -180,7 +180,7 @@ const refreshReach = async () => {
 };
 
 /** Cards still waiting for an OK, counted per node for the badges (#133). */
-const NODE_OF_CARD = { calendar: "calendar", email: "gmail", skill: "skills" };
+const NODE_OF_CARD = { calendar: "calendar", email: "gmail", "draft-delete": "gmail", skill: "skills" };
 const refreshPending = () => {
   /** @type {Record<string, number>} */
   const counts = {};
@@ -238,13 +238,14 @@ const CARDS = {
   calendar: { ask: (/** @type {string} */ l) => `Add to your calendar: ${l}?`, yes: "Add it", no: "Don't add", endpoint: "/calendar/confirm", failed: "nothing was added" },
   skill: { ask: (/** @type {string} */ l) => `New skill: ${l}. Approve it?`, yes: "Approve skill", no: "Not now", endpoint: "/skills/decide", failed: "nothing changed" },
   email: { ask: (/** @type {string} */ l) => `Draft saved. ${l}. Send it?`, yes: "Send it", no: "Keep as draft", endpoint: "/gmail/send", failed: "nothing was sent" },
+  "draft-delete": { ask: (/** @type {string} */ l) => `Delete the draft ${l}?`, yes: "Delete it", no: "Keep it", endpoint: "/gmail/delete", failed: "nothing was deleted" },
 };
 
 /**
  * A card for something waiting for Renato's OK: a calendar event (Reach 2), a
  * skill (#116) or an email draft (#120). Only the first button acts; the reply
  * is worded by code and goes into the history with what really ran.
- * @param {{ id: string, label: string, kind?: "calendar" | "skill" | "email" }} proposal
+ * @param {{ id: string, label: string, kind?: "calendar" | "skill" | "email" | "draft-delete" }} proposal
  */
 const confirmCard = (proposal) => {
   const kind = proposal.kind ?? "calendar";

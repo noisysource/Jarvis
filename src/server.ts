@@ -323,6 +323,25 @@ export const makeServer = (
     );
   }
 
+  // #124: his answer to deleting a draft Jarvis wrote. Only "yes" deletes it.
+  const del = deps.gmailDelete;
+  if (del) {
+    const DeleteBody = z.object({ id: z.string().regex(/^[a-f0-9]{8,64}$/), decision: z.enum(["yes", "no"]) }).strict();
+    app.post(
+      "/gmail/delete",
+      async (c, next) => {
+        if (!isJson(c.req.header("content-type"))) return c.json(errorBody("POST /gmail/delete needs Content-Type: application/json."), 415);
+        await next();
+      },
+      bodyLimit({ maxSize: 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }),
+      async (c) => {
+        const body = DeleteBody.safeParse(await c.req.json().catch(() => undefined));
+        if (!body.success) return c.json(errorBody('Send { id, decision: "yes" | "no" }.'), 400);
+        return c.json(await del(body.data.id, body.data.decision));
+      },
+    );
+  }
+
   // Reach 2: Renato's answer to a proposed calendar event. Only "yes" creates it.
   const confirm = deps.calendarConfirm;
   if (confirm) {

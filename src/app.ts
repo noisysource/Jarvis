@@ -11,7 +11,7 @@ import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate, type CalendarError } from "./calendar/read.js";
 import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type CalendarReaders } from "./calendar/accounts.js";
 import { makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
-import { makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
+import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
 import { makeClassifier } from "./classify.js";
 import type { Config, Env } from "./config.js";
@@ -182,7 +182,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     return made();
   };
   // #120 (GMAIL_WRITE=on): drafts are saved in Gmail; sending waits for "Send it".
-  const drafts = config.gmail.write ? { write: inputs.gmailWriter ?? makeGmailWriter({ accessToken: gmailToken }), pending: makePendingDrafts() } : undefined;
+  const drafts = config.gmail.write
+    ? { write: inputs.gmailWriter ?? makeGmailWriter({ accessToken: gmailToken }), pending: makePendingDrafts(), book: makeDraftBook(), deletions: makePendingDrafts() }
+    : undefined;
   const gmail = config.gmail.enabled
     ? { reader: inputs.gmailReader ?? makeGmailReader({ accessToken: gmailToken }), isEc: isEcText, ...(drafts ? { writer: drafts } : {}) }
     : undefined;
@@ -209,6 +211,33 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         return { ok: true, text: `Sent “${draft.subject}” to ${draft.to.join(", ")}.`, tool: `gmail_send ${draft.account} → sent` };
       }
     : undefined;
+  // #124: his answer to "delete this draft?". Only "yes" deletes, and only a draft Jarvis wrote.
+  const discard = drafts?.write.discard;
+  const gmailDelete =
+    drafts && discard
+      ? async (id: string, decision: "yes" | "no") => {
+          const draft = drafts.deletions.take(id);
+          if (!draft) return { ok: false, text: "That card has expired or was already answered. The draft is still in your Gmail Drafts if you want to delete it there." };
+          if (decision === "no") {
+            log.info("gmail draft delete", { outcome: "kept" });
+            return { ok: true, text: `Okay, I kept the draft “${draft.subject}”.` };
+          }
+          const done = await discard(draft.account, draft.draftId);
+          if (!done.ok) {
+            log.warn("gmail draft delete failed", { code: done.error.code, reason: done.error.message });
+            return {
+              ok: false,
+              text:
+                done.error.code === "auth"
+                  ? `I couldn't delete it: Gmail didn't allow it. Connect ${draft.account} again with write access (GMAIL_WRITE=on npm run gmail:connect -- ${draft.account}), then restart Jarvis.`
+                  : `I couldn't delete it: ${done.error.message}.`,
+            };
+          }
+          if (draft.ref) drafts.book.remove(draft.ref);
+          log.info("gmail draft delete", { outcome: "deleted" });
+          return { ok: true, text: `Deleted the draft “${draft.subject}”.`, tool: `gmail_draft_delete ${draft.account} → deleted` };
+        }
+      : undefined;
   const calendarReader = (account: CalendarAccount) =>
     makeGoogleCalendarReader({
       accessToken: () => calendarToken(account),
@@ -291,6 +320,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
     ...(gmailSend ? { gmailSend } : {}),
+    ...(gmailDelete ? { gmailDelete } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
