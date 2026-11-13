@@ -54,6 +54,13 @@ import { historyMessages, profileName } from "./personal.js";
 
 const BARE_MAX_TOKENS = 2000;
 
+/**
+ * #157: how much of a round's text is held back while tools are on offer,
+ * in characters. Narration before a tool call is a short sentence or two;
+ * an answer is longer and streams once it passes this.
+ */
+export const NARRATION_HOLD = 160;
+
 /** Native tool calling (#104): at most this many rounds of tool calls in one answer. */
 export const MAX_TOOL_ROUNDS = 5;
 
@@ -1067,22 +1074,47 @@ export const makeBareAnswerer = (deps: {
       // The last round gets no tools, so it has to answer.
       const last = round >= MAX_TOOL_ROUNDS;
       const roundRequest: LlmRequest = { ...request, messages, ...(last ? { tools: undefined } : {}) };
+      // #157: with tools on offer, the start of a round's text is held back. A
+      // round that ends in tool calls was the brain narrating ("I'll check my
+      // notes first"), and what it held is dropped; an answer runs past the
+      // hold and streams as usual. `shown`: this round's text that went out.
+      let held = "";
+      let holding = (roundRequest.tools?.length ?? 0) > 0;
+      let shown = "";
+      const out = (text: string): boolean => {
+        shown += text;
+        return pass(strip ? strip.feed(text) : text);
+      };
       if (onText || cap) {
         const streamed = streamOrCall(deps.llm, roundRequest, controller.signal);
         for await (const delta of streamed.text) {
-          if (pass(strip ? strip.feed(delta) : delta)) {
+          if (holding) {
+            held += delta;
+            if (held.length < NARRATION_HOLD) continue;
+            holding = false;
+            if (out(held)) {
+              cut = true;
+              controller.abort();
+              break;
+            }
+            continue;
+          }
+          if (out(delta)) {
             cut = true;
             controller.abort();
             break;
           }
         }
         result = await streamed.result;
+        // The round is over and it's an answer: what was held goes out now.
+        if (!cut && holding && held !== "" && result.ok && result.value.kind !== "tool_calls" && out(held)) cut = true;
       } else {
         result = await deps.llm(roundRequest);
       }
       if (cut || !result.ok || result.value.kind !== "tool_calls" || last) break;
       const response: LlmResponse & { readonly kind: "tool_calls" } = result.value;
-      if (response.text !== "") earlier.push(response.text);
+      // Only what was already shown stays in the answer; held narration is gone.
+      if (onText || cap ? shown.trim() !== "" : response.text.length >= NARRATION_HOLD) earlier.push(onText || cap ? shown : response.text);
       const results: LlmToolResult[] = [];
       for (const call of response.calls) results.push(await runTool(call));
       if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });

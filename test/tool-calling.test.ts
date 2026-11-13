@@ -2,7 +2,7 @@
 // when to call calendar_read; code checks every call, reads, and reports it.
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { barePrompt, makeBareAnswerer, MAX_TOOL_ROUNDS, toolsSoFar } from "../src/answer/bare.js";
+import { barePrompt, makeBareAnswerer, MAX_TOOL_ROUNDS, NARRATION_HOLD, toolsSoFar } from "../src/answer/bare.js";
 import { calendarIntent } from "../src/calendar/intent.js";
 import { parseAskRequest } from "../src/request.js";
 import { appendTurn, toolsRan } from "../src/web/chat.js";
@@ -207,6 +207,45 @@ describe("native tool calling (#104)", () => {
     const result = await answerer(llm, googleWith(events).read)({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, onText: (d) => deltas.push(d) });
     expect(deltas).toEqual(["You've got the dentist at eleven."]);
     expect(result).toEqual(ok({ kind: "answer", text: "You've got the dentist at eleven." }));
+  });
+
+  describe("no narration before tool calls (#157)", () => {
+    const narrated = "I'll check your calendar first.";
+    const ask = (llm: LlmCall, deltas?: string[]) =>
+      answerer(llm, googleWith(events).read)({ context: personal, question: "What's on tomorrow?", history: [], memories: [], now: NOW, ...(deltas ? { onText: (d: string) => deltas.push(d) } : {}) });
+
+    it("streamed: what the brain says before calling a tool is never shown or kept", async () => {
+      const { llm } = scripted([calls(narrated, read("t1", "2026-11-11", "2026-11-11")), text("You've got the dentist at eleven.")], { stream: true });
+      const deltas: string[] = [];
+      const result = await ask(llm, deltas);
+      expect(deltas.join("")).toBe("You've got the dentist at eleven.");
+      expect(result).toEqual(ok({ kind: "answer", text: "You've got the dentist at eleven." }));
+    });
+
+    it("not streamed: the same", async () => {
+      const { llm } = scripted([calls(narrated, read("t1", "2026-11-11", "2026-11-11")), text("You've got the dentist at eleven.")]);
+      expect(await ask(llm)).toEqual(ok({ kind: "answer", text: "You've got the dentist at eleven." }));
+    });
+
+    it("a short answer with no tool call still comes through, whole", async () => {
+      const { llm } = scripted([text("Morning!")], { stream: true });
+      const deltas: string[] = [];
+      expect(await ask(llm, deltas)).toEqual(ok({ kind: "answer", text: "Morning!" }));
+      expect(deltas.join("")).toBe("Morning!");
+    });
+
+    it("a long answer streams once it's past the hold, in order, nothing lost", async () => {
+      const long = `${"Your Tuesday is busy. ".repeat(12)}That's all.`;
+      expect(long.length).toBeGreaterThan(NARRATION_HOLD);
+      const pieces = long.match(/.{1,25}/gs) ?? [];
+      const response: LlmResponse = { ...common, kind: "text", text: long };
+      const llm: LlmCall = Object.assign(async () => ok(response), { stream: () => streamedFrom(pieces, ok(response)) });
+      const deltas: string[] = [];
+      const result = await ask(llm, deltas);
+      expect(deltas.join("")).toBe(long);
+      expect(deltas.length).toBeGreaterThan(2); // still streamed, not one lump
+      expect(result).toEqual(ok({ kind: "answer", text: long }));
+    });
   });
 
   it("\"did you check?\" goes to the brain, with the record of what really ran", async () => {
