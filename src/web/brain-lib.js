@@ -5,20 +5,21 @@
 // answer's path): nothing is drawn for show.
 
 /** @typedef {import("./chat.js").PathStep} PathStep */
-/** @typedef {"profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "code" | "kiro"} NodeId */
+/** @typedef {"profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "cloud" | "code" | "kiro"} NodeId */
 /** @typedef {"reaching" | "used" | "waiting" | "failed" | "handoff"} Reach */
 /** @typedef {"idle" | "off" | "soon" | "kiro"} Rest */
 
 /** Around the core, clockwise from the top. `soon`: not connected yet. */
 export const NODES = /** @type {const} */ ([
   { id: "profile", label: "Profile", angle: -90, rest: "idle" },
-  { id: "memory", label: "Memory", angle: -45, rest: "idle" },
-  { id: "skills", label: "Skills", angle: 0, rest: "idle" },
-  { id: "calendar", label: "Calendar", angle: 45, rest: "idle" },
-  { id: "gmail", label: "Gmail", angle: 90, rest: "idle" },
-  { id: "github", label: "GitHub", angle: 135, rest: "soon" },
-  { id: "code", label: "Code agent", angle: 180, rest: "soon" },
-  { id: "kiro", label: "Kiro", angle: 225, rest: "kiro" },
+  { id: "memory", label: "Memory", angle: -50, rest: "idle" },
+  { id: "skills", label: "Skills", angle: -10, rest: "idle" },
+  { id: "calendar", label: "Calendar", angle: 30, rest: "idle" },
+  { id: "gmail", label: "Gmail", angle: 70, rest: "idle" },
+  { id: "github", label: "GitHub", angle: 110, rest: "soon" },
+  { id: "cloud", label: "Google Cloud", angle: 150, rest: "soon" },
+  { id: "code", label: "Code agent", angle: 190, rest: "soon" },
+  { id: "kiro", label: "Kiro", angle: 230, rest: "kiro" },
 ]);
 
 /**
@@ -32,6 +33,7 @@ export const nodeOfTool = (tool) => {
   if (tool.startsWith("memory_")) return "memory";
   if (tool.startsWith("skill_")) return "skills";
   if (tool.startsWith("github_")) return "github";
+  if (tool.startsWith("gcloud_")) return "cloud";
   if (tool.startsWith("code_")) return "code";
   return undefined;
 };
@@ -178,6 +180,8 @@ export const restOf = (id, status) => (id === "kiro" ? "kiro" : status === "soon
 export const connectCommand = (node, account) =>
   node === "github"
     ? `npm run github:connect -- ${account}`
+    : node === "cloud"
+      ? `npm run gcloud:connect -- ${account.split(" · ")[0]} <key.json>`
     : node === "gmail"
       ? `npm run gmail:connect -- ${account}`
       : account === "personal"

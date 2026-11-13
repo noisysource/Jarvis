@@ -16,6 +16,7 @@ import { makeClaudeCodeAgent } from "./code/claude-code.js";
 import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
 import { makeNoteStore, makeStudies, mapViews, type NoteFiles } from "./code/study.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
+import { makeGcloudKeys, makeGcloudReader, type GcloudReader } from "./gcloud/gcloud.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
@@ -66,6 +67,7 @@ export type AppInputs = {
   readonly gmailWriter?: GmailWriter;
   /** Tests: a GitHub reader instead of the real one (#125). */
   readonly githubReader?: GithubReader;
+  readonly gcloudReader?: GcloudReader;
   /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
   readonly codeAgent?: CodeAgent;
   readonly repoCopies?: RepoCopies;
@@ -263,6 +265,9 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   // #125: GitHub, read-only, one fine-grained token per owner in data/github-tokens.json (mode 600).
   const githubTokens = makeGithubTokens({ readFile: () => readFileFs(config.github.tokensPath, "utf8") });
   const github = config.github.enabled ? { reader: inputs.githubReader ?? makeGithubReader({ tokens: githubTokens }), isEc: isEcText } : undefined;
+  // #161: Google Cloud, read-only (logs), one service account key per environment in data/gcloud/ (mode 600).
+  const gcloudKeys = makeGcloudKeys({ list: () => readdir(config.gcloud.keysPath), read: (env) => readFileFs(path.join(config.gcloud.keysPath, `${env}.json`), "utf8") });
+  const gcloud = config.gcloud.enabled ? { reader: inputs.gcloudReader ?? makeGcloudReader({ keys: gcloudKeys }) } : undefined;
   // #127: what he's learned from studying repos: one note per repo or app, local, readable only by him.
   const noteStore = makeNoteStore(
     inputs.noteFiles ?? {
@@ -305,6 +310,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       ? { calendar: await Promise.all(CALENDAR_ACCOUNTS.map(async (name) => ({ name, connected: await fileExists(calendarTokensPath(config.calendar.tokensPath, name)) }))) }
       : {}),
     ...(config.gmail.enabled ? { gmail: await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await fileExists(config.gmail.tokensPath(name)) }))) } : {}),
+    ...(gcloud ? { cloud: (await gcloud.reader.envs().catch(() => [])).map((e) => e.env) } : {}),
   });
   const calendarReader = (account: CalendarAccount) =>
     makeGoogleCalendarReader({
@@ -383,6 +389,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         config,
         exists: fileExists,
         githubOwners: githubTokens.owners,
+        cloudEnvs: gcloudKeys.envs,
         studied: async () => ({ notes: await noteStore.all(), active: studies?.active() ?? [] }),
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
@@ -415,6 +422,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               // #125: his GitHub repos, read-only, with tools (Claude).
               ...(github && config.toolCalling ? { github } : {}),
               ...(code && config.toolCalling ? { code } : {}),
+              // #161: errors and logs in his Google Cloud environments, read-only, with tools (Claude).
+              ...(gcloud && config.toolCalling ? { gcloud } : {}),
               // Tests give their own calendar reader: no token files to check then.
               ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
               log,

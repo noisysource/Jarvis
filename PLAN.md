@@ -936,7 +936,7 @@ Confirmed for M0 (2026-11-06):
 Confirmed for the page (2026-11-11):
 
 - **Brain view (#130–#134):** the page shows Jarvis as a core with nodes
-  around it (Profile, Memory, Skills, Calendar, Gmail, GitHub, Code agent,
+  around it (Profile, Memory, Skills, Calendar, Gmail, GitHub, Google Cloud, Code agent,
   Kiro). A line goes to a node only when a real path step reaches it (live
   `reach`/`step` events, then the final path): blue while reaching and when
   used, amber while an action waits for Renato's OK, red and short when it
@@ -950,6 +950,16 @@ Confirmed (2026-11-12):
   separate Google accounts, each connected on its own. A read covers every
   connected account unless the brain names one; an account that can't be
   read is reported, never treated as an empty calendar.
+
+- **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
+  logs, read-only, from Cloud Logging. One service account key per
+  environment in `data/gcloud/<env>.json` (local, mode 600); access grows
+  by connecting environments, dev first, prod last. The token is asked
+  with the `logging.read` scope only; the filter is built in code from
+  checked values; email addresses are masked. Two tools: `gcloud_errors`
+  (grouped) and `gcloud_logs`. Firestore and other data stay out for now.
+  The fix loop (code agent proposes, PR after his OK) is #162; the code
+  agent never gets cloud credentials.
 
 - **GitHub (#125):** read-only, GET only, through fine-grained read-only
   tokens, one per owner, in `data/github-tokens.json` (local, mode 600).

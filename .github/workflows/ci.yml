@@ -43,8 +43,8 @@ jobs:
 
       - name: Google tokens are not committed
         run: |
-          if git ls-files 'data/google-tokens.json' 'data/google-oauth-client.json' 'data/google-gmail-*.json' 'data/google-calendar-*.json' 'data/github-tokens.json' | grep -q .; then
-            echo "::error::Token files (data/google-*.json, data/github-tokens.json) hold secrets and must not be committed. Remove them with 'git rm --cached'."
+          if git ls-files 'data/google-tokens.json' 'data/google-oauth-client.json' 'data/google-gmail-*.json' 'data/google-calendar-*.json' 'data/github-tokens.json' 'data/gcloud/*' | grep -q .; then
+            echo "::error::Token files (data/google-*.json, data/github-tokens.json, data/gcloud/) hold secrets and must not be committed. Remove them with 'git rm --cached'."
             exit 1
           fi
 
