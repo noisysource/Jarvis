@@ -170,6 +170,7 @@ const brainView = makeBrainView(byId("brain-view"), {
 
 // #158: the maps of the code he's studied.
 const codeMapView = makeCodeMapView(/** @type {HTMLDialogElement} */ (byId("codemap")));
+byId("codemaps").addEventListener("click", () => void codeMapView.open());
 
 // #143: how he got there, for the current answer, as a tree that grows while he works.
 const traceView = makeTraceView(brainView.traceSlot);
