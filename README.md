@@ -382,6 +382,16 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        restart. Ask "what's open on Jarvis?" or "is CI green on KidClub?".
        Jarvis only reads (GET calls); repos that look like EC work show only
        as "EC repo, handled by Kiro".
+     - **Code agent (`CODE_AGENT=on`, with `GITHUB=on`, ☁️ Claude).** For
+       questions that need the code itself ("how does memory expire in
+       Jarvis?"), Jarvis asks Claude Code. It reads a shallow local copy of
+       the repo in `data/repos/` (gitignored; cloned with your read-only
+       token, which stays out of the URL and `.git/config`) and can only
+       read and search inside it: no edits, no commands, no network, and the
+       repo's own Claude settings and hooks aren't loaded. Each question is
+       capped by `CODE_AGENT_MAX_USD` (default 0.50) and
+       `CODE_AGENT_MAX_TURNS` (default 25); the cost shows on the path and
+       the trace. It uses your Anthropic API key.
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

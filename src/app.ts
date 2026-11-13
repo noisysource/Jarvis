@@ -2,6 +2,7 @@
 // server (#15) and the end-to-end tests. Refuses to start (returns an error)
 // if contexts.md, the profile or the API key is missing or invalid.
 
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
@@ -10,6 +11,9 @@ import { makeGoogleCalendarReader, type CalendarReader } from "./calendar/google
 import { makeAccessTokens } from "./calendar/oauth.js";
 import { isEcEvent, localDate, type CalendarError } from "./calendar/read.js";
 import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type CalendarReaders } from "./calendar/accounts.js";
+import type { CodeAgent } from "./code/agent.js";
+import { makeClaudeCodeAgent } from "./code/claude-code.js";
+import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
@@ -60,6 +64,9 @@ export type AppInputs = {
   readonly gmailWriter?: GmailWriter;
   /** Tests: a GitHub reader instead of the real one (#125). */
   readonly githubReader?: GithubReader;
+  /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
+  readonly codeAgent?: CodeAgent;
+  readonly repoCopies?: RepoCopies;
   /** Tests: reads email instead of Gmail (Reach 3). */
   readonly gmailReader?: GmailReader;
 };
@@ -83,6 +90,14 @@ export const capabilitiesText = (contexts: readonly Context[], answered: Readonl
     "- General questions and conversation.",
     "You can type or speak, and answers are read aloud in English or Portuguese.",
   ].join("\n");
+
+/** Runs one command (git, #126) without a shell; output is ignored, only the exit code counts. */
+const runCommand: Run = (cmd, args, options) =>
+  new Promise((resolve) => {
+    execFile(cmd, [...args], { ...(options.cwd ? { cwd: options.cwd } : {}), env: options.env, timeout: 5 * 60_000, maxBuffer: 1024 * 1024 }, (error) =>
+      resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 }),
+    );
+  });
 
 export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>> => {
   const { config, env, log } = inputs;
@@ -244,6 +259,18 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   // #125: GitHub, read-only, one fine-grained token per owner in data/github-tokens.json (mode 600).
   const githubTokens = makeGithubTokens({ readFile: () => readFileFs(config.github.tokensPath, "utf8") });
   const github = config.github.enabled ? { reader: inputs.githubReader ?? makeGithubReader({ tokens: githubTokens }), isEc: isEcText } : undefined;
+  // #126: a code agent (Claude Code, read-only) on local copies of the repos GitHub reaches.
+  const code =
+    github && config.codeAgent.enabled
+      ? {
+          agent: inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key }),
+          copies: inputs.repoCopies ?? makeRepoCopies({ root: config.codeAgent.reposPath, token: githubTokens.token, run: runCommand }),
+          owners: githubTokens.owners,
+          isEc: isEcText,
+          maxUsd: config.codeAgent.maxUsd,
+          maxTurns: config.codeAgent.maxTurns,
+        }
+      : undefined;
   // #146: which accounts are connected, checked each turn (does the token file exist), for the brain's prompt.
   const fileExists = (path: string) =>
     access(path).then(
@@ -362,6 +389,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(skillStore && config.toolCalling ? { skills: { store: skillStore, ec: memoryEc } } : {}),
               // #125: his GitHub repos, read-only, with tools (Claude).
               ...(github && config.toolCalling ? { github } : {}),
+              ...(code && config.toolCalling ? { code } : {}),
               // Tests give their own calendar reader: no token files to check then.
               ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
               log,
