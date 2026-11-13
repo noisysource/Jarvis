@@ -95,6 +95,38 @@ describe("the GitHub reader", () => {
     expect(checksSummary(checks.ok ? checks.value.checks : [])).toBe("1 failing");
   });
 
+  it("when check runs are forbidden (#160), reads the same CI from the Actions workflow runs", async () => {
+    replies["/repos/noisysource/noisysource$"] = { default_branch: "main" };
+    replies["/repos/noisysource/noisysource/commits/main/check-runs"] = 403;
+    replies["/repos/noisysource/noisysource/actions/runs?branch=main"] = {
+      workflow_runs: [
+        { name: "CI", head_sha: "abc", status: "completed", conclusion: "failure" },
+        { name: "Deploy", head_sha: "abc", status: "in_progress", conclusion: null },
+        { name: "CI", head_sha: "abc", status: "completed", conclusion: "success" },
+        { name: "CI", head_sha: "old", status: "completed", conclusion: "success" },
+      ],
+    };
+    const checks = await reader.checks({ repo: { owner: "noisysource", name: "noisysource" } });
+    expect(checks).toEqual(
+      ok({
+        ref: "main",
+        checks: [
+          { name: "CI", status: "completed", conclusion: "failure" },
+          { name: "Deploy", status: "in_progress", conclusion: "" },
+        ],
+      }),
+    );
+    // A commit is looked up by its sha.
+    replies["/commits/0123abc/check-runs"] = 403;
+    replies["/actions/runs?head_sha=0123abc"] = { workflow_runs: [] };
+    expect(await reader.checks({ repo: { owner: "noisysource", name: "noisysource" }, ref: "0123abc" })).toEqual(ok({ ref: "0123abc", checks: [] }));
+    // Both refused: say which permission is missing.
+    replies["/commits/dev/check-runs"] = 403;
+    replies["/actions/runs?branch=dev"] = 403;
+    const refused = await reader.checks({ repo: { owner: "noisysource", name: "noisysource" }, ref: "dev" });
+    expect(!refused.ok && refused.error.message).toContain("Actions: Read-only");
+  });
+
   it("says plainly what went wrong, never with the token", async () => {
     const none = makeGithubReader({ tokens: makeGithubTokens({ readFile: async () => Promise.reject(new Error("ENOENT")) }), fetch: fake });
     const r = await none.repos();
