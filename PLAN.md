@@ -967,6 +967,10 @@ Confirmed (2026-11-12):
   the profile or the personal memory. Each note has prose plus a small map
   (nodes and edges) for the code maps. Questions read the note first
   (`code_notes`); `code_ask` covers the rest.
+- **Code maps (#158):** the page draws each study's map: columns by kind
+  (apps, modules, services, data, outside), lines for connections, pick a
+  part to see its links, path and one-line description. The page gets the
+  maps only (`GET /code/maps`), never the notes' text.
 - **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
   questions on his Claude plan (Claude Code's login on his Mac, no API key
   passed), falling back to the API key when there's no login. Guests never

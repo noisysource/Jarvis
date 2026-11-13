@@ -48,6 +48,12 @@ export type CodeNote = {
   readonly via?: "subscription" | "api-key";
 };
 
+/** A note's map as the page gets it (#158): the parts and connections, not the note's text. */
+export type CodeMapView = { readonly key: string; readonly repo: string; readonly folder: string; readonly studiedAt: string; readonly partial: boolean } & CodeMap;
+
+export const mapViews = (notes: readonly CodeNote[]): readonly CodeMapView[] =>
+  notes.map((n) => ({ key: noteKey(n.repo, n.folder), repo: n.repo, folder: n.folder, studiedAt: n.studiedAt, partial: n.partial, nodes: n.map.nodes, edges: n.map.edges }));
+
 export const noteKey = (repo: string, folder: string): string => `${repo}${folder ? `:${folder}` : ""}`;
 
 /** What the agent is asked for a study. `folder`: one app's folder in a monorepo. */

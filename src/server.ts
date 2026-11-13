@@ -348,6 +348,15 @@ export const makeServer = (
     );
   }
 
+  // #158: the code maps from his studies.
+  const codeMaps = deps.codeMaps;
+  if (codeMaps) {
+    app.get("/code/maps", async (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({ maps: await codeMaps() });
+    });
+  }
+
   // #124: his answer to deleting a draft Jarvis wrote. Only "yes" deletes it.
   const del = deps.gmailDelete;
   if (del) {

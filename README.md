@@ -403,6 +403,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        free); `code_ask` is only for what the note doesn't cover. The Code
        agent panel lists what's studied and what's under way.
 
+       **Code maps (#158):** each studied repo or app has a map. Open it
+       from the Code agent panel ("Map" next to a studied item, or "Open
+       code maps"): its parts in columns (apps, modules, services, data,
+       outside APIs) with lines for how they connect. Pick a part to light
+       up its connections and read what it is and where it lives. A
+       monorepo's own map is the overview of its apps.
+
        **Which account pays (`CODE_AGENT_AUTH`, #150):** `auto` (default)
        runs on your **Claude plan** when Claude Code is signed in on this Mac
        (`claude`, then `/login` with your Claude account), and on the API key

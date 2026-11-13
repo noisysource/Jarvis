@@ -1472,3 +1472,200 @@ li[data-status="waiting"] > .t-leaf .t-result {
   justify-content: space-between;
   gap: 0.1rem 0.75rem;
 }
+
+/* ---- code maps (#158) ---- */
+
+.brain-panel-map {
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  font-size: 0.78rem;
+}
+
+.codemap {
+  width: min(96vw, 80rem);
+  max-height: 92vh;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.codemap[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.codemap::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.codemap-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.codemap-head h2 {
+  margin: 0;
+  flex: 1 1 12rem;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.codemap-head select,
+.codemap-head button {
+  min-height: 2.75rem;
+}
+
+.codemap-note,
+.codemap-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.codemap-scroll {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+
+.codemap-canvas {
+  position: relative;
+}
+
+.codemap-canvas svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.codemap-canvas path {
+  fill: none;
+  stroke: var(--reach);
+  stroke-width: 1.5;
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+
+.codemap-canvas path.on {
+  opacity: 1;
+  stroke-width: 2.5;
+}
+
+.codemap-canvas path.off {
+  opacity: 0.07;
+}
+
+.codemap-col {
+  position: absolute;
+  top: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.codemap-node {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0 0.6rem;
+  border: 1.5px solid var(--quiet);
+  border-radius: 0.55rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: opacity 0.2s, border-color 0.2s;
+}
+
+/* Kinds differ by shape and weight as well as position, not by colour alone. */
+.codemap-node[data-kind="app"] {
+  border-color: var(--reach);
+  border-width: 2px;
+  font-weight: 600;
+}
+
+.codemap-node[data-kind="data"] {
+  border-radius: 1.1rem;
+}
+
+.codemap-node[data-kind="external"] {
+  border-style: dashed;
+}
+
+.codemap-node[data-lit="no"] {
+  opacity: 0.3;
+}
+
+.codemap-node[aria-pressed="true"] {
+  border-color: var(--reach);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--reach) 30%, transparent);
+}
+
+.codemap-node:focus-visible {
+  outline: 2px solid var(--reach);
+  outline-offset: 2px;
+}
+
+.codemap-detail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  min-height: 3rem;
+}
+
+.codemap-detail p {
+  margin: 0;
+}
+
+.codemap-detail-top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.codemap-kind {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  color: var(--muted);
+}
+
+.codemap-path {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.codemap-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.codemap-links li {
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}

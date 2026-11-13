@@ -4,6 +4,7 @@
 // lives in this page's memory only; reload or "New conversation" clears it.
 
 import { makeBrainView } from "./brain.js";
+import { makeCodeMapView } from "./codemap.js";
 import { makeStudiesView } from "./studies.js";
 import { makeTraceView } from "./trace.js";
 import {
@@ -162,8 +163,13 @@ const brainView = makeBrainView(byId("brain-view"), {
   open: {
     memory: { label: "Open memories", run: () => void openMemories() },
     skills: { label: "Open skills", run: () => void openSkills() },
+    code: { label: "Open code maps", run: () => void codeMapView.open() },
   },
+  onMap: (key) => void codeMapView.open(key),
 });
+
+// #158: the maps of the code he's studied.
+const codeMapView = makeCodeMapView(/** @type {HTMLDialogElement} */ (byId("codemap")));
 
 // #143: how he got there, for the current answer, as a tree that grows while he works.
 const traceView = makeTraceView(brainView.traceSlot);
