@@ -140,7 +140,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
         { name: "gcloud_logs", does: "recent log entries" },
       ],
       accounts: cloudEnvs.map((e) => ({ name: `${e.env} · ${e.project}`, connected: true })),
-      ...(config.gcloud.enabled ? (cloudEnvs.length === 0 ? { hint: "npm run gcloud:connect -- dev <key.json>" } : {}) : { hint: "GCLOUD=on in .env" }),
+      ...(config.gcloud.enabled ? (cloudEnvs.length === 0 ? { hint: "npm run gcloud:connect -- dev <project-id>" } : {}) : { hint: "GCLOUD=on in .env" }),
     },
     {
       id: "code",

@@ -373,17 +373,19 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        at Noisy Source?". Jarvis can't send, delete or label; EC email shows
        only as "EC email, handled by Kiro".
      - **Google Cloud (`GCLOUD=on`, ☁️ Claude), read-only.** Errors and
-       logs in your environments, one at a time (start with dev). In that
-       environment's project create a service account `jarvis-read` with
-       one role, **Logs Viewer**, and download a JSON key. Then
-       `npm run gcloud:connect -- dev ~/Downloads/<key>.json` (it checks the
-       key with one read and keeps a copy in `data/gcloud/dev.json`,
-       gitignored, readable only by you), delete the download, put
-       `GCLOUD=on` in `.env` and restart. Ask "what's failing in dev?".
-       Jarvis only ever asks Google for a logging-read token, builds the
-       log filter himself, and masks email addresses before the brain sees
-       a line. He can't change, deploy or read databases. Add `staging` or
-       `prod` the same way when you want him to see them.
+       logs in your environments, one at a time (start with dev). No key
+       file (the organisation blocks service account keys): in that
+       environment's project there is a service account `jarvis-read` with
+       one role, **Logs Viewer**, and your own Google account has
+       **Service Account Token Creator** on it. With `gcloud` installed and
+       signed in, run `npm run gcloud:connect -- dev <project-id>` (it
+       checks with one read and writes `data/gcloud/dev.json`: names only),
+       put `GCLOUD=on` in `.env` and restart. Ask "what's failing in dev?".
+       Jarvis asks `gcloud` for a 30-minute token of `jarvis-read`, never
+       your own login; builds the log filter himself; counts `console.error`
+       output as errors (it arrives without a severity); and masks email
+       addresses before the brain sees a line. He can't change, deploy or
+       read databases. Add `staging` or `prod` the same way later.
      - **GitHub (`GITHUB=on`, ☁️ Claude), read-only.** Your repos: files,
        folders, issues, PRs and CI. Create a **fine-grained token** per owner
        (your account, the `noisysource` org): Repository access *All*, and

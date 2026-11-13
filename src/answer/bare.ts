@@ -202,7 +202,7 @@ export const connectedLine = (c: Connected): string | undefined => {
     const off = accounts.filter((a) => !a.connected).map((a) => a.name);
     return `${what}: ${on.length > 0 ? on.join(" and ") : "none"} connected${off.length > 0 ? `; ${off.join(" and ")} not connected` : ""}`;
   };
-  const cloud = c.cloud === undefined ? undefined : `Google Cloud environments: ${c.cloud.length > 0 ? `${c.cloud.join(", ")} connected` : "none connected (npm run gcloud:connect -- dev <key.json>)"}`;
+  const cloud = c.cloud === undefined ? undefined : `Google Cloud environments: ${c.cloud.length > 0 ? `${c.cloud.join(", ")} connected` : "none connected (npm run gcloud:connect -- dev <project-id>)"}`;
   const parts = [part("Calendars", c.calendar), part("Gmail", c.gmail), cloud].filter((p): p is string => p !== undefined);
   return parts.length === 0
     ? undefined
@@ -834,7 +834,7 @@ export const makeBareAnswerer = (deps: {
       if (!checked.ok) {
         deps.log?.info("gcloud request refused", { tool: call.name, why: checked.error });
         onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: `refused: ${checked.error}` });
-        return { callId: call.id, content: `Refused: ${checked.error}. To connect one: npm run gcloud:connect -- <env> <key.json>. Say so plainly.`, isError: true };
+        return { callId: call.id, content: `Refused: ${checked.error}. To connect one: npm run gcloud:connect -- <env> <project-id>. Say so plainly.`, isError: true };
       }
       const r = checked.value;
       const args = `${r.env} · last ${r.hours} h${r.service ? ` · ${r.service}` : ""}${r.text ? " · text search" : ""}`;

@@ -16,7 +16,7 @@ import { makeClaudeCodeAgent } from "./code/claude-code.js";
 import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
 import { makeNoteStore, makeStudies, mapViews, type NoteFiles } from "./code/study.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
-import { makeGcloudKeys, makeGcloudReader, type GcloudReader } from "./gcloud/gcloud.js";
+import { makeGcloudCliToken, makeGcloudEnvs, makeGcloudReader, type GcloudReader } from "./gcloud/gcloud.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
@@ -265,9 +265,16 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   // #125: GitHub, read-only, one fine-grained token per owner in data/github-tokens.json (mode 600).
   const githubTokens = makeGithubTokens({ readFile: () => readFileFs(config.github.tokensPath, "utf8") });
   const github = config.github.enabled ? { reader: inputs.githubReader ?? makeGithubReader({ tokens: githubTokens }), isEc: isEcText } : undefined;
-  // #161: Google Cloud, read-only (logs), one service account key per environment in data/gcloud/ (mode 600).
-  const gcloudKeys = makeGcloudKeys({ list: () => readdir(config.gcloud.keysPath), read: (env) => readFileFs(path.join(config.gcloud.keysPath, `${env}.json`), "utf8") });
-  const gcloud = config.gcloud.enabled ? { reader: inputs.gcloudReader ?? makeGcloudReader({ keys: gcloudKeys }) } : undefined;
+  // #161: Google Cloud, read-only (logs): each environment is a project and a read-only service account
+  // named in data/gcloud/<env>.json. No key: gcloud on this Mac gives a short-lived token of that account.
+  const gcloudEnvs = makeGcloudEnvs({ list: () => readdir(config.gcloud.keysPath), read: (env) => readFileFs(path.join(config.gcloud.keysPath, `${env}.json`), "utf8") });
+  const gcloudRun = (cmd: string, args: readonly string[]) =>
+    new Promise<{ code: number; stdout: string; missing?: boolean }>((resolve) => {
+      execFile(cmd, [...args], { timeout: 60_000, maxBuffer: 64 * 1024 }, (error, stdout) =>
+        resolve({ code: error ? 1 : 0, stdout, ...(error && (error as NodeJS.ErrnoException).code === "ENOENT" ? { missing: true } : {}) }),
+      );
+    });
+  const gcloud = config.gcloud.enabled ? { reader: inputs.gcloudReader ?? makeGcloudReader({ envs: gcloudEnvs, token: makeGcloudCliToken(gcloudRun) }) } : undefined;
   // #127: what he's learned from studying repos: one note per repo or app, local, readable only by him.
   const noteStore = makeNoteStore(
     inputs.noteFiles ?? {
@@ -389,7 +396,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         config,
         exists: fileExists,
         githubOwners: githubTokens.owners,
-        cloudEnvs: gcloudKeys.envs,
+        cloudEnvs: gcloudEnvs.envs,
         studied: async () => ({ notes: await noteStore.all(), active: studies?.active() ?? [] }),
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),

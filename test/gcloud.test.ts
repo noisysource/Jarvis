@@ -14,22 +14,23 @@ import {
   groupErrors,
   logsFilter,
   logsForBrain,
-  makeGcloudKeys,
+  makeGcloudCliToken,
+  makeGcloudEnvs,
   makeGcloudReader,
   maskEmails,
-  parseKey,
-  tokenAssertion,
+  parseEnvFile,
   type GcloudReader,
   type LogEntry,
 } from "../src/gcloud/gcloud.js";
 
-const KEY = JSON.stringify({ type: "service_account", project_id: "kidclub-dev", client_email: "jarvis-read@kidclub-dev.iam.gserviceaccount.com", private_key: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n" });
+const ENV_FILE = JSON.stringify({ project: "kidclub-dev" });
+const SA = "jarvis-read@kidclub-dev.iam.gserviceaccount.com";
 const NOW = Date.parse("2026-11-13T16:00:00Z");
 
 describe("Google Cloud, read-only (#161): checking a request", () => {
   it("only a connected environment, with plain values", () => {
-    expect(checkLogsRequest({ env: "dev" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 24, severity: "ERROR" } });
-    expect(checkLogsRequest({ env: "DEV", hours: 9999, service: "api" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 168, severity: "ERROR", service: "api" } });
+    expect(checkLogsRequest({ env: "dev" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 24, severity: "ERROR", stderr: true } });
+    expect(checkLogsRequest({ env: "DEV", hours: 9999, service: "api" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 168, severity: "ERROR", stderr: true, service: "api" } });
     const prod = checkLogsRequest({ env: "prod" }, ["dev"], true);
     expect(!prod.ok && prod.error).toBe("no such environment (connected: dev)");
     const none = checkLogsRequest({ env: "dev" }, [], true);
@@ -39,7 +40,7 @@ describe("Google Cloud, read-only (#161): checking a request", () => {
   });
 
   it("errors ignore a severity or text; logs default to INFO", () => {
-    expect(checkLogsRequest({ env: "dev", severity: "DEFAULT", text: "x" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 24, severity: "ERROR" } });
+    expect(checkLogsRequest({ env: "dev", severity: "DEFAULT", text: "x" }, ["dev"], true)).toEqual({ ok: true, value: { env: "dev", hours: 24, severity: "ERROR", stderr: true } });
     expect(checkLogsRequest({ env: "dev", severity: "nope", text: "req-1" }, ["dev"], false)).toEqual({ ok: true, value: { env: "dev", hours: 24, severity: "INFO", text: "req-1" } });
   });
 
@@ -48,59 +49,69 @@ describe("Google Cloud, read-only (#161): checking a request", () => {
       'timestamp>="2026-11-13T14:00:00.000Z" AND severity>=ERROR AND (resource.labels.service_name="api" OR resource.labels.function_name="api" OR resource.labels.module_id="api") AND "say \\"hi\\" \\\\ bye"',
     );
     expect(logsFilter({ env: "dev", hours: 1, severity: "DEFAULT" }, new Date(NOW))).toBe('timestamp>="2026-11-13T15:00:00.000Z"');
+    // console.error arrives with no severity: errors also take what was written to stderr.
+    expect(logsFilter({ env: "dev", hours: 1, severity: "ERROR", stderr: true }, new Date(NOW))).toBe('timestamp>="2026-11-13T15:00:00.000Z" AND (severity>=ERROR OR log_id("run.googleapis.com/stderr"))');
   });
 });
 
-describe("Google Cloud keys", () => {
-  it("reads a service account key, and nothing else", () => {
-    expect(parseKey(KEY)).toEqual({ ok: true, value: expect.objectContaining({ projectId: "kidclub-dev" }) });
-    expect(parseKey("{}").ok).toBe(false);
-    expect(parseKey("nope").ok).toBe(false);
-    expect(parseKey(JSON.stringify({ type: "authorized_user" })).ok).toBe(false);
+describe("Google Cloud environments", () => {
+  it("an environment is a project and a read-only service account: names only", () => {
+    expect(parseEnvFile(ENV_FILE)).toEqual({ ok: true, value: { projectId: "kidclub-dev", serviceAccount: SA } });
+    expect(parseEnvFile(JSON.stringify({ project: "kidclub-dev", serviceAccount: "reader@kidclub-dev.iam.gserviceaccount.com" }))).toMatchObject({ value: { serviceAccount: "reader@kidclub-dev.iam.gserviceaccount.com" } });
+    expect(parseEnvFile("{}").ok).toBe(false);
+    expect(parseEnvFile("nope").ok).toBe(false);
+    expect(parseEnvFile(JSON.stringify({ project: "kidclub-dev", serviceAccount: "admin@noisysource.com" })).ok).toBe(false);
+    expect(parseEnvFile(JSON.stringify({ project: "x --flag" })).ok).toBe(false);
   });
 
-  it("lists the environments that have a valid key, with their project", async () => {
-    const keys = makeGcloudKeys({ list: async () => ["prod.json", "dev.json", "notes.txt", "Bad Name.json", "broken.json"], read: async (env) => (env === "broken" ? "{" : KEY) });
-    expect(await keys.envs()).toEqual([
+  it("lists the environments that have a valid file, with their project", async () => {
+    const envs = makeGcloudEnvs({ list: async () => ["prod.json", "dev.json", "notes.txt", "Bad Name.json", "broken.json"], read: async (env) => (env === "broken" ? "{" : ENV_FILE) });
+    expect(await envs.envs()).toEqual([
       { env: "dev", project: "kidclub-dev" },
       { env: "prod", project: "kidclub-dev" },
     ]);
-    expect(await makeGcloudKeys({ list: async () => Promise.reject(new Error("no folder")), read: async () => KEY }).envs()).toEqual([]);
+    expect(await makeGcloudEnvs({ list: async () => Promise.reject(new Error("no folder")), read: async () => ENV_FILE }).envs()).toEqual([]);
   });
 
-  it("asks only for the read-only logging scope", () => {
-    const key = parseKey(KEY);
-    if (!key.ok) throw new Error("key");
-    const [, claims, signature] = tokenAssertion(key.value, NOW, () => "sig").split(".");
-    expect(JSON.parse(Buffer.from(claims ?? "", "base64url").toString())).toEqual({
-      iss: "jarvis-read@kidclub-dev.iam.gserviceaccount.com",
-      scope: "https://www.googleapis.com/auth/logging.read",
-      aud: "https://oauth2.googleapis.com/token",
-      iat: NOW / 1000,
-      exp: NOW / 1000 + 3600,
+  it("asks gcloud for a short-lived token of the service account, never the user's own", async () => {
+    const ran: string[][] = [];
+    const token = makeGcloudCliToken(async (cmd, args) => {
+      ran.push([cmd, ...args]);
+      return { code: 0, stdout: "ya29.a0AfH6SMBxyzxyzxyzxyzxyz\n" };
     });
-    expect(signature).toBe("sig");
+    expect(await token(SA)).toEqual({ ok: true, value: "ya29.a0AfH6SMBxyzxyzxyzxyzxyz" });
+    expect(ran).toEqual([["gcloud", "auth", "print-access-token", `--impersonate-service-account=${SA}`, "--lifetime=1800", "--quiet"]]);
+    // Anything that isn't a service account never reaches the command line.
+    expect((await token("admin@noisysource.com")).ok).toBe(false);
+    expect(ran).toHaveLength(1);
+    const missing = await makeGcloudCliToken(async () => ({ code: 1, stdout: "", missing: true }))(SA);
+    expect(!missing.ok && missing.error.code).toBe("not_connected");
+    const refused = await makeGcloudCliToken(async () => ({ code: 1, stdout: "" }))(SA);
+    expect(!refused.ok && refused.error).toMatchObject({ code: "auth", message: expect.stringContaining("Service Account Token Creator") });
   });
 });
 
 describe("Google Cloud reader", () => {
   const setup = (logs: { status?: number; body?: unknown } = {}) => {
     const calls: { url: string; body: string; auth: string }[] = [];
+    const asked: string[] = [];
     const reader = makeGcloudReader({
-      keys: makeGcloudKeys({ list: async () => ["dev.json"], read: async (env) => (env === "dev" ? KEY : Promise.reject(new Error("no file"))) }),
+      envs: makeGcloudEnvs({ list: async () => ["dev.json"], read: async (env) => (env === "dev" ? ENV_FILE : Promise.reject(new Error("no file"))) }),
       now: () => NOW,
-      sign: () => "sig",
+      token: async (sa) => {
+        asked.push(sa);
+        return ok("tok");
+      },
       fetch: (async (url: string, init: RequestInit) => {
         calls.push({ url, body: String(init.body), auth: String((init.headers as Record<string, string>).authorization ?? "") });
-        if (url.includes("oauth2")) return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }));
         return new Response(JSON.stringify(logs.body ?? {}), { status: logs.status ?? 200 });
       }) as typeof fetch,
     });
-    return { reader, calls };
+    return { reader, calls, asked };
   };
 
   it("reads entries of the environment's project, and reuses the token", async () => {
-    const { reader, calls } = setup({
+    const { reader, calls, asked } = setup({
       body: {
         entries: [
           { timestamp: "2026-11-13T15:59:00Z", severity: "ERROR", resource: { type: "cloud_run_revision", labels: { service_name: "api" } }, jsonPayload: { message: "Booking failed for ana@example.com", stack: "Error: Booking failed\n  at save (booking.ts:10)" } },
@@ -121,19 +132,18 @@ describe("Google Cloud reader", () => {
         ],
       },
     });
-    expect(calls[1]?.url).toBe("https://logging.googleapis.com/v2/entries:list");
-    expect(calls[1]?.auth).toBe("Bearer tok");
-    expect(JSON.parse(calls[1]?.body ?? "{}")).toEqual(expect.objectContaining({ resourceNames: ["projects/kidclub-dev"], orderBy: "timestamp desc", pageSize: 200 }));
+    expect(calls[0]?.url).toBe("https://logging.googleapis.com/v2/entries:list");
+    expect(calls[0]?.auth).toBe("Bearer tok");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual(expect.objectContaining({ resourceNames: ["projects/kidclub-dev"], orderBy: "timestamp desc", pageSize: 200 }));
     await reader.entries({ env: "dev", hours: 24, severity: "ERROR" }, 200);
-    expect(calls.filter((c) => c.url.includes("oauth2"))).toHaveLength(1);
+    expect(asked).toEqual([SA]);
   });
 
-  it("says plainly what went wrong, never with the key", async () => {
+  it("says plainly what went wrong", async () => {
     const forbidden = await setup({ status: 403 }).reader.entries({ env: "dev", hours: 1, severity: "ERROR" }, 10);
-    expect(!forbidden.ok && forbidden.error).toEqual({ code: "forbidden", message: "The dev service account can't read logs: give it the Logs Viewer role in project kidclub-dev" });
+    expect(!forbidden.ok && forbidden.error).toEqual({ code: "forbidden", message: `${SA} can't read logs: give it the Logs Viewer role in project kidclub-dev` });
     const missing = await setup().reader.entries({ env: "prod", hours: 1, severity: "ERROR" }, 10);
     expect(!missing.ok && missing.error.code).toBe("not_connected");
-    expect(JSON.stringify([forbidden, missing])).not.toContain("PRIVATE KEY");
   });
 });
 
@@ -220,7 +230,7 @@ describe("Google Cloud around the page", () => {
   it("is its own node, with the environment as the trace target", () => {
     expect(nodeOfTool("gcloud_errors")).toBe("cloud");
     expect(targetOf("gcloud_errors", "dev · last 24 h")).toEqual({ target: "dev", detail: "last 24 h" });
-    expect(connectCommand("cloud", "dev · kidclub-dev")).toBe("npm run gcloud:connect -- dev <key.json>");
+    expect(connectCommand("cloud", "dev · kidclub-dev")).toBe("npm run gcloud:connect -- dev <project-id>");
   });
 
   it("the node: soon until switched on, then its environments or how to connect one", async () => {
@@ -230,7 +240,7 @@ describe("Google Cloud around the page", () => {
     expect((await reachView({ config: off.value, exists: async () => false })).find((n) => n.id === "cloud")).toMatchObject({ status: "soon", hint: "GCLOUD=on in .env" });
     const nodes = await reachView({ config: on.value, exists: async () => false, cloudEnvs: async () => [{ env: "dev", project: "kidclub-dev" }] });
     expect(nodes.find((n) => n.id === "cloud")).toMatchObject({ status: "on", accounts: [{ name: "dev · kidclub-dev", connected: true }] });
-    expect((await reachView({ config: on.value, exists: async () => false, cloudEnvs: async () => [] })).find((n) => n.id === "cloud")?.hint).toBe("npm run gcloud:connect -- dev <key.json>");
+    expect((await reachView({ config: on.value, exists: async () => false, cloudEnvs: async () => [] })).find((n) => n.id === "cloud")?.hint).toBe("npm run gcloud:connect -- dev <project-id>");
   });
 
   it("the prompt says which environments are connected", () => {

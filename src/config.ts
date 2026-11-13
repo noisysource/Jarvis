@@ -117,8 +117,9 @@ export type Config = {
   readonly github: { readonly enabled: boolean; readonly tokensPath: string };
   /**
    * GCLOUD=on (#161): Claude can read errors and logs in Renato's Google Cloud
-   * environments, read-only. One service account key per environment
-   * (npm run gcloud:connect -- <env> <key.json>) in a folder under data/.
+   * environments, read-only. Each environment is a project and a
+   * read-only service account, named in a file under data/
+   * (npm run gcloud:connect -- <env> <project-id>); no key is stored.
    * Local only for now.
    */
   readonly gcloud: { readonly enabled: boolean; readonly keysPath: string };
@@ -431,7 +432,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
   }
   if (raw("CODE_AGENT") === "on" && raw("GITHUB") !== "on") errors.push("CODE_AGENT: needs GITHUB=on (it reads the repos GitHub reaches)");
   if (raw("GCLOUD") === "on") {
-    if (production) errors.push("GCLOUD: local only for now (its keys are files on this Mac, not in Secret Manager)");
+    if (production) errors.push("GCLOUD: local only for now (it signs in through gcloud on this Mac)");
     if (raw("BARE_MODE") !== "on") errors.push("GCLOUD: needs BARE_MODE=on");
   }
   if (raw("GITHUB") === "on") {

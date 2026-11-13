@@ -952,11 +952,16 @@ Confirmed (2026-11-12):
   read is reported, never treated as an empty calendar.
 
 - **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
-  logs, read-only, from Cloud Logging. One service account key per
-  environment in `data/gcloud/<env>.json` (local, mode 600); access grows
-  by connecting environments, dev first, prod last. The token is asked
-  with the `logging.read` scope only; the filter is built in code from
-  checked values; email addresses are masked. Two tools: `gcloud_errors`
+  logs, read-only, from Cloud Logging. Each environment is a project and a
+  read-only service account (`jarvis-read`, Logs Viewer only) named in
+  `data/gcloud/<env>.json`; access grows by connecting environments, dev
+  first, prod last. No key is stored (the organisation blocks service
+  account keys): `gcloud` on the Mac gives a 30-minute token of that
+  account by impersonation, so read-only rests on that account's single
+  role, and Jarvis never holds Renato's own login. Errors are
+  `severity>=ERROR` or anything on stderr (`console.error` arrives with
+  no severity). The filter is built in code from checked values; email
+  addresses are masked. Two tools: `gcloud_errors`
   (grouped) and `gcloud_logs`. Firestore and other data stay out for now.
   The fix loop (code agent proposes, PR after his OK) is #162; the code
   agent never gets cloud credentials.

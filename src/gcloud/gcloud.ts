@@ -1,18 +1,20 @@
 // Google Cloud, read-only (#161): what is going wrong in Renato's apps, from
 // Cloud Logging, one environment at a time (dev first, then up to prod).
 //
-// Each environment is a service account key in data/gcloud/<env>.json
-// (npm run gcloud:connect -- <env> <key.json>). Jarvis asks Google for a token
-// with the logging.read scope only, so even a key with wider roles can't
-// change anything through here. The one call made is entries:list (a read).
+// Each environment is a small file, data/gcloud/<env>.json, naming its project
+// and a read-only service account (npm run gcloud:connect -- <env> <project>).
+// No key is stored: service account keys are blocked by the organisation's
+// policy, rightly. Jarvis asks the gcloud tool on this Mac for a short-lived
+// token of that service account (impersonation), so he can do exactly what
+// that account may do, which is view logs, and never holds Renato's own
+// Google login. The one call made is entries:list (a read).
 //
 // Claude asks with the gcloud_* tools; code checks every call (a connected
 // environment, plain values, a filter built here and never by the model) and
 // hands back plain text, with email addresses masked. Log text is data,
 // never instructions. Nothing is stored. Logs carry counts and fixed words
-// only; never a key, a token or a log line.
+// only; never a token or a log line.
 
-import { createSign } from "node:crypto";
 import { err, ok, type Result } from "../result.js";
 import type { LlmTool } from "../llm/types.js";
 
@@ -20,8 +22,10 @@ export type GcloudError = { readonly code: "not_connected" | "auth" | "forbidden
 
 export const GCLOUD_ENV = /^[a-z][a-z0-9-]{0,19}$/;
 const SERVICE = /^[A-Za-z0-9_.-]{1,80}$/;
-const SCOPE = "https://www.googleapis.com/auth/logging.read";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const SERVICE_ACCOUNT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/;
+const PROJECT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+/** What a function writes with console.error: it arrives with no severity (#161). */
+const STDERR_LOG = "run.googleapis.com/stderr";
 const SEVERITIES = ["DEFAULT", "INFO", "WARNING", "ERROR"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 const MAX_HOURS = 168;
@@ -58,7 +62,8 @@ export const GCLOUD_LOGS_TOOL: LlmTool = {
 
 export const GCLOUD_TOOLS: readonly LlmTool[] = [GCLOUD_ERRORS_TOOL, GCLOUD_LOGS_TOOL];
 
-export type LogsRequest = { readonly env: string; readonly hours: number; readonly severity: Severity; readonly service?: string; readonly text?: string };
+/** `stderr`: also entries written to stderr, whatever their severity (gcloud_errors). */
+export type LogsRequest = { readonly env: string; readonly hours: number; readonly severity: Severity; readonly service?: string; readonly text?: string; readonly stderr?: true };
 
 const object = (v: unknown): Record<string, unknown> | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
 
@@ -73,7 +78,7 @@ export const checkLogsRequest = (v: unknown, envs: readonly string[], errors: bo
     if (typeof o.service !== "string" || !SERVICE.test(o.service)) return err("not a service name");
     service = o.service;
   }
-  if (errors) return ok({ env, hours, severity: "ERROR", ...(service ? { service } : {}) });
+  if (errors) return ok({ env, hours, severity: "ERROR", stderr: true, ...(service ? { service } : {}) });
   const severity = SEVERITIES.find((s) => s === o?.severity) ?? "INFO";
   let text: string | undefined;
   if (o?.text !== undefined && o.text !== "") {
@@ -90,18 +95,21 @@ export const logsFilter = (r: LogsRequest, now: Date): string => {
   const quoted = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   return [
     `timestamp>=${quoted(since)}`,
-    ...(r.severity === "DEFAULT" ? [] : [`severity>=${r.severity}`]),
+    ...(r.severity === "DEFAULT" ? [] : [r.stderr ? `(severity>=${r.severity} OR log_id(${quoted(STDERR_LOG)}))` : `severity>=${r.severity}`]),
     ...(r.service ? [`(resource.labels.service_name=${quoted(r.service)} OR resource.labels.function_name=${quoted(r.service)} OR resource.labels.module_id=${quoted(r.service)})`] : []),
     ...(r.text ? [quoted(r.text)] : []),
   ].join(" AND ");
 };
 
-// ── Keys: one service account per environment ──────────────────────────────
+// ── Environments: a project and its read-only service account ─────────────
 
-export type GcloudKey = { readonly projectId: string; readonly clientEmail: string; readonly privateKey: string };
+export type GcloudEnv = { readonly projectId: string; readonly serviceAccount: string };
 
-/** The JSON key file Google gives for a service account. */
-export const parseKey = (text: string): Result<GcloudKey, string> => {
+/** The default read-only account of a project. */
+export const defaultServiceAccount = (projectId: string): string => `jarvis-read@${projectId}.iam.gserviceaccount.com`;
+
+/** data/gcloud/<env>.json: { "project": "...", "serviceAccount": "..." }. Names only, nothing secret. */
+export const parseEnvFile = (text: string): Result<GcloudEnv, string> => {
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -109,27 +117,28 @@ export const parseKey = (text: string): Result<GcloudKey, string> => {
     return err("not a JSON file");
   }
   const o = object(json);
-  if (o?.type !== "service_account") return err("not a service account key");
-  if (typeof o.project_id !== "string" || typeof o.client_email !== "string" || typeof o.private_key !== "string" || !o.private_key.includes("PRIVATE KEY")) return err("the key file is missing fields");
-  return ok({ projectId: o.project_id, clientEmail: o.client_email, privateKey: o.private_key });
+  if (typeof o?.project !== "string" || !PROJECT.test(o.project)) return err("not a project id");
+  const serviceAccount = typeof o.serviceAccount === "string" ? o.serviceAccount : defaultServiceAccount(o.project);
+  if (!SERVICE_ACCOUNT.test(serviceAccount)) return err("not a service account");
+  return ok({ projectId: o.project, serviceAccount });
 };
 
-export type GcloudKeys = {
-  /** The connected environments, and the project each one is. Names only. */
+export type GcloudEnvs = {
+  /** The connected environments, and the project each one is. */
   readonly envs: () => Promise<readonly { readonly env: string; readonly project: string }[]>;
-  readonly key: (env: string) => Promise<GcloudKey | undefined>;
+  readonly get: (env: string) => Promise<GcloudEnv | undefined>;
 };
 
-/** `list`: the file names in the keys folder. `read`: one environment's key file. */
-export const makeGcloudKeys = (deps: { readonly list: () => Promise<readonly string[]>; readonly read: (env: string) => Promise<string> }): GcloudKeys => {
-  const key = async (env: string): Promise<GcloudKey | undefined> => {
+/** `list`: the file names in the folder. `read`: one environment's file. */
+export const makeGcloudEnvs = (deps: { readonly list: () => Promise<readonly string[]>; readonly read: (env: string) => Promise<string> }): GcloudEnvs => {
+  const get = async (env: string): Promise<GcloudEnv | undefined> => {
     if (!GCLOUD_ENV.test(env)) return undefined;
     const text = await deps.read(env).catch(() => undefined);
-    const parsed = text === undefined ? undefined : parseKey(text);
+    const parsed = text === undefined ? undefined : parseEnvFile(text);
     return parsed?.ok ? parsed.value : undefined;
   };
   return {
-    key,
+    get,
     envs: async () => {
       const names = (await deps.list().catch(() => []))
         .filter((f) => f.endsWith(".json"))
@@ -138,24 +147,32 @@ export const makeGcloudKeys = (deps: { readonly list: () => Promise<readonly str
         .sort();
       const out: { env: string; project: string }[] = [];
       for (const env of names) {
-        const k = await key(env);
-        if (k) out.push({ env, project: k.projectId });
+        const e = await get(env);
+        if (e) out.push({ env, project: e.projectId });
       }
       return out;
     },
   };
 };
 
-const b64url = (s: string | Buffer): string => Buffer.from(s).toString("base64url");
+/** A short-lived token of a service account. Never Renato's own. */
+export type GcloudToken = (serviceAccount: string) => Promise<Result<string, GcloudError>>;
 
-/** The signed request for a token: this service account, the read-only logging scope, one hour. */
-export const tokenAssertion = (key: GcloudKey, nowMs: number, sign: (data: string, privateKey: string) => string): string => {
-  const iat = Math.floor(nowMs / 1000);
-  const body = `${b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${b64url(JSON.stringify({ iss: key.clientEmail, scope: SCOPE, aud: TOKEN_URL, iat, exp: iat + 3600 }))}`;
-  return `${body}.${sign(body, key.privateKey)}`;
-};
-
-const rsaSign = (data: string, privateKey: string): string => createSign("RSA-SHA256").update(data).sign(privateKey, "base64url");
+/**
+ * Asks the gcloud tool for a token of the service account (impersonation,
+ * 30 minutes). `run` runs one command without a shell and gives its stdout.
+ */
+export const makeGcloudCliToken =
+  (run: (cmd: string, args: readonly string[]) => Promise<{ readonly code: number; readonly stdout: string; readonly missing?: boolean }>): GcloudToken =>
+  async (serviceAccount) => {
+    if (!SERVICE_ACCOUNT.test(serviceAccount)) return err({ code: "auth", message: "Not a service account" });
+    const got = await run("gcloud", ["auth", "print-access-token", `--impersonate-service-account=${serviceAccount}`, "--lifetime=1800", "--quiet"]);
+    if (got.missing) return err({ code: "not_connected", message: "The gcloud tool isn't installed on this Mac (or not on the PATH)" });
+    const token = got.stdout.trim();
+    if (got.code !== 0 || !/^[A-Za-z0-9._-]{20,}$/.test(token))
+      return err({ code: "auth", message: `gcloud couldn't get a token for ${serviceAccount}: check you're signed in (gcloud auth login) and may impersonate it (Service Account Token Creator)` });
+    return ok(token);
+  };
 
 // ── Reading ────────────────────────────────────────────────────────────────
 
@@ -163,7 +180,7 @@ export type LogEntry = { readonly time: string; readonly severity: string; reado
 export type ErrorGroup = { readonly message: string; readonly count: number; readonly services: readonly string[]; readonly last: string; readonly example: string };
 
 export type GcloudReader = {
-  readonly envs: GcloudKeys["envs"];
+  readonly envs: GcloudEnvs["envs"];
   /** Newest first, at most `limit`. */
   readonly entries: (r: LogsRequest, limit: number, signal?: AbortSignal) => Promise<Result<{ readonly project: string; readonly entries: readonly LogEntry[] }, GcloudError>>;
 };
@@ -210,70 +227,45 @@ const entryOf = (raw: unknown): LogEntry | undefined => {
   };
 };
 
-export const makeGcloudReader = (deps: {
-  readonly keys: GcloudKeys;
-  readonly fetch?: typeof fetch;
-  readonly now?: () => number;
-  /** Signs the token request (RS256); tests give their own. */
-  readonly sign?: (data: string, privateKey: string) => string;
-}): GcloudReader => {
+export const makeGcloudReader = (deps: { readonly envs: GcloudEnvs; readonly token: GcloudToken; readonly fetch?: typeof fetch; readonly now?: () => number }): GcloudReader => {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
   const tokens = new Map<string, { token: string; expiresAt: number }>();
 
-  const token = async (env: string, key: GcloudKey, signal?: AbortSignal): Promise<Result<string, GcloudError>> => {
-    const have = tokens.get(env);
+  const token = async (serviceAccount: string): Promise<Result<string, GcloudError>> => {
+    const have = tokens.get(serviceAccount);
     if (have && have.expiresAt - 60_000 > now()) return ok(have.token);
-    let assertion: string;
-    try {
-      assertion = tokenAssertion(key, now(), deps.sign ?? rsaSign);
-    } catch {
-      return err({ code: "auth", message: `The ${env} key file can't be used: run npm run gcloud:connect -- ${env} <key.json> again` });
-    }
-    let res: Response;
-    try {
-      res = await doFetch(TOKEN_URL, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }).toString(),
-        ...(signal ? { signal } : {}),
-      });
-    } catch {
-      return err({ code: "network", message: "Couldn't reach Google" });
-    }
-    const body = object(await res.json().catch(() => undefined));
-    if (!res.ok || typeof body?.access_token !== "string")
-      return err({ code: "auth", message: `Google refused the ${env} key (deleted, disabled or expired): run npm run gcloud:connect -- ${env} <key.json> again` });
-    tokens.set(env, { token: body.access_token, expiresAt: now() + (typeof body.expires_in === "number" ? body.expires_in : 3600) * 1000 });
-    return ok(body.access_token);
+    const got = await deps.token(serviceAccount).catch(() => err<GcloudError>({ code: "auth", message: "gcloud couldn't be run" }));
+    if (got.ok) tokens.set(serviceAccount, { token: got.value, expiresAt: now() + 25 * 60_000 });
+    return got;
   };
 
   return {
-    envs: deps.keys.envs,
+    envs: deps.envs.envs,
     entries: async (r, limit, signal) => {
-      const key = await deps.keys.key(r.env);
-      if (!key) return err({ code: "not_connected", message: `${r.env} isn't connected: run npm run gcloud:connect -- ${r.env} <key.json>` });
-      const t = await token(r.env, key, signal);
+      const env = await deps.envs.get(r.env);
+      if (!env) return err({ code: "not_connected", message: `${r.env} isn't connected: run npm run gcloud:connect -- ${r.env} <project-id>` });
+      const t = await token(env.serviceAccount);
       if (!t.ok) return t;
       let res: Response;
       try {
         res = await doFetch("https://logging.googleapis.com/v2/entries:list", {
           method: "POST",
           headers: { authorization: `Bearer ${t.value}`, "content-type": "application/json" },
-          body: JSON.stringify({ resourceNames: [`projects/${key.projectId}`], filter: logsFilter(r, new Date(now())), orderBy: "timestamp desc", pageSize: limit }),
+          body: JSON.stringify({ resourceNames: [`projects/${env.projectId}`], filter: logsFilter(r, new Date(now())), orderBy: "timestamp desc", pageSize: limit }),
           ...(signal ? { signal } : {}),
         });
       } catch {
         return err({ code: "network", message: "Couldn't reach Google Cloud" });
       }
       if (res.status === 401) {
-        tokens.delete(r.env);
-        return err({ code: "auth", message: `Google refused the ${r.env} key: run npm run gcloud:connect -- ${r.env} <key.json> again` });
+        tokens.delete(env.serviceAccount);
+        return err({ code: "auth", message: `Google refused the token for ${r.env}: try again, or sign in with gcloud auth login` });
       }
-      if (res.status === 403) return err({ code: "forbidden", message: `The ${r.env} service account can't read logs: give it the Logs Viewer role in project ${key.projectId}` });
+      if (res.status === 403) return err({ code: "forbidden", message: `${env.serviceAccount} can't read logs: give it the Logs Viewer role in project ${env.projectId}` });
       if (!res.ok) return err({ code: "api", message: `Google Cloud answered ${res.status}` });
       const list = object(await res.json().catch(() => undefined))?.entries;
-      return ok({ project: key.projectId, entries: (Array.isArray(list) ? list : []).flatMap((x) => entryOf(x) ?? []).slice(0, limit) });
+      return ok({ project: env.projectId, entries: (Array.isArray(list) ? list : []).flatMap((x) => entryOf(x) ?? []).slice(0, limit) });
     },
   };
 };

@@ -1,24 +1,23 @@
 // Connects one Google Cloud environment to Jarvis (#161), read-only, on this Mac.
 //
-//   npm run gcloud:connect -- dev ~/Downloads/my-project-dev-1234.json
+//   npm run gcloud:connect -- dev kidclub-dev
+//   npm run gcloud:connect -- dev kidclub-dev other-name@kidclub-dev.iam.gserviceaccount.com
 //
-// 1. In the Google Cloud console, in that environment's project:
-//    IAM & Admin → Service accounts → Create. Name it "jarvis-read".
-//    Give it one role only: Logging → Logs Viewer. No others.
-// 2. Open the account → Keys → Add key → Create new key → JSON. A file downloads.
-// 3. Run this with the environment's name (dev, staging, prod…) and that file.
-//    It checks the key with one read of the logs, then keeps a copy in
-//    data/gcloud/<env>.json (gitignored, readable only by you).
-// 4. Delete the downloaded file. Set GCLOUD=on in .env and restart Jarvis.
-//
-// Jarvis only ever asks Google for a logging-read token with this key.
-// Nothing here prints the key.
+// No key file: the organisation blocks service account keys. Instead:
+// 1. In that project, a service account "jarvis-read" with one role only,
+//    Logs Viewer. Your own Google account gets "Service Account Token
+//    Creator" on that service account (not on the project).
+// 2. The gcloud tool is installed and signed in on this Mac (gcloud auth login).
+// 3. Run this with the environment's name (dev, staging, prod…) and the
+//    project id. It checks with one read of the logs, then writes
+//    data/gcloud/<env>.json: the project and the account's name, nothing secret.
+// 4. Set GCLOUD=on in .env and restart Jarvis.
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "../src/config.js";
-import { GCLOUD_ENV, makeGcloudReader, parseKey } from "../src/gcloud/gcloud.js";
+import { defaultServiceAccount, GCLOUD_ENV, makeGcloudCliToken, makeGcloudReader, parseEnvFile } from "../src/gcloud/gcloud.js";
 
 const fail = (message: string): never => {
   console.error(`✗ ${message}`);
@@ -26,30 +25,32 @@ const fail = (message: string): never => {
 };
 
 const env = (process.argv[2] ?? "").toLowerCase();
-const file = (process.argv[3] ?? "").replace(/^~(?=\/)/, os.homedir());
-if (!GCLOUD_ENV.test(env) || file === "") fail("Say which environment and key file: npm run gcloud:connect -- dev ~/Downloads/<key>.json");
+const project = process.argv[3] ?? "";
+if (!GCLOUD_ENV.test(env) || project === "") fail("Say which environment and project: npm run gcloud:connect -- dev <project-id>");
+const text = JSON.stringify({ project, serviceAccount: process.argv[4] ?? defaultServiceAccount(project) }, null, 2);
+const parsed = parseEnvFile(text);
+const target = parsed.ok ? parsed.value : fail(`${parsed.ok ? "" : parsed.error}. Nothing was saved.`);
 
 const configResult = loadConfig({ ...process.env, GCLOUD: "off" });
 const config = configResult.ok ? configResult.value : fail(configResult.ok ? "" : configResult.error);
 if (config.env === "production") fail("Google Cloud reading is local only: run this on your Mac, not in production.");
 
-const text = await readFile(file, "utf8").catch(() => fail(`Couldn't read ${file}.`));
-const key = parseKey(text);
-if (!key.ok) fail(`${file}: ${key.error}. It should be the JSON key of a service account. Nothing was saved.`);
-const parsed = key.ok ? key.value : fail("");
+const run = (cmd: string, args: readonly string[]) =>
+  new Promise<{ code: number; stdout: string; missing?: boolean }>((resolve) => {
+    execFile(cmd, [...args], { timeout: 60_000 }, (error, stdout) => resolve({ code: error ? 1 : 0, stdout, ...(error && (error as NodeJS.ErrnoException).code === "ENOENT" ? { missing: true } : {}) }));
+  });
 
 // One read to check it: the newest log entry of the last hour.
-const reader = makeGcloudReader({ keys: { envs: async () => [{ env, project: parsed.projectId }], key: async () => parsed } });
+const reader = makeGcloudReader({ envs: { envs: async () => [{ env, project: target.projectId }], get: async () => target }, token: makeGcloudCliToken(run) });
 const got = await reader.entries({ env, hours: 1, severity: "DEFAULT" }, 1);
 if (!got.ok) fail(`${got.error.message}. Nothing was saved.`);
 
 const dir = config.gcloud.keysPath;
 await mkdir(dir, { recursive: true, mode: 0o700 });
-const target = path.join(dir, `${env}.json`);
-await writeFile(target, text, { mode: 0o600 });
-await chmod(target, 0o600);
+const file = path.join(dir, `${env}.json`);
+await writeFile(file, text, { mode: 0o600 });
+await chmod(file, 0o600);
 
-console.log(`✓ ${env} is connected: project ${parsed.projectId}, read-only (logs).`);
-console.log(`✓ Key saved to ${target} (only you can read it; gitignored).`);
-console.log(`  Now delete ${file}: Jarvis has his own copy.`);
+console.log(`✓ ${env} is connected: project ${target.projectId}, read-only (logs), as ${target.serviceAccount}.`);
+console.log(`✓ Saved to ${file} (names only; no key is stored).`);
 console.log("\nPut GCLOUD=on in .env (with BARE_MODE=on) and restart Jarvis.");

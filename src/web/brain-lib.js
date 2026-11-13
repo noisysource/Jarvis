@@ -181,7 +181,7 @@ export const connectCommand = (node, account) =>
   node === "github"
     ? `npm run github:connect -- ${account}`
     : node === "cloud"
-      ? `npm run gcloud:connect -- ${account.split(" · ")[0]} <key.json>`
+      ? `npm run gcloud:connect -- ${account.split(" · ")[0]} <project-id>`
     : node === "gmail"
       ? `npm run gmail:connect -- ${account}`
       : account === "personal"
