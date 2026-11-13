@@ -63,17 +63,20 @@ describe("Claude Code stays inside the repo", () => {
         yield { type: "result", subtype: "success", is_error: false, result: "It's in src/a.ts.", total_cost_usd: 0.03, num_turns: 4 };
       })();
     };
-    const agent = makeClaudeCodeAgent({ apiKey: "sk-ant-test", query });
+    const agent = makeClaudeCodeAgent({ apiKey: "sk-ant-test", auth: "api-key", query });
     const q: CodeQuestion = { dir: "/tmp/repo", question: "Where?", maxTurns: 25, maxUsd: 0.5 };
-    expect(await agent.ask(q)).toEqual(ok({ answer: "It's in src/a.ts.", costUsd: 0.03, turns: 4 }));
+    expect(await agent.ask(q)).toEqual(ok({ answer: "It's in src/a.ts.", costUsd: 0.03, turns: 4, via: "api-key" }));
     expect(seen).toMatchObject({ cwd: "/tmp/repo", tools: ["Read", "Grep", "Glob"], settingSources: [], permissionMode: "default", maxTurns: 25, maxBudgetUsd: 0.5 });
     expect(seen.allowedTools).toBeUndefined(); // nothing skips the path check
-    expect(Object.keys(seen.env as object).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_AGENT_SDK_CLIENT_APP", "HOME", "PATH"]);
+    const env = Object.keys(seen.env as object);
+    expect(env).toContain("ANTHROPIC_API_KEY");
+    expect(env.every((k) => ["ANTHROPIC_API_KEY", "CLAUDE_AGENT_SDK_CLIENT_APP", "HOME", "PATH", "USER", "LOGNAME", "TMPDIR"].includes(k))).toBe(true);
   });
 
   it("a bad key is said plainly, even though the SDK throws after its result", async () => {
     const bad = makeClaudeCodeAgent({
       apiKey: "k",
+      auth: "api-key",
       query: () =>
         (async function* () {
           yield { type: "result", subtype: "success", is_error: true, result: "Invalid API key · Fix external API key", total_cost_usd: 0, num_turns: 1 };
@@ -81,7 +84,7 @@ describe("Claude Code stays inside the repo", () => {
         })(),
     });
     const r = await bad.ask({ dir: "/tmp/r", question: "q", maxTurns: 25, maxUsd: 0.5 });
-    expect(!r.ok && r.error).toEqual({ code: "agent", message: "The code agent couldn't sign in to Anthropic (check the API key)" });
+    expect(!r.ok && r.error).toEqual({ code: "login", message: "The code agent couldn't sign in to Anthropic (check the API key)" });
   });
 
   it("says when it hit a limit", async () => {
@@ -91,6 +94,68 @@ describe("Claude Code stays inside the repo", () => {
     });
     const r = await over.ask({ dir: "/tmp/r", question: "q", maxTurns: 25, maxUsd: 0.5 });
     expect(!r.ok && r.error).toEqual({ code: "limit", message: "It hit the $0.50 limit for one question before answering" });
+  });
+});
+
+describe("on his Claude plan (#150)", () => {
+  type Seen = { env: Record<string, string> };
+  const scripted = (results: Record<string, unknown>[][]) => {
+    const seen: Seen[] = [];
+    const query = (p: { prompt: string; options: Record<string, unknown> }) => {
+      seen.push({ env: p.options.env as Record<string, string> });
+      const msgs = results[seen.length - 1] ?? [];
+      return (async function* () {
+        for (const m of msgs) yield m;
+      })();
+    };
+    return { query, seen };
+  };
+  const q: CodeQuestion = { dir: "/tmp/repo", question: "Where?", maxTurns: 25, maxUsd: 0.5 };
+  const answered = (keySource: string) => [
+    { type: "system", subtype: "init", apiKeySource: keySource },
+    { type: "result", subtype: "success", is_error: false, result: "In src/a.ts.", total_cost_usd: 0.12, num_turns: 6 },
+  ];
+  const notSignedIn = [{ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login", total_cost_usd: 0, num_turns: 1 }];
+
+  it("subscription: no API key reaches Claude Code, and the answer says it ran on the plan", async () => {
+    const { query, seen } = scripted([answered("none")]);
+    const r = await makeClaudeCodeAgent({ apiKey: "sk-ant", auth: "subscription", query }).ask(q);
+    expect(r).toEqual(ok({ answer: "In src/a.ts.", costUsd: 0.12, turns: 6, via: "subscription" }));
+    expect(seen[0]?.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(answerSummary(r.ok ? r.value : { answer: "", costUsd: 0, turns: 0 })).toBe("answered · Claude plan · 6 turns");
+  });
+
+  it("subscription without a login says how to sign in, and never falls back to the key", async () => {
+    const { query, seen } = scripted([notSignedIn]);
+    const r = await makeClaudeCodeAgent({ apiKey: "sk-ant", auth: "subscription", query }).ask(q);
+    expect(!r.ok && r.error).toEqual({ code: "login", message: "Claude Code isn't signed in to your Claude account on this Mac (run claude, then /login)" });
+    expect(seen).toHaveLength(1);
+  });
+
+  it("auto: the plan first; with no login, the API key", async () => {
+    const { query, seen } = scripted([notSignedIn, answered("ANTHROPIC_API_KEY")]);
+    const r = await makeClaudeCodeAgent({ apiKey: "sk-ant", auth: "auto", query }).ask(q);
+    expect(r.ok && r.value.via).toBe("api-key");
+    expect(seen.map((s) => s.env.ANTHROPIC_API_KEY)).toEqual([undefined, "sk-ant"]);
+  });
+
+  it("auto: a real failure (not the login) isn't retried on the key", async () => {
+    const { query, seen } = scripted([[{ type: "result", subtype: "error_max_turns", total_cost_usd: 0.4, num_turns: 25 }]]);
+    const r = await makeClaudeCodeAgent({ apiKey: "sk-ant", auth: "auto", query }).ask(q);
+    expect(!r.ok && r.error.code).toBe("limit");
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a Console login (an API key stored by /login) counts as the API key, not the plan", async () => {
+    const { query } = scripted([answered("/login managed key")]);
+    const r = await makeClaudeCodeAgent({ auth: "subscription", query }).ask(q);
+    expect(r.ok && r.value.via).toBe("api-key");
+  });
+
+  it("CODE_AGENT_AUTH: auto by default; only the three values", () => {
+    const c = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", GITHUB: "on", CODE_AGENT: "on", CODE_AGENT_AUTH: "subscription" });
+    expect(c.ok && c.value.codeAgent.auth).toBe("subscription");
+    expect(loadConfig({ ANTHROPIC_API_KEY: "k", CODE_AGENT_AUTH: "max" }).ok).toBe(false);
   });
 });
 
@@ -195,7 +260,7 @@ describe("config and the page", () => {
     const bad = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", CODE_AGENT: "on" });
     expect(!bad.ok && bad.error).toContain("CODE_AGENT: needs GITHUB=on");
     const good = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", GITHUB: "on", CODE_AGENT: "on", CODE_AGENT_MAX_USD: "1" });
-    expect(good.ok && good.value.codeAgent).toEqual({ enabled: true, maxUsd: 1, maxTurns: 25, reposPath: "data/repos" });
+    expect(good.ok && good.value.codeAgent).toEqual({ enabled: true, maxUsd: 1, maxTurns: 25, reposPath: "data/repos", auth: "auto" });
     expect(loadConfig({ ANTHROPIC_API_KEY: "k", CODE_AGENT_MAX_USD: "50" }).ok).toBe(false);
   });
 

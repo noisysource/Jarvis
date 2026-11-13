@@ -961,6 +961,10 @@ Confirmed (2026-11-12):
   It reads a shallow copy in `data/repos/` with Read/Grep/Glob only, every
   call path-checked to stay inside the copy, the repo's settings and hooks
   not loaded, and a cost and turn cap per question.
+- **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
+  questions on his Claude plan (Claude Code's login on his Mac, no API key
+  passed), falling back to the API key when there's no login. Guests never
+  run on his plan.
 
 ## Out of scope for M0
 

@@ -9,13 +9,15 @@
 import { err, ok, type Result } from "../result.js";
 import type { LlmTool } from "../llm/types.js";
 
-export type CodeError = { readonly code: "not_connected" | "clone" | "limit" | "agent" | "cancelled"; readonly message: string };
+export type CodeError = { readonly code: "not_connected" | "clone" | "limit" | "agent" | "login" | "cancelled"; readonly message: string };
 
 export type CodeAnswer = {
   readonly answer: string;
   /** Estimated cost in USD, as the backend reports it. */
   readonly costUsd: number;
   readonly turns: number;
+  /** #150: how it was paid for: his Claude plan (his own login) or the API key. */
+  readonly via?: "subscription" | "api-key";
 };
 
 export type CodeQuestion = {
@@ -79,7 +81,8 @@ export const answerForBrain = (r: AskRequest, a: CodeAnswer, backend: string): s
   ].join("\n");
 
 /** For the path and the trace: cost and turns, never content. */
-export const answerSummary = (a: CodeAnswer): string => `answered · $${a.costUsd.toFixed(2)} · ${a.turns} ${a.turns === 1 ? "turn" : "turns"}`;
+export const answerSummary = (a: CodeAnswer): string =>
+  `answered · ${a.via === "subscription" ? "Claude plan" : `$${a.costUsd.toFixed(2)}`} · ${a.turns} ${a.turns === 1 ? "turn" : "turns"}`;
 
 /** What the agent is told, whatever the backend. */
 export const CODE_AGENT_PROMPT = [

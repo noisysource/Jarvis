@@ -121,7 +121,14 @@ export type Config = {
    * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
    * CODE_AGENT_MAX_TURNS (default 25).
    */
-  readonly codeAgent: { readonly enabled: boolean; readonly maxUsd: number; readonly maxTurns: number; readonly reposPath: string };
+  readonly codeAgent: {
+    readonly enabled: boolean;
+    readonly maxUsd: number;
+    readonly maxTurns: number;
+    readonly reposPath: string;
+    /** #150: CODE_AGENT_AUTH: "auto" (default: his Claude login, else the API key), "subscription" or "api-key". */
+    readonly auth: "auto" | "subscription" | "api-key";
+  };
   /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
    * across conversations like a person (short-term that fades, long-term that
@@ -271,6 +278,10 @@ const EnvSchema = z.object({
   GMAIL: onOff,
   GITHUB: onOff,
   CODE_AGENT: onOff,
+  CODE_AGENT_AUTH: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["auto", "subscription", "api-key"], { error: 'must be "auto", "subscription" or "api-key"' }).default("auto"),
+  ),
   CODE_AGENT_MAX_USD: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.coerce.number({ error: "must be a number from 0.05 to 5" }).min(0.05, { error: "must be a number from 0.05 to 5" }).max(5, { error: "must be a number from 0.05 to 5" }).default(0.5),
@@ -431,7 +442,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos" },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

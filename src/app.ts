@@ -263,7 +263,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const code =
     github && config.codeAgent.enabled
       ? {
-          agent: inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key }),
+          // #150: his own questions can run on his Claude plan (Claude Code's login on this Mac).
+          agent: inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key, auth: config.codeAgent.auth }),
           copies: inputs.repoCopies ?? makeRepoCopies({ root: config.codeAgent.reposPath, token: githubTokens.token, run: runCommand }),
           owners: githubTokens.owners,
           isEc: isEcText,

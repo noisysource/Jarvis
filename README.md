@@ -391,7 +391,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        repo's own Claude settings and hooks aren't loaded. Each question is
        capped by `CODE_AGENT_MAX_USD` (default 0.50) and
        `CODE_AGENT_MAX_TURNS` (default 25); the cost shows on the path and
-       the trace. It uses your Anthropic API key.
+       the trace.
+
+       **Which account pays (`CODE_AGENT_AUTH`, #150):** `auto` (default)
+       runs on your **Claude plan** when Claude Code is signed in on this Mac
+       (`claude`, then `/login` with your Claude account), and on the API key
+       otherwise; `subscription` uses only the plan; `api-key` only the key.
+       Anthropic allows the Agent SDK on your own plan for your own use; it's
+       for you only, never for guests. The trace shows "Claude plan" or the
+       dollar cost for each question.
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is
