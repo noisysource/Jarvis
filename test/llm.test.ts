@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
 import { makeSdkLogger, parseAttempt } from "../src/llm/http.js";
-import { buildParams, makeAnthropicLlm, mapError, mapResponse, type StreamMessage, thinkingOff } from "../src/llm/anthropic.js";
+import { buildParams, makeAnthropicLlm, mapError, mapResponse, strictFlags, type StreamMessage, thinkingOff } from "../src/llm/anthropic.js";
 import { streamOrCall } from "../src/llm/stream.js";
 import { makeLlm } from "../src/llm/registry.js";
 import type { LlmRequest } from "../src/llm/types.js";
@@ -124,6 +124,19 @@ describe("buildParams", () => {
       { type: "text", text: "You are Jarvis." },
       { type: "text", text: "Now: Friday" },
     ]);
+  });
+
+  it("keeps strict tools inside Anthropic's limits: 20 tools, 24 optional parameters", () => {
+    const tool = (optional: number, extra: Record<string, unknown> = {}) => ({
+      inputSchema: { type: "object", properties: { a: { type: "string" }, ...Object.fromEntries(Array.from({ length: optional }, (_, i) => [`o${i}`, { type: "string" }])), ...extra }, required: ["a"], additionalProperties: false },
+    });
+    // Twenty-five simple tools: the first twenty are strict.
+    expect(strictFlags(Array.from({ length: 25 }, () => tool(0))).filter(Boolean)).toHaveLength(20);
+    // Optional parameters add up across tools, nested ones included; a tool that doesn't fit goes plain, later ones still can.
+    const nested = tool(0, { list: { type: "array", items: { type: "object", properties: { x: { type: "string" }, y: { type: "string" } }, required: ["x"] } } });
+    expect(strictFlags([tool(20), nested, tool(5), tool(2)])).toEqual([true, true, false, true]);
+    // An untyped or union value can't be strict.
+    expect(strictFlags([tool(0, { v: { description: "anything" } }), tool(0, { v: { type: ["string", "null"] } }), tool(0)])).toEqual([false, false, true]);
   });
 
   it("maps tools as strict tools", () => {

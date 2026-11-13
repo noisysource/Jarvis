@@ -120,11 +120,12 @@ export const buildParams = (model: string, request: LlmRequest): CreateParams =>
   messages: request.messages.map(toMessageParam),
   ...(request.tools && request.tools.length > 0
     ? {
-        tools: request.tools.map((t) => ({
+        tools: request.tools.map((t, i) => ({
           name: t.name,
           description: t.description,
           input_schema: t.inputSchema as Anthropic.Beta.Messages.BetaTool.InputSchema,
-          strict: true,
+          // Strict where it fits Anthropic's limits; code checks every call either way.
+          ...(strictFlags(request.tools ?? [])[i] ? { strict: true } : {}),
         })),
       }
     : {}),
@@ -191,6 +192,45 @@ export const mapResponse = (message: Message, wantsJson: boolean): Result<LlmRes
   }
 };
 
+const STRICT_MAX_TOOLS = 20;
+const STRICT_MAX_OPTIONAL = 24;
+
+/** How many parameters a schema leaves optional, at every level; undefined when it uses something strict mode can't take (an untyped or union value). */
+const optionalParams = (schema: unknown): number | undefined => {
+  if (typeof schema !== "object" || schema === null) return undefined;
+  const s = schema as Record<string, unknown>;
+  if (typeof s.type !== "string" || "anyOf" in s || "oneOf" in s) return undefined;
+  if (s.type === "array") return s.items === undefined ? undefined : optionalParams(s.items);
+  if (s.type !== "object") return 0;
+  const required = new Set(Array.isArray(s.required) ? s.required : []);
+  let n = 0;
+  for (const [name, prop] of Object.entries((s.properties ?? {}) as Record<string, unknown>)) {
+    const inner = optionalParams(prop);
+    if (inner === undefined) return undefined;
+    n += inner + (required.has(name) ? 0 : 1);
+  }
+  return n;
+};
+
+/**
+ * Which tools go to Claude as strict. Anthropic refuses a request with more
+ * than 20 strict tools or more than 24 optional parameters across them
+ * (400, "Schema is too complex"), which took every answer down once the
+ * tools grew. In order, each tool is strict while it fits; the rest go
+ * plain. Nothing relies on strict: code checks every tool call.
+ */
+export const strictFlags = (tools: readonly { readonly inputSchema: unknown }[]): readonly boolean[] => {
+  let count = 0;
+  let optional = 0;
+  return tools.map((t) => {
+    const n = optionalParams(t.inputSchema);
+    if (n === undefined || count + 1 > STRICT_MAX_TOOLS || optional + n > STRICT_MAX_OPTIONAL) return false;
+    count += 1;
+    optional += n;
+    return true;
+  });
+};
+
 /** Most specific SDK error class first. Messages never include the API key or prompt. */
 export const mapError = (e: unknown): LlmError => {
   if (e instanceof APIUserAbortError) return { kind: "aborted", message: "Cancelled", retryable: false };
@@ -201,7 +241,13 @@ export const mapError = (e: unknown): LlmError => {
     return { kind: "auth", message: `Anthropic API rejected the key (${e.status})`, retryable: false };
   }
   if (e instanceof BadRequestError || e instanceof NotFoundError) {
-    return { kind: "bad_request", message: `Anthropic API rejected the request (${e.status}): ${e.message}`, retryable: false };
+    // Said on the page too: it's about the request or the account (credit, limits), never the key or the prompt.
+    return {
+      kind: "bad_request",
+      message: `Anthropic API rejected the request (${e.status}): ${e.message}`,
+      userMessage: `Claude refused the request (${e.status}): ${e.message.replace(/\s+/g, " ").slice(0, 300)}`,
+      retryable: false,
+    };
   }
   if (e instanceof InternalServerError) {
     return { kind: "server", message: `Anthropic API error (${e.status})`, retryable: true };
