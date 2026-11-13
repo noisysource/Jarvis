@@ -101,7 +101,7 @@ describe("studying in the background", () => {
     const { asked, store, studies } = setup((q) => (q.question.includes('the folder "') ? body("KidClub details.") + mapBlock({ nodes: [{ id: "web", label: "Web", kind: "module", path: "apps/kidclub/src" }], edges: [] }) : body() + mapBlock(monorepoMap)));
     expect(studies.start("noisysource", "noisysource", "")).toBe("queued");
     expect(studies.start("noisysource", "noisysource", "")).toBe("already");
-    expect(studies.active()).toEqual([{ repo: "noisysource/noisysource", folder: "", state: "running" }]);
+    expect(studies.active()).toMatchObject([{ repo: "noisysource/noisysource", folder: "", state: "running" }]);
     await studies.idle();
     expect(asked[0]).toMatchObject({ dir: "data/repos/noisysource/noisysource", maxUsd: 5, maxTurns: 150 });
     expect(asked.map((q) => /the folder "([^"]+)"/.exec(q.question)?.[1])).toEqual([undefined, "apps/kidclub", "apps/finance"]); // not apps/hrt-tools
@@ -220,5 +220,108 @@ describe("around the page", () => {
     ]);
     expect(node?.about).toContain("a study at $10.00 and 150 steps");
     expect(loadConfig({ ANTHROPIC_API_KEY: "k", CODE_STUDY_MAX_USD: "500" }).ok).toBe(false);
+  });
+});
+
+describe("seeing and stopping a study (#156)", () => {
+  it("reports each step as it happens: the tool and the path inside the repo, never content", async () => {
+    const { stepOf } = await import("../src/code/agent.js");
+    expect(stepOf("/data/repos/a/b", "Read", { file_path: "/data/repos/a/b/src/app.ts" })).toEqual({ tool: "Read", target: "src/app.ts" });
+    expect(stepOf("/data/repos/a/b", "Grep", { pattern: "firebase", path: "/data/repos/a/b" })).toEqual({ tool: "Grep", target: "firebase" });
+    expect(stepOf("/data/repos/a/b", "Grep", { pattern: "firebase", path: "/data/repos/a/b/src" })).toEqual({ tool: "Grep", target: "firebase in src" });
+    // A relative repo folder (data/repos/…) against the agent's absolute paths; nothing outside the repo is shown in full.
+    expect(stepOf("data/repos/a/b", "Read", { file_path: `${process.cwd()}/data/repos/a/b/src/app.ts` })).toEqual({ tool: "Read", target: "src/app.ts" });
+    expect(stepOf("/data/repos/a/b", "Read", { file_path: "/Users/renato/.ssh/id_ed25519" })).toEqual({ tool: "Read", target: "id_ed25519" });
+    expect(stepOf("/data/repos/a/b", "Glob", { pattern: "**/*.ts" })).toEqual({ tool: "Glob", target: "**/*.ts" });
+
+    const { makeClaudeCodeAgent } = await import("../src/code/claude-code.js");
+    const seen: unknown[] = [];
+    const query = () =>
+      (async function* () {
+        yield { type: "assistant", message: { content: [{ type: "text", text: "Looking." }, { type: "tool_use", name: "Read", input: { file_path: "/tmp/repo/README.md" } }] } };
+        yield { type: "result", subtype: "success", is_error: false, result: "ok", total_cost_usd: 0, num_turns: 2 };
+      })();
+    await makeClaudeCodeAgent({ auth: "subscription", query }).ask({ dir: "/tmp/repo", question: "q", maxTurns: 5, maxUsd: 1, onProgress: (s) => seen.push(s) });
+    expect(seen).toEqual([{ tool: "Read", target: "README.md" }]);
+  });
+
+  const slowSetup = () => {
+    let release: (() => void) | undefined;
+    let aborted = false;
+    const agent: CodeAgent = {
+      name: "Claude Code",
+      ask: async (q) => {
+        q.onProgress?.({ tool: "Read", target: "README.md" });
+        q.onProgress?.({ tool: "Grep", target: "firebase" });
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          q.signal?.addEventListener("abort", () => {
+            aborted = true;
+            resolve();
+          });
+        });
+        return ok({ answer: body() + mapBlock({ nodes: [{ id: "a", label: "A", kind: "module" }], edges: [] }), costUsd: 1, turns: 12 });
+      },
+    };
+    const files = memoryFiles();
+    const store = makeNoteStore(files);
+    const studies = makeStudies({ agent, copies: { ensure: async (o, n) => ok(`data/repos/${o}/${n}`) }, store, isEc, maxUsd: 5, maxTurns: 150, now: () => NOW });
+    return { studies, store, release: () => release?.(), wasAborted: () => aborted };
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it("shows the running study's steps and latest files, then lists it as finished", async () => {
+    const { studies, release } = slowSetup();
+    studies.start("noisysource", "Jarvis", "");
+    studies.start("noisysource", "kidclub", "");
+    await tick();
+    expect(studies.active()).toEqual([
+      { repo: "noisysource/Jarvis", folder: "", state: "running", startedAt: NOW.toISOString(), steps: 2, recent: [{ tool: "Read", target: "README.md" }, { tool: "Grep", target: "firebase" }] },
+      { repo: "noisysource/kidclub", folder: "", state: "queued" },
+    ]);
+    release();
+    await tick();
+    expect(studies.finished()[0]).toMatchObject({ repo: "noisysource/Jarvis", turns: 12, partial: false, parts: 1 });
+    release();
+    await studies.idle();
+    expect(studies.finished().map((d) => d.repo)).toEqual(["noisysource/kidclub", "noisysource/Jarvis"]);
+  });
+
+  it("Stop cancels the running study and drops the queue; nothing is saved", async () => {
+    const { studies, store, wasAborted } = slowSetup();
+    studies.start("noisysource", "Jarvis", "");
+    studies.start("noisysource", "kidclub", "");
+    await tick();
+    expect(studies.stop()).toBe(2);
+    await studies.idle();
+    expect(wasAborted()).toBe(true);
+    expect(studies.active()).toEqual([]);
+    expect(await store.all()).toEqual([]);
+  });
+
+  it("the card's words: running, next, failed, finished", async () => {
+    const { studiesSummary, duration } = await import("../src/web/studies.js");
+    expect(duration(125)).toBe("2 min 05 s");
+    const now = Date.parse("2026-11-13T10:02:05Z");
+    const s = studiesSummary(
+      {
+        active: [
+          { repo: "noisysource/noisysource", folder: "apps/kidclub", state: "running", startedAt: "2026-11-13T10:00:00Z", steps: 14, recent: [{ tool: "Read", target: "a.ts" }, { tool: "Grep", target: "firebase" }] },
+          { repo: "noisysource/noisysource", folder: "apps/finance", state: "queued" },
+          { repo: "noisysource/old", folder: "", state: "failed", error: "It hit the limit" },
+        ],
+        finished: [{ repo: "noisysource/noisysource", folder: "", finishedAt: "2026-11-13T09:59:00Z", turns: 40, seconds: 190, partial: false, parts: 22 }],
+      },
+      now,
+    );
+    expect(s).toEqual({
+      busy: true,
+      empty: false,
+      running: { name: "noisysource/noisysource · apps/kidclub", line: "step 14 · 2 min 05 s", recent: ["Grep firebase", "Read a.ts"] },
+      queued: ["noisysource/noisysource · apps/finance"],
+      failed: [{ name: "noisysource/old", error: "It hit the limit" }],
+      finished: [{ name: "noisysource/noisysource", line: "40 steps · 3 min 10 s · 22 parts" }],
+    });
+    expect(studiesSummary({ active: [], finished: [] }, now).empty).toBe(true);
   });
 });

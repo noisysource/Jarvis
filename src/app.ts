@@ -388,6 +388,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       }),
     ...(gmailSend ? { gmailSend } : {}),
     ...(gmailDelete ? { gmailDelete } : {}),
+    ...(studies ? { codeStudies: studies } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,

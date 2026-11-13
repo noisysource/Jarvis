@@ -323,6 +323,31 @@ export const makeServer = (
     );
   }
 
+  // #156: what the code agent is studying in the background, and stopping it.
+  const codeStudies = deps.codeStudies;
+  if (codeStudies) {
+    app.get("/code/studies", (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({ active: codeStudies.active(), finished: codeStudies.finished() });
+    });
+    const StopBody = z
+      .object({ repo: z.string().regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/).optional(), folder: z.string().max(200).optional() })
+      .strict();
+    app.post(
+      "/code/studies/stop",
+      async (c, next) => {
+        if (!isJson(c.req.header("content-type"))) return c.json(errorBody("POST /code/studies/stop needs Content-Type: application/json."), 415);
+        await next();
+      },
+      bodyLimit({ maxSize: 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }),
+      async (c) => {
+        const body = StopBody.safeParse(await c.req.json().catch(() => undefined));
+        if (!body.success) return c.json(errorBody("Send { repo?, folder? }."), 400);
+        return c.json({ stopped: codeStudies.stop(body.data.repo, body.data.folder) });
+      },
+    );
+  }
+
   // #124: his answer to deleting a draft Jarvis wrote. Only "yes" deletes it.
   const del = deps.gmailDelete;
   if (del) {

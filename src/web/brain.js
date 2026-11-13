@@ -118,7 +118,9 @@ export const makeBrainView = (root, options = {}) => {
   stage.append(net, lines, core, list);
   // #143: the reasoning trace goes between the brain and the node panel.
   const traceSlot = el("div", "");
-  root.append(stage, traceSlot, panel);
+  // #156: what's being studied in the background.
+  const studiesSlot = el("div", "");
+  root.append(stage, traceSlot, studiesSlot, panel);
 
   /** @type {Map<string, ReachNode>} */
   let known = new Map();
@@ -232,18 +234,21 @@ export const makeBrainView = (root, options = {}) => {
   let working = false;
   /** #141: the nodes offered this turn; undefined until the answer says. @type {Set<string> | undefined} */
   let offered;
+  /** #156: nodes working in the background, outside any answer (the code agent studying). @type {Set<string>} */
+  let background = new Set();
 
   const draw = () => {
     lines.replaceChildren();
     for (const n of NODES) {
-      const reach = state[n.id];
+      // A node busy in the background shows as reaching, unless this answer says more about it.
+      const reach = state[n.id] ?? (background.has(n.id) ? "reaching" : undefined);
       const node = nodes.get(n.id);
       if (!node) continue;
       const shown = reach ?? node.rest;
       node.box.dataset.state = shown;
       const notOffered = offered !== undefined && !offered.has(n.id) && !reach;
       node.box.dataset.offered = offered === undefined ? "" : notOffered ? "no" : "yes";
-      node.tag.textContent = notOffered && (shown === "idle" || shown === "off") ? "not offered" : NODE_TAGS[shown];
+      node.tag.textContent = notOffered && (shown === "idle" || shown === "off") ? "not offered" : !state[n.id] && background.has(n.id) ? "studying…" : NODE_TAGS[shown];
       if (!reach) continue;
       const g = lineGeometry(n.angle, reach);
       const line = el("span", `brain-line brain-line-${reach}`);
@@ -272,6 +277,15 @@ export const makeBrainView = (root, options = {}) => {
 
   return {
     traceSlot,
+    studiesSlot,
+    /**
+     * Nodes working in the background (#156), e.g. the code agent studying.
+     * @param {readonly string[]} ids
+     */
+    setBackground: (ids) => {
+      background = new Set(ids);
+      draw();
+    },
     setBrain,
     /**
      * What each node can do and what's connected (GET /reach, #133): the

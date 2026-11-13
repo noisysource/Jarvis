@@ -4,6 +4,7 @@
 // lives in this page's memory only; reload or "New conversation" clears it.
 
 import { makeBrainView } from "./brain.js";
+import { makeStudiesView } from "./studies.js";
 import { makeTraceView } from "./trace.js";
 import {
   CONVERSATION,
@@ -166,6 +167,12 @@ const brainView = makeBrainView(byId("brain-view"), {
 
 // #143: how he got there, for the current answer, as a tree that grows while he works.
 const traceView = makeTraceView(brainView.traceSlot);
+
+// #156: what the code agent is studying in the background, live, with Stop.
+const studiesView = makeStudiesView(brainView.studiesSlot, {
+  onBusy: (busy) => brainView.setBackground(busy ? ["code"] : []),
+  onChange: () => void refreshReach(),
+});
 
 /** What each node can do and what's connected (#133). Refreshed after answers and decisions. */
 const refreshReach = async () => {
@@ -981,6 +988,8 @@ const ask = async (question, context) => {
   brainView.finish(path);
   traceView.finish(path);
   void refreshReach();
+  // A study may just have been started by this answer.
+  void studiesView.refresh();
   if (path.length > 0 && (view.kind === "answer" || view.kind === "handoff")) {
     const details = document.createElement("details");
     details.className = "path";
@@ -1740,6 +1749,7 @@ renderVoices();
 void refreshVoice();
 void refreshBadge();
 void refreshReach();
+void studiesView.refresh();
 void fetch("/voice-settings")
   .then((res) => (res.ok ? res.json() : null))
   .then((body) => {

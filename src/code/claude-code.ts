@@ -14,7 +14,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { err, ok, type Result } from "../result.js";
-import { codeAgentPrompt, WRAP_UP_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
+import { codeAgentPrompt, stepOf, WRAP_UP_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
 
 const TOOLS = ["Read", "Grep", "Glob"] as const;
 
@@ -98,6 +98,13 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
         const m = message as Record<string, unknown>;
         if (m.type === "system" && m.subtype === "init") keySource = m.apiKeySource;
         if (typeof m.session_id === "string") session = m.session_id;
+        if (m.type === "assistant" && q.onProgress) {
+          const content = (m.message as { content?: unknown } | undefined)?.content;
+          for (const block of Array.isArray(content) ? content : []) {
+            const b = block as { type?: unknown; name?: unknown; input?: unknown };
+            if (b.type === "tool_use" && typeof b.name === "string") q.onProgress(stepOf(q.dir, b.name, typeof b.input === "object" && b.input !== null ? (b.input as Record<string, unknown>) : {}));
+          }
+        }
         if (m.type === "result") result = m;
       }
     } catch {

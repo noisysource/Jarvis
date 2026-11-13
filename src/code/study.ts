@@ -14,7 +14,7 @@
 
 import { err, ok, type Result } from "../result.js";
 import type { LlmTool } from "../llm/types.js";
-import type { CodeAgent, CodeError } from "./agent.js";
+import type { CodeAgent, CodeError, CodeStep } from "./agent.js";
 import type { RepoCopies } from "./repos.js";
 
 const MAX_NOTE = 14_000;
@@ -201,13 +201,31 @@ export const makeNoteStore = (files: NoteFiles): NoteStore => ({
 
 // ---- studying, in the background ----
 
-export type StudyState = { readonly repo: string; readonly folder: string; readonly state: "queued" | "running" | "failed"; readonly error?: string };
+export type StudyState = {
+  readonly repo: string;
+  readonly folder: string;
+  readonly state: "queued" | "running" | "failed";
+  readonly error?: string;
+  /** While running: when it started, how many things it's done, and the latest few. */
+  readonly startedAt?: string;
+  readonly steps?: number;
+  readonly recent?: readonly CodeStep[];
+};
+
+/** A study that finished since Jarvis started, for the page. */
+export type StudyDone = { readonly repo: string; readonly folder: string; readonly finishedAt: string; readonly turns: number; readonly seconds: number; readonly partial: boolean; readonly parts: number };
+
+const RECENT = 8;
 
 export type Studies = {
   /** Queues a study (and, for a whole repo, its apps after it). Returns what was queued. */
   readonly start: (owner: string, name: string, folder: string) => "queued" | "already";
   /** Studies waiting, running, or failed since Jarvis started. */
   readonly active: () => readonly StudyState[];
+  /** Studies finished since Jarvis started, newest first. */
+  readonly finished: () => readonly StudyDone[];
+  /** Stops a study: the running one is cancelled (nothing is saved), a queued one is dropped. With no key, all of them. */
+  readonly stop: (repo?: string, folder?: string) => number;
   /** Resolves when nothing is queued or running (tests). */
   readonly idle: () => Promise<void>;
 };
@@ -224,13 +242,27 @@ export const makeStudies = (deps: {
 }): Studies => {
   const states = new Map<string, StudyState>();
   const queue: { owner: string; name: string; folder: string; apps: boolean }[] = [];
+  const done: StudyDone[] = [];
   let running: Promise<void> | undefined;
+  /** The running study's key and its cancel switch. */
+  let current: { readonly key: string; readonly controller: AbortController } | undefined;
 
-  const one = async (job: { owner: string; name: string; folder: string; apps: boolean }): Promise<Result<CodeNote, CodeError>> => {
+  const one = async (job: { owner: string; name: string; folder: string; apps: boolean }, key: string, signal: AbortSignal): Promise<Result<CodeNote, CodeError>> => {
     const repo = `${job.owner}/${job.name}`;
     const dir = await deps.copies.ensure(job.owner, job.name);
     if (!dir.ok) return dir;
-    const answered = await deps.agent.ask({ dir: dir.value, question: studyQuestion(repo, job.folder), maxTurns: deps.maxTurns, maxUsd: deps.maxUsd });
+    const answered = await deps.agent.ask({
+      dir: dir.value,
+      question: studyQuestion(repo, job.folder),
+      maxTurns: deps.maxTurns,
+      maxUsd: deps.maxUsd,
+      signal,
+      onProgress: (step) => {
+        const s = states.get(key);
+        if (s?.state === "running") states.set(key, { ...s, steps: (s.steps ?? 0) + 1, recent: [...(s.recent ?? []), step].slice(-RECENT) });
+      },
+    });
+    if (signal.aborted) return err({ code: "cancelled", message: "Stopped" });
     if (!answered.ok) return answered;
     const parsed = parseStudy(answered.value.answer);
     if (parsed.text.length < 200) return err({ code: "agent", message: "The study came back empty" });
@@ -252,23 +284,34 @@ export const makeStudies = (deps: {
   const drain = async (): Promise<void> => {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const key = noteKey(`${job.owner}/${job.name}`, job.folder);
-      states.set(key, { repo: `${job.owner}/${job.name}`, folder: job.folder, state: "running" });
+      const controller = new AbortController();
+      current = { key, controller };
+      states.set(key, { repo: `${job.owner}/${job.name}`, folder: job.folder, state: "running", startedAt: deps.now().toISOString(), steps: 0, recent: [] });
       const started = Date.now();
-      const done = await one(job).catch((): Result<CodeNote, CodeError> => err({ code: "agent", message: "The study stopped with an error" }));
-      if (!done.ok) {
-        deps.log?.warn("code study failed", { code: done.error.code, reason: done.error.message });
-        states.set(key, { repo: `${job.owner}/${job.name}`, folder: job.folder, state: "failed", error: done.error.message });
+      const result = await one(job, key, controller.signal).catch((): Result<CodeNote, CodeError> => err({ code: "agent", message: "The study stopped with an error" }));
+      current = undefined;
+      if (!result.ok) {
+        if (result.error.code === "cancelled") {
+          deps.log?.info("code study stopped");
+          states.delete(key);
+          continue;
+        }
+        deps.log?.warn("code study failed", { code: result.error.code, reason: result.error.message });
+        states.set(key, { repo: `${job.owner}/${job.name}`, folder: job.folder, state: "failed", error: result.error.message });
         continue;
       }
       states.delete(key);
-      deps.log?.info("code study", { turns: done.value.turns, usd: Math.round(done.value.costUsd * 100) / 100, partial: done.value.partial, nodes: done.value.map.nodes.length, ms: Date.now() - started });
+      const note = result.value;
+      done.unshift({ repo: note.repo, folder: note.folder, finishedAt: deps.now().toISOString(), turns: note.turns, seconds: Math.round((Date.now() - started) / 1000), partial: note.partial, parts: note.map.nodes.length });
+      done.splice(20);
+      deps.log?.info("code study", { turns: note.turns, usd: Math.round(note.costUsd * 100) / 100, partial: note.partial, nodes: note.map.nodes.length, ms: Date.now() - started });
       // A monorepo: each app it found gets its own study, unless it's EC work or already queued.
       if (job.apps)
-        for (const folder of appsToStudy(done.value.map)) {
+        for (const folder of appsToStudy(note.map)) {
           if (deps.isEc(folder.replace(/[-_/]/g, " "))) continue;
-          const k = noteKey(done.value.repo, folder);
+          const k = noteKey(note.repo, folder);
           if (states.get(k)?.state === "queued" || states.get(k)?.state === "running") continue;
-          states.set(k, { repo: done.value.repo, folder, state: "queued" });
+          states.set(k, { repo: note.repo, folder, state: "queued" });
           queue.push({ owner: job.owner, name: job.name, folder, apps: false });
         }
     }
@@ -287,6 +330,27 @@ export const makeStudies = (deps: {
       return "queued";
     },
     active: () => [...states.values()],
+    finished: () => [...done],
+    stop: (repo, folder) => {
+      const only = repo === undefined ? undefined : noteKey(repo, folder ?? "");
+      let stopped = 0;
+      for (let i = queue.length - 1; i >= 0; i -= 1) {
+        const j = queue[i];
+        const k = j ? noteKey(`${j.owner}/${j.name}`, j.folder) : "";
+        if (j && (only === undefined || k === only)) {
+          queue.splice(i, 1);
+          states.delete(k);
+          stopped += 1;
+        }
+      }
+      if (current && (only === undefined || current.key === only)) {
+        current.controller.abort();
+        stopped += 1;
+      }
+      // Failed ones are cleared too, when asked for by name or all.
+      for (const [k, s] of states) if (s.state === "failed" && (only === undefined || k === only)) states.delete(k);
+      return stopped;
+    },
     idle: async () => {
       while (running) await running;
     },
