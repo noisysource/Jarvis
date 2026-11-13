@@ -14,6 +14,7 @@ import {
   groupErrors,
   logsFilter,
   logsForBrain,
+  cachedToken,
   makeGcloudCliToken,
   makeGcloudEnvs,
   makeGcloudReader,
@@ -86,6 +87,13 @@ describe("Google Cloud environments", () => {
     expect(ran).toHaveLength(1);
     const missing = await makeGcloudCliToken(async () => ({ code: 1, stdout: "", missing: true }))(SA);
     expect(!missing.ok && missing.error.code).toBe("not_connected");
+    // The token is kept for 25 minutes, then asked again.
+    let t = NOW;
+    let asks = 0;
+    const cached = cachedToken(async () => ok(`tok${++asks}`), () => t);
+    expect([await cached(SA), await cached(SA)]).toEqual([ok("tok1"), ok("tok1")]);
+    t += 26 * 60_000;
+    expect(await cached(SA)).toEqual(ok("tok2"));
     const refused = await makeGcloudCliToken(async () => ({ code: 1, stdout: "" }))(SA);
     expect(!refused.ok && refused.error).toMatchObject({ code: "auth", message: expect.stringContaining("Service Account Token Creator") });
   });
@@ -110,7 +118,7 @@ describe("Google Cloud reader", () => {
     return { reader, calls, asked };
   };
 
-  it("reads entries of the environment's project, and reuses the token", async () => {
+  it("reads entries of the environment's project", async () => {
     const { reader, calls, asked } = setup({
       body: {
         entries: [
@@ -135,7 +143,6 @@ describe("Google Cloud reader", () => {
     expect(calls[0]?.url).toBe("https://logging.googleapis.com/v2/entries:list");
     expect(calls[0]?.auth).toBe("Bearer tok");
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual(expect.objectContaining({ resourceNames: ["projects/kidclub-dev"], orderBy: "timestamp desc", pageSize: 200 }));
-    await reader.entries({ env: "dev", hours: 24, severity: "ERROR" }, 200);
     expect(asked).toEqual([SA]);
   });
 
@@ -207,6 +214,7 @@ describe("Claude reading Google Cloud", () => {
   it("offers the two tools; the path names the environment and what came back", async () => {
     const { requests, steps, asked } = await run("gcloud_errors", { env: "dev" });
     expect(requests[0]?.tools?.map((t) => t.name)).toEqual(["gcloud_errors", "gcloud_logs"]);
+    expect(requests[0]?.system).not.toContain("gcloud_db_query");
     expect(requests[0]?.system).toContain("errors and logs in his Google Cloud environments, read-only");
     expect(asked).toEqual([{ env: "dev", limit: 200 }]);
     expect(steps[0]).toEqual({ kind: "tool", name: "gcloud_errors", args: "dev · last 24 h", by: "model", ok: true, result: "1 kind of error (1 entries)" });

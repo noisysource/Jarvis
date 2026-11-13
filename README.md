@@ -384,8 +384,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        Jarvis asks `gcloud` for a 30-minute token of `jarvis-read`, never
        your own login; builds the log filter himself; counts `console.error`
        output as errors (it arrives without a severity); and masks email
-       addresses before the brain sees a line. He can't change, deploy or
-       read databases. Add `staging` or `prod` the same way later.
+       addresses before the brain sees a line. To let him read the
+       environment's **database** too (Firestore, where the apps keep
+       client errors and failed emails), give `jarvis-read` the **Cloud
+       Datastore Viewer** role; the connect command prints the exact line
+       and tells you whether logs and database are readable. He can't
+       write, change or deploy anything. Add `staging` or `prod` the same
+       way later.
      - **GitHub (`GITHUB=on`, ☁️ Claude), read-only.** Your repos: files,
        folders, issues, PRs and CI. Create a **fine-grained token** per owner
        (your account, the `noisysource` org): Repository access *All*, and

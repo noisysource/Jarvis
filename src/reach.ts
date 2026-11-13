@@ -134,10 +134,13 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
     {
       id: "cloud",
       status: config.gcloud.enabled ? onOff(true) : "soon",
-      about: "Reads errors and logs in your Google Cloud environments, read-only, one environment at a time. He can't change, deploy or read your databases. Email addresses in logs are masked.",
+      about: "Reads errors, logs and the database (Firestore) of your Google Cloud environments, read-only, one environment at a time. He can't change or deploy anything. Email addresses are masked.",
       tools: [
         { name: "gcloud_errors", does: "recent errors, grouped" },
         { name: "gcloud_logs", does: "recent log entries" },
+        { name: "gcloud_db_collections", does: "collection names in the database" },
+        { name: "gcloud_db_query", does: "documents of a collection" },
+        { name: "gcloud_db_get", does: "one document" },
       ],
       accounts: cloudEnvs.map((e) => ({ name: `${e.env} · ${e.project}`, connected: true })),
       ...(config.gcloud.enabled ? (cloudEnvs.length === 0 ? { hint: "npm run gcloud:connect -- dev <project-id>" } : {}) : { hint: "GCLOUD=on in .env" }),

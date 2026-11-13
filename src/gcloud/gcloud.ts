@@ -227,25 +227,27 @@ const entryOf = (raw: unknown): LogEntry | undefined => {
   };
 };
 
-export const makeGcloudReader = (deps: { readonly envs: GcloudEnvs; readonly token: GcloudToken; readonly fetch?: typeof fetch; readonly now?: () => number }): GcloudReader => {
-  const doFetch = deps.fetch ?? fetch;
-  const now = deps.now ?? Date.now;
+/** Keeps each account's token for 25 of its 30 minutes, shared by everything that reads Google Cloud. */
+export const cachedToken = (token: GcloudToken, now: () => number = Date.now): GcloudToken => {
   const tokens = new Map<string, { token: string; expiresAt: number }>();
-
-  const token = async (serviceAccount: string): Promise<Result<string, GcloudError>> => {
+  return async (serviceAccount) => {
     const have = tokens.get(serviceAccount);
-    if (have && have.expiresAt - 60_000 > now()) return ok(have.token);
-    const got = await deps.token(serviceAccount).catch(() => err<GcloudError>({ code: "auth", message: "gcloud couldn't be run" }));
+    if (have && have.expiresAt > now()) return ok(have.token);
+    const got = await token(serviceAccount).catch(() => err<GcloudError>({ code: "auth", message: "gcloud couldn't be run" }));
     if (got.ok) tokens.set(serviceAccount, { token: got.value, expiresAt: now() + 25 * 60_000 });
     return got;
   };
+};
 
+export const makeGcloudReader = (deps: { readonly envs: GcloudEnvs; readonly token: GcloudToken; readonly fetch?: typeof fetch; readonly now?: () => number }): GcloudReader => {
+  const doFetch = deps.fetch ?? fetch;
+  const now = deps.now ?? Date.now;
   return {
     envs: deps.envs.envs,
     entries: async (r, limit, signal) => {
       const env = await deps.envs.get(r.env);
       if (!env) return err({ code: "not_connected", message: `${r.env} isn't connected: run npm run gcloud:connect -- ${r.env} <project-id>` });
-      const t = await token(env.serviceAccount);
+      const t = await deps.token(env.serviceAccount).catch(() => err<GcloudError>({ code: "auth", message: "gcloud couldn't be run" }));
       if (!t.ok) return t;
       let res: Response;
       try {
@@ -259,7 +261,6 @@ export const makeGcloudReader = (deps: { readonly envs: GcloudEnvs; readonly tok
         return err({ code: "network", message: "Couldn't reach Google Cloud" });
       }
       if (res.status === 401) {
-        tokens.delete(env.serviceAccount);
         return err({ code: "auth", message: `Google refused the token for ${r.env}: try again, or sign in with gcloud auth login` });
       }
       if (res.status === 403) return err({ code: "forbidden", message: `${env.serviceAccount} can't read logs: give it the Logs Viewer role in project ${env.projectId}` });

@@ -16,7 +16,8 @@ import { makeClaudeCodeAgent } from "./code/claude-code.js";
 import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
 import { makeNoteStore, makeStudies, mapViews, type NoteFiles } from "./code/study.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
-import { makeGcloudCliToken, makeGcloudEnvs, makeGcloudReader, type GcloudReader } from "./gcloud/gcloud.js";
+import { cachedToken, makeGcloudCliToken, makeGcloudEnvs, makeGcloudReader, type GcloudReader } from "./gcloud/gcloud.js";
+import { makeDbReader, type DbReader } from "./gcloud/firestore.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
 import { addedSentence, makeGoogleEventCreator, makePendingProposals, proposalPathLabel, type EventCreator } from "./calendar/create.js";
@@ -68,6 +69,7 @@ export type AppInputs = {
   /** Tests: a GitHub reader instead of the real one (#125). */
   readonly githubReader?: GithubReader;
   readonly gcloudReader?: GcloudReader;
+  readonly gcloudDb?: DbReader;
   /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
   readonly codeAgent?: CodeAgent;
   readonly repoCopies?: RepoCopies;
@@ -274,7 +276,11 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         resolve({ code: error ? 1 : 0, stdout, ...(error && (error as NodeJS.ErrnoException).code === "ENOENT" ? { missing: true } : {}) }),
       );
     });
-  const gcloud = config.gcloud.enabled ? { reader: inputs.gcloudReader ?? makeGcloudReader({ envs: gcloudEnvs, token: makeGcloudCliToken(gcloudRun) }) } : undefined;
+  const gcloudToken = cachedToken(makeGcloudCliToken(gcloudRun));
+  // #167: the environment's database (Firestore), read-only, with the same account.
+  const gcloud = config.gcloud.enabled
+    ? { reader: inputs.gcloudReader ?? makeGcloudReader({ envs: gcloudEnvs, token: gcloudToken }), db: inputs.gcloudDb ?? makeDbReader({ envs: gcloudEnvs, token: gcloudToken }) }
+    : undefined;
   // #127: what he's learned from studying repos: one note per repo or app, local, readable only by him.
   const noteStore = makeNoteStore(
     inputs.noteFiles ?? {

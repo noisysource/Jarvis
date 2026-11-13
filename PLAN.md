@@ -962,7 +962,15 @@ Confirmed (2026-11-12):
   `severity>=ERROR` or anything on stderr (`console.error` arrives with
   no severity). The filter is built in code from checked values; email
   addresses are masked. Two tools: `gcloud_errors`
-  (grouped) and `gcloud_logs`. Firestore and other data stay out for now.
+  (grouped) and `gcloud_logs`.
+- **The database (#167, dev):** the apps keep their best error records in
+  Firestore, so the same account also gets Cloud Datastore Viewer and
+  Jarvis three reading tools (`gcloud_db_collections`, `gcloud_db_query`,
+  `gcloud_db_get`). Renato chose the whole dev database rather than a
+  list of collections. Code builds every query from checked values,
+  makes reading calls only, caps and cuts what comes back, masks email
+  addresses, and shows only the field names of filters on the page.
+  Staging and prod are a separate decision.
   The fix loop (code agent proposes, PR after his OK) is #162; the code
   agent never gets cloud credentials.
 
