@@ -22,6 +22,7 @@ const FILES: readonly { path: string; file: string; contentType: string }[] = [
   { path: "/brain.js", file: "brain.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/brain-lib.js", file: "brain-lib.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/trace.js", file: "trace.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/studies.js", file: "studies.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/trace-lib.js", file: "trace-lib.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/app.css", file: "app.css", contentType: "text/css; charset=utf-8" },
   { path: "/audio.js", file: "audio.js", contentType: "text/javascript; charset=utf-8" },

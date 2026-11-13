@@ -39,6 +39,7 @@ export const targetOf = (tool, args) => {
   if (m) return { target: m[1] ?? args, detail: m[2] ?? "" };
   if (tool === "calendar_read" && args !== "") return { target: "all calendars", detail: args };
   // #125: "owner/repo · path" → the repo, then the rest.
+  if (tool.startsWith("code_") && args !== "") return { target: args, detail: "" };
   if (tool.startsWith("github_") && args !== "") {
     const [repo, ...rest] = args.split(" · ");
     return { target: repo ?? args, detail: rest.join(" · ") };

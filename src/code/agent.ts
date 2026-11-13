@@ -6,6 +6,7 @@
 // read/search tools that can't leave that folder. Every question has a turn
 // and a cost limit. EC-looking repos are Kiro's and never asked about.
 
+import path from "node:path";
 import { err, ok, type Result } from "../result.js";
 import type { LlmTool } from "../llm/types.js";
 
@@ -29,6 +30,33 @@ export type CodeQuestion = {
   readonly maxTurns: number;
   readonly maxUsd: number;
   readonly signal?: AbortSignal;
+  /** Each thing the agent does, as it does it: the tool and what it's on (a path or a search), never content. */
+  readonly onProgress?: (step: CodeStep) => void;
+};
+
+/** One thing the agent did: "Read src/app.ts", "Grep firebase". */
+export type CodeStep = { readonly tool: string; readonly target: string };
+
+/**
+ * What a tool call is on, for showing: a path inside the repo, or the search
+ * words. Never file content. `dir` may be relative; the agent's paths are absolute.
+ */
+export const stepOf = (dir: string, tool: string, input: Record<string, unknown>): CodeStep => {
+  const root = path.resolve(dir);
+  const inside = (v: unknown): string => {
+    if (typeof v !== "string" || v === "") return "";
+    const full = path.isAbsolute(v) ? v : path.resolve(root, v);
+    if (full === root) return ".";
+    return full.startsWith(`${root}${path.sep}`) ? full.slice(root.length + 1) : path.basename(full);
+  };
+  const pattern = typeof input.pattern === "string" ? input.pattern : "";
+  const where = inside(input.path);
+  const raw = tool === "Read" ? inside(input.file_path) : pattern !== "" ? `${pattern}${where !== "" && where !== "." ? ` in ${where}` : ""}` : inside(input.file_path) || where;
+  const target = [...raw]
+    .map((c) => (c.charCodeAt(0) < 32 || c === "<" || c === ">" ? " " : c))
+    .join("")
+    .slice(0, 160);
+  return { tool: tool.slice(0, 20), target };
 };
 
 /** The slot: any backend that can answer a question about a folder of code. */

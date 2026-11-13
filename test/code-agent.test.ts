@@ -317,7 +317,7 @@ describe("config and the page", () => {
     const bad = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", CODE_AGENT: "on" });
     expect(!bad.ok && bad.error).toContain("CODE_AGENT: needs GITHUB=on");
     const good = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", GITHUB: "on", CODE_AGENT: "on", CODE_AGENT_MAX_USD: "1" });
-    expect(good.ok && good.value.codeAgent).toEqual({ enabled: true, maxUsd: 1, maxTurns: 25, reposPath: "data/repos", auth: "auto" });
+    expect(good.ok && good.value.codeAgent).toMatchObject({ enabled: true, maxUsd: 1, maxTurns: 25, reposPath: "data/repos", auth: "auto" });
     expect(loadConfig({ ANTHROPIC_API_KEY: "k", CODE_AGENT_MAX_USD: "50" }).ok).toBe(false);
   });
 
@@ -325,7 +325,8 @@ describe("config and the page", () => {
     const c = loadConfig({ ANTHROPIC_API_KEY: "k", BARE_MODE: "on", GITHUB: "on", CODE_AGENT: "on" });
     if (!c.ok) throw new Error(c.error);
     const node = (await reachView({ config: c.value, exists: async () => false })).find((n) => n.id === "code");
-    expect(node).toMatchObject({ status: "on", tools: [{ name: "code_ask" }] });
+    expect(node?.status).toBe("on");
+    expect(node?.tools.map((t) => t.name)).toEqual(["code_notes", "code_study", "code_ask"]);
     expect(node?.about).toContain("$0.50 and 25 steps");
   });
 });

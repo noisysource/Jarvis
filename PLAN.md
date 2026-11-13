@@ -961,6 +961,12 @@ Confirmed (2026-11-12):
   It reads a shallow copy in `data/repos/` with Read/Grep/Glob only, every
   call path-checked to stay inside the copy, the repo's settings and hooks
   not loaded, and a cost and turn cap per question.
+- **Studying code (#127):** Jarvis learns a repo once, with a high ceiling,
+  in the background (monorepo: top level, then each app), and keeps a note
+  per repo or app in his own code-knowledge store (`data/code/`), not in
+  the profile or the personal memory. Each note has prose plus a small map
+  (nodes and edges) for the code maps. Questions read the note first
+  (`code_notes`); `code_ask` covers the rest.
 - **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
   questions on his Claude plan (Claude Code's login on his Mac, no API key
   passed), falling back to the API key when there's no login. Guests never

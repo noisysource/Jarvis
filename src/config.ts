@@ -128,6 +128,12 @@ export type Config = {
     readonly reposPath: string;
     /** #150: CODE_AGENT_AUTH: "auto" (default: his Claude login, else the API key), "subscription" or "api-key". */
     readonly auth: "auto" | "subscription" | "api-key";
+    /**
+     * #127: the ceiling for one study (a repo, or one app in a monorepo):
+     * CODE_STUDY_MAX_USD (default 5) and CODE_STUDY_MAX_TURNS (default 150).
+     * High on purpose: a study reads a lot, once. Notes go to `notesPath`.
+     */
+    readonly study: { readonly maxUsd: number; readonly maxTurns: number; readonly notesPath: string };
   };
   /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
@@ -281,6 +287,19 @@ const EnvSchema = z.object({
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["auto", "subscription", "api-key"], { error: 'must be "auto", "subscription" or "api-key"' }).default("auto"),
+  ),
+  CODE_STUDY_MAX_USD: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ error: "must be a number from 0.5 to 50" }).min(0.5, { error: "must be a number from 0.5 to 50" }).max(50, { error: "must be a number from 0.5 to 50" }).default(5),
+  ),
+  CODE_STUDY_MAX_TURNS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: "must be a whole number from 10 to 400" })
+      .int({ error: "must be a whole number from 10 to 400" })
+      .min(10, { error: "must be a whole number from 10 to 400" })
+      .max(400, { error: "must be a whole number from 10 to 400" })
+      .default(150),
   ),
   CODE_AGENT_MAX_USD: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -442,7 +461,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

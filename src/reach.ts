@@ -4,6 +4,7 @@
 // title or a memory.
 
 import { CALENDAR_ACCOUNTS, calendarTokensPath } from "./calendar/accounts.js";
+import { noteKey, type CodeNote, type StudyState } from "./code/study.js";
 import type { Config } from "./config.js";
 import { GMAIL_ACCOUNTS } from "./gmail/gmail.js";
 
@@ -21,6 +22,8 @@ export type ReachNode = {
   readonly hint?: string;
   /** Things waiting for Renato (draft skills). */
   readonly waiting?: number;
+  /** #127: the code he has notes on, and what's being studied: names and states only. */
+  readonly studied?: readonly { readonly name: string; readonly state: string }[];
 };
 
 export type ReachInput = {
@@ -31,6 +34,8 @@ export type ReachInput = {
   readonly draftSkills?: () => Promise<number>;
   /** #125: the GitHub owners with a token. */
   readonly githubOwners?: () => Promise<readonly string[]>;
+  /** #127: his code notes, and studies under way. */
+  readonly studied?: () => Promise<{ readonly notes: readonly CodeNote[]; readonly active: readonly StudyState[] }>;
 };
 
 export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]> => {
@@ -44,6 +49,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
   const gmailAccounts = await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await exists(config.gmail.tokensPath(name)) })));
   const drafts = config.bareMemory && input.draftSkills ? await input.draftSkills().catch(() => 0) : 0;
   const githubOwners = config.github.enabled && input.githubOwners ? await input.githubOwners().catch(() => []) : [];
+  const studied = config.codeAgent.enabled && input.studied ? await input.studied().catch(() => ({ notes: [], active: [] })) : { notes: [], active: [] };
 
   return [
     {
@@ -131,8 +137,16 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
           : config.codeAgent.auth === "subscription"
             ? "Runs on your Claude plan (Claude Code's login on this Mac)."
             : "Runs on your Claude plan when Claude Code is signed in on this Mac, otherwise on the API key."
-      } Each question is capped at $${config.codeAgent.maxUsd.toFixed(2)} and ${config.codeAgent.maxTurns} steps.`,
-      tools: [{ name: "code_ask", does: "ask a question about a repo's code" }],
+      } Each question is capped at $${config.codeAgent.maxUsd.toFixed(2)} and ${config.codeAgent.maxTurns} steps; a study at $${config.codeAgent.study.maxUsd.toFixed(2)} and ${config.codeAgent.study.maxTurns} steps per repo or app.`,
+      tools: [
+        { name: "code_notes", does: "read his note on code he's studied" },
+        { name: "code_study", does: "study a repo or app in the background" },
+        { name: "code_ask", does: "ask a question about a repo's code" },
+      ],
+      studied: [
+        ...studied.notes.map((n) => ({ name: noteKey(n.repo, n.folder), state: `studied ${n.studiedAt.slice(0, 10)}${n.partial ? " (partial)" : ""}` })),
+        ...studied.active.map((s) => ({ name: noteKey(s.repo, s.folder), state: s.state === "failed" ? `failed: ${s.error ?? "error"}` : s.state === "running" ? "studying now…" : "waiting to be studied" })),
+      ],
       ...(config.codeAgent.enabled ? {} : { hint: config.github.enabled ? "CODE_AGENT=on in .env" : "GITHUB=on and CODE_AGENT=on in .env" }),
     },
     {
