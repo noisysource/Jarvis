@@ -109,6 +109,18 @@ describe("studying in the background", () => {
     expect(studies.active()).toEqual([]);
   });
 
+  it("a monorepo study skips the apps he already has complete notes on, unless it's a refresh", async () => {
+    const answers = (q: CodeQuestion) => (q.question.includes('the folder "') ? body("App.") + mapBlock({ nodes: [], edges: [] }) : body() + mapBlock(monorepoMap));
+    const a = setup(answers);
+    await a.store.save({ repo: "noisysource/noisysource", folder: "apps/kidclub", studiedAt: NOW.toISOString(), text: "x", map: { nodes: [], edges: [] }, partial: false, turns: 1, costUsd: 0 });
+    a.studies.start("noisysource", "noisysource", "");
+    await a.studies.idle();
+    expect(a.asked.map((q) => /the folder "([^"]+)"/.exec(q.question)?.[1])).toEqual([undefined, "apps/finance"]);
+    a.studies.start("noisysource", "noisysource", "", true);
+    await a.studies.idle();
+    expect(a.asked.slice(2).map((q) => /the folder "([^"]+)"/.exec(q.question)?.[1])).toEqual([undefined, "apps/kidclub", "apps/finance"]);
+  });
+
   it("studying one app doesn't fan out; an empty study is a failure, kept visible", async () => {
     const { asked, studies, store } = setup((q) => (q.question.includes("apps/kidclub") ? body() + mapBlock(monorepoMap) : "Nothing."));
     studies.start("noisysource", "noisysource", "apps/kidclub");
@@ -177,6 +189,19 @@ describe("Jarvis using what he studied", () => {
     expect(steps[0]).toEqual({ kind: "tool", name: "code_study", args: "noisysource/Jarvis", by: "model", ok: true, result: "started in the background" });
     expect(toolResult).toContain("Don't describe the code yet");
     expect((await store.all()).map((n) => n.repo)).toEqual(["noisysource/Jarvis"]); // done after the answer
+  });
+
+  it("doesn't redo a study he already has, unless asked to study it again", async () => {
+    const first = await run("code_study", { repo: "noisysource/noisysource", folder: "apps/kidclub" });
+    expect(first.steps[0]).toEqual({ kind: "tool", name: "code_study", args: "noisysource/noisysource:apps/kidclub", by: "model", ok: true, result: "already studied 2026-11-13" });
+    expect(first.toolResult).toContain("nothing was started");
+    expect(first.asked).toHaveLength(0);
+    const again = await run("code_study", { repo: "noisysource/noisysource", folder: "apps/kidclub", again: true });
+    expect(again.steps[0]).toMatchObject({ result: "started in the background" });
+    expect(again.asked).toHaveLength(1);
+    // A partial note (it hit its limit) is worth redoing without being asked.
+    const partial = await run("code_study", { repo: "noisysource/noisysource", folder: "apps/kidclub" }, [{ ...note, partial: true }]);
+    expect(partial.asked).toHaveLength(1);
   });
 
   it("never studies or reads EC work, another owner's repo, or a path outside the repo", async () => {

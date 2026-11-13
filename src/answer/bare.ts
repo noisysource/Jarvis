@@ -256,7 +256,7 @@ export const barePrompt = (
                 "For questions that need understanding the code (how something works, where it's done, the architecture), call code_ask with the repo and one specific question: a code agent reads the repo and answers. It takes up to a minute and has a limit, so use it when github_read isn't enough. Ask narrow questions: in a big repo (a monorepo holding several apps), first list its folders with github_read to find where the app lives, then name that folder in the question (\"In apps/kidclub, how does it talk to Firebase?\"). Pass on its answer in your own words; if it couldn't find something or its answer is partial, say so.",
                 ...(options.study === true
                   ? [
-                      "You keep notes on code you've studied; the list is at the end of this prompt. For a question about a repo or app on that list, read its note with code_notes first and answer from it; use code_ask only for what the note doesn't cover. When they ask you to study, learn or get to know a repo or app, call code_study: it runs in the background for several minutes, so say it's started, not what you found.",
+                      "You keep notes on code you've studied; the list is at the end of this prompt. For a question about a repo or app on that list, read its note with code_notes first and answer from it; use code_ask only for what the note doesn't cover. When they ask you to study, learn or get to know a repo or app, call code_study: it runs in the background for several minutes, so say it's started, not what you found. If it's already on your list, don't study it again unless they ask for a refresh (again: true).",
                     ]
                   : []),
               ]
@@ -830,7 +830,17 @@ export const makeBareAnswerer = (deps: {
         onStep?.({ kind: "tool", name: "code_notes", args, by: "model", ok: true, result: `note from ${note.studiedAt.slice(0, 10)}${note.partial ? " (partial)" : ""}` });
         return { callId: call.id, content: noteForBrain(note) };
       }
-      const started = study.studies.start(r.owner, r.name, r.folder);
+      // He already has a complete note: don't redo the reading unless they asked to study it again.
+      const have = r.again ? undefined : await study.notes.get(repo, r.folder);
+      if (have && !have.partial) {
+        const when = have.studiedAt.slice(0, 10);
+        onStep?.({ kind: "tool", name: "code_study", args, by: "model", ok: true, result: `already studied ${when}` });
+        return {
+          callId: call.id,
+          content: `You already studied ${args} on ${when}; nothing was started. Say so, and that you can answer from your note (code_notes), or study it again if they want it refreshed (that redoes all the reading).`,
+        };
+      }
+      const started = study.studies.start(r.owner, r.name, r.folder, r.again);
       deps.log?.info("code study requested", { outcome: started, folder: r.folder !== "" });
       onStep?.({ kind: "tool", name: "code_study", args, by: "model", ok: true, result: started === "queued" ? "started in the background" : "already under way" });
       return {

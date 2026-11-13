@@ -218,8 +218,11 @@ export type StudyDone = { readonly repo: string; readonly folder: string; readon
 const RECENT = 8;
 
 export type Studies = {
-  /** Queues a study (and, for a whole repo, its apps after it). Returns what was queued. */
-  readonly start: (owner: string, name: string, folder: string) => "queued" | "already";
+  /**
+   * Queues a study (and, for a whole repo, its apps after it). Returns what
+   * was queued. `again`: also redo the apps that already have a complete note.
+   */
+  readonly start: (owner: string, name: string, folder: string, again?: boolean) => "queued" | "already";
   /** Studies waiting, running, or failed since Jarvis started. */
   readonly active: () => readonly StudyState[];
   /** Studies finished since Jarvis started, newest first. */
@@ -241,13 +244,13 @@ export const makeStudies = (deps: {
   readonly log?: { readonly info: (m: string, f?: Record<string, unknown>) => void; readonly warn: (m: string, f?: Record<string, unknown>) => void };
 }): Studies => {
   const states = new Map<string, StudyState>();
-  const queue: { owner: string; name: string; folder: string; apps: boolean }[] = [];
+  const queue: { owner: string; name: string; folder: string; apps: boolean; again: boolean }[] = [];
   const done: StudyDone[] = [];
   let running: Promise<void> | undefined;
   /** The running study's key and its cancel switch. */
   let current: { readonly key: string; readonly controller: AbortController } | undefined;
 
-  const one = async (job: { owner: string; name: string; folder: string; apps: boolean }, key: string, signal: AbortSignal): Promise<Result<CodeNote, CodeError>> => {
+  const one = async (job: { owner: string; name: string; folder: string }, key: string, signal: AbortSignal): Promise<Result<CodeNote, CodeError>> => {
     const repo = `${job.owner}/${job.name}`;
     const dir = await deps.copies.ensure(job.owner, job.name);
     if (!dir.ok) return dir;
@@ -311,19 +314,22 @@ export const makeStudies = (deps: {
           if (deps.isEc(folder.replace(/[-_/]/g, " "))) continue;
           const k = noteKey(note.repo, folder);
           if (states.get(k)?.state === "queued" || states.get(k)?.state === "running") continue;
+          // An app he already has a complete note on isn't read again, unless asked to.
+          const have = job.again ? undefined : await deps.store.get(note.repo, folder).catch(() => undefined);
+          if (have && !have.partial) continue;
           states.set(k, { repo: note.repo, folder, state: "queued" });
-          queue.push({ owner: job.owner, name: job.name, folder, apps: false });
+          queue.push({ owner: job.owner, name: job.name, folder, apps: false, again: job.again });
         }
     }
   };
 
   return {
-    start: (owner, name, folder) => {
+    start: (owner, name, folder, again = false) => {
       const key = noteKey(`${owner}/${name}`, folder);
       const s = states.get(key)?.state;
       if (s === "queued" || s === "running") return "already";
       states.set(key, { repo: `${owner}/${name}`, folder, state: "queued" });
-      queue.push({ owner, name, folder, apps: folder === "" });
+      queue.push({ owner, name, folder, apps: folder === "", again });
       running ??= drain().finally(() => {
         running = undefined;
       });
@@ -367,7 +373,11 @@ export const CODE_STUDY_TOOL: LlmTool = {
     "Start a thorough study of one of his repos (or one app's folder in a monorepo), so you know it later. It runs in the background and takes several minutes; in a monorepo, each app it finds is studied after the top level. Use it when they ask you to study, learn or get to know a repo or app. The result is saved as a note you read with code_notes.",
   inputSchema: {
     type: "object",
-    properties: { repo: repoProp, folder: { type: "string", description: "One app's folder in a monorepo; leave out for the whole repo" } },
+    properties: {
+      repo: repoProp,
+      folder: { type: "string", description: "One app's folder in a monorepo; leave out for the whole repo" },
+      again: { type: "boolean", description: "True only when they ask to study it again or refresh it; it redoes all the reading" },
+    },
     required: ["repo"],
     additionalProperties: false,
   },
@@ -387,7 +397,7 @@ export const CODE_NOTES_TOOL: LlmTool = {
 
 const REPO = /^([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})$/;
 
-export type StudyRequest = { readonly owner: string; readonly name: string; readonly folder: string };
+export type StudyRequest = { readonly owner: string; readonly name: string; readonly folder: string; readonly again: boolean };
 
 /** For both tools: a repo of an owner with a token, and a clean folder. */
 export const checkStudyRequest = (v: unknown, owners: readonly string[]): Result<StudyRequest, string> => {
@@ -397,9 +407,10 @@ export const checkStudyRequest = (v: unknown, owners: readonly string[]): Result
   const name = m?.[2];
   if (!owner || !name) return err("not a repo");
   if (!owners.some((x) => x.toLowerCase() === owner.toLowerCase())) return err("no token for that owner");
-  if (o.folder === undefined || o.folder === "" || o.folder === "/" || o.folder === ".") return ok({ owner, name, folder: "" });
+  const again = o.again === true;
+  if (o.folder === undefined || o.folder === "" || o.folder === "/" || o.folder === ".") return ok({ owner, name, folder: "", again });
   const folder = cleanPath(o.folder);
-  return folder === "" ? err("not a folder") : ok({ owner, name, folder });
+  return folder === "" ? err("not a folder") : ok({ owner, name, folder, again });
 };
 
 /** A note for the brain: the agent's reading of the code, marked as data. */
