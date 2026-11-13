@@ -24,7 +24,7 @@ export type ReachNode = {
 };
 
 export type ReachInput = {
-  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github">;
+  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "codeAgent">;
   /** Whether a token file exists: connected, as far as Jarvis can tell without calling Google. */
   readonly exists: (path: string) => Promise<boolean>;
   /** How many draft skills wait for review. */
@@ -122,7 +122,13 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       accounts: githubOwners.map((name) => ({ name, connected: true })),
       ...(config.github.enabled ? (githubOwners.length === 0 ? { hint: "npm run github:connect -- <owner>" } : {}) : { hint: "GITHUB=on in .env" }),
     },
-    { id: "code", status: "soon", about: "Asking a code agent about a repo (Claude Code first, swappable).", tools: [], hint: "Coming in #126" },
+    {
+      id: "code",
+      status: config.codeAgent.enabled && config.bareMode && config.toolCalling ? "on" : config.github.enabled ? "off" : "soon",
+      about: `Asks Claude Code about a repo: it reads a local copy (data/repos/) and can't change or run anything. Each question is capped at $${config.codeAgent.maxUsd.toFixed(2)} and ${config.codeAgent.maxTurns} steps.`,
+      tools: [{ name: "code_ask", does: "ask a question about a repo's code" }],
+      ...(config.codeAgent.enabled ? {} : { hint: config.github.enabled ? "CODE_AGENT=on in .env" : "GITHUB=on and CODE_AGENT=on in .env" }),
+    },
     {
       id: "kiro",
       status: "on",

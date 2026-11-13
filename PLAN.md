@@ -956,6 +956,12 @@ Confirmed (2026-11-12):
   Four tools: repos, read (file or folder), issues/PRs, checks. EC-looking
   repos are Kiro's. Writing (issues for #138) comes later, behind a card.
 
+- **Code agent (#126):** behind a `CodeAgent` slot (folder + question in,
+  answer out); Claude Code (Agent SDK) first, a local backend later (#129).
+  It reads a shallow copy in `data/repos/` with Read/Grep/Glob only, every
+  call path-checked to stay inside the copy, the repo's settings and hooks
+  not loaded, and a cost and turn cap per question.
+
 ## Out of scope for M0
 
 Vendus, Cloud Run deployment or the Pi (#53), real memory (#24, #56),

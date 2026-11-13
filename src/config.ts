@@ -116,6 +116,13 @@ export type Config = {
    */
   readonly github: { readonly enabled: boolean; readonly tokensPath: string };
   /**
+   * CODE_AGENT=on (#126): Claude can ask a code agent (Claude Code, read-only,
+   * on a local copy in data/repos/) about one of the repos GITHUB=on reaches.
+   * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
+   * CODE_AGENT_MAX_TURNS (default 25).
+   */
+  readonly codeAgent: { readonly enabled: boolean; readonly maxUsd: number; readonly maxTurns: number; readonly reposPath: string };
+  /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
    * across conversations like a person (short-term that fades, long-term that
    * lasts), saving and recalling with tools. Memories live in MEMORY_DB.
@@ -263,6 +270,20 @@ const EnvSchema = z.object({
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
   GITHUB: onOff,
+  CODE_AGENT: onOff,
+  CODE_AGENT_MAX_USD: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ error: "must be a number from 0.05 to 5" }).min(0.05, { error: "must be a number from 0.05 to 5" }).max(5, { error: "must be a number from 0.05 to 5" }).default(0.5),
+  ),
+  CODE_AGENT_MAX_TURNS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: "must be a whole number from 3 to 60" })
+      .int({ error: "must be a whole number from 3 to 60" })
+      .min(3, { error: "must be a whole number from 3 to 60" })
+      .max(60, { error: "must be a whole number from 3 to 60" })
+      .default(25),
+  ),
   GMAIL_WRITE: onOff,
   MEMORY: onOff,
   INTROSPECTION: onOff,
@@ -370,6 +391,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (production) errors.push("GMAIL: local only for now");
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
   }
+  if (raw("CODE_AGENT") === "on" && raw("GITHUB") !== "on") errors.push("CODE_AGENT: needs GITHUB=on (it reads the repos GitHub reaches)");
   if (raw("GITHUB") === "on") {
     if (production) errors.push("GITHUB: local only for now (its tokens are a file on this Mac, not in Secret Manager)");
     if (raw("BARE_MODE") !== "on") errors.push("GITHUB: needs BARE_MODE=on");
@@ -409,6 +431,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos" },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

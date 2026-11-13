@@ -32,6 +32,7 @@ describe("loadConfig", () => {
       toolCalling: true,
       gmail: { enabled: false, write: false, tokensPath: expect.any(Function) },
       github: { enabled: false, tokensPath: "data/github-tokens.json" },
+      codeAgent: { enabled: false, maxUsd: 0.5, maxTurns: 25, reposPath: "data/repos" },
       bareMemory: false,
       introspection: false,
       ollamaThink: false,

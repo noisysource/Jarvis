@@ -561,10 +561,22 @@ footer {
 }
 
 /* Narrow screens: the brain sits above the chat, small, and scrolls away with it. */
-@media (max-width: 52rem) {
+/*
+ * When the brain and the chat no longer fit side by side (37rem + 26rem plus
+ * gaps), the chat drops below the brain: then the brain must scroll away with
+ * the page, or it covers the messages. Pinned only when they're side by side.
+ */
+@media (max-width: 68rem) {
   .brain {
     position: static;
     flex: 1 1 100%;
+    max-width: 30rem;
+  }
+}
+
+/* Narrow screens: a small brain, so the chat is close to the top. */
+@media (max-width: 52rem) {
+  .brain {
     max-width: 19rem;
   }
 }
