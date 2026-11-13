@@ -588,7 +588,7 @@ with the evals, to see which jobs they can take. One PR at a time:
      `calendarForBrain` text; EC events stay "EC work, handled by Kiro".
      A refused call, an unknown tool or a failed read goes back as a tool
      error, so the brain can say so.
-   - At most 3 tool rounds (`MAX_TOOL_ROUNDS`); the last round gets no
+   - At most 5 tool rounds (`MAX_TOOL_ROUNDS`, 3 until #154); the last round gets no
      tools, so it has to answer.
    - Each call is on the path line (`by: model`); a read that worked lets
      the honesty guard pass what's on the calendar, as before.

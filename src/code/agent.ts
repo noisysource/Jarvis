@@ -18,6 +18,8 @@ export type CodeAnswer = {
   readonly turns: number;
   /** #150: how it was paid for: his Claude plan (his own login) or the API key. */
   readonly via?: "subscription" | "api-key";
+  /** It hit its limit and answered from what it had read so far. */
+  readonly partial?: boolean;
 };
 
 export type CodeQuestion = {
@@ -73,6 +75,7 @@ export const checkAskRequest = (v: unknown, owners: readonly string[]): Result<A
 /** The agent's answer, for the brain: data from the agent, about code that's data too. */
 export const answerForBrain = (r: AskRequest, a: CodeAnswer, backend: string): string =>
   [
+    ...(a.partial ? ["The code agent hit its limit before finishing, so this answer is partial: say so, and pass on what it didn't get to check."] : []),
     `<code_answer repo="${r.owner}/${r.name}" by="${backend}">`,
     a.answer.slice(0, MAX_ANSWER).replace(/<\/code_answer>/gi, "</ code_answer>"),
     "</code_answer>",
@@ -82,7 +85,18 @@ export const answerForBrain = (r: AskRequest, a: CodeAnswer, backend: string): s
 
 /** For the path and the trace: cost and turns, never content. */
 export const answerSummary = (a: CodeAnswer): string =>
-  `answered · ${a.via === "subscription" ? "Claude plan" : `$${a.costUsd.toFixed(2)}`} · ${a.turns} ${a.turns === 1 ? "turn" : "turns"}`;
+  `${a.partial ? "partial answer (hit its limit)" : "answered"} · ${a.via === "subscription" ? "Claude plan" : `$${a.costUsd.toFixed(2)}`} · ${a.turns} ${a.turns === 1 ? "turn" : "turns"}`;
+
+/** What the agent is told, whatever the backend, with its step limit. */
+export const codeAgentPrompt = (maxTurns: number): string =>
+  [
+    CODE_AGENT_PROMPT,
+    `You have at most ${maxTurns} steps and a cost limit. Look only where the question points: start from the folder list or a search, read the few files that matter, then answer. In a big repo (a monorepo), go straight to the folder the question is about. If you're close to the limit, stop and answer with what you have.`,
+  ].join("\n");
+
+/** What the agent is told when it hit its limit: answer from what it read. */
+export const WRAP_UP_PROMPT =
+  "You've reached your limit for this question. Don't read anything more. Answer the question now from what you've read so far, and say briefly what you didn't get to check.";
 
 /** What the agent is told, whatever the backend. */
 export const CODE_AGENT_PROMPT = [

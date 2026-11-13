@@ -159,6 +159,63 @@ describe("on his Claude plan (#150)", () => {
   });
 });
 
+describe("hitting the limit still gives an answer", () => {
+  const q: CodeQuestion = { dir: "/tmp/repo", question: "How does KidClub talk to Firebase?", maxTurns: 25, maxUsd: 0.5 };
+
+  it("resumes the same session once, with no tools, and returns a partial answer", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const query = (p: { prompt: string; options: Record<string, unknown> }) => {
+      calls.push({ prompt: p.prompt, ...p.options });
+      return (async function* () {
+        if (calls.length === 1) {
+          yield { type: "system", subtype: "init", apiKeySource: "none", session_id: "s-1" };
+          yield { type: "result", subtype: "error_max_budget_usd", total_cost_usd: 0.51, num_turns: 14, session_id: "s-1" };
+        } else {
+          yield { type: "result", subtype: "success", is_error: false, result: "From what I read: apps/kidclub/src/firebase.ts sets up Firestore. I didn't check the functions folder.", total_cost_usd: 0.04, num_turns: 1, session_id: "s-1" };
+        }
+      })();
+    };
+    const r = await makeClaudeCodeAgent({ auth: "subscription", query }).ask(q);
+    expect(r).toEqual(ok({ answer: "From what I read: apps/kidclub/src/firebase.ts sets up Firestore. I didn't check the functions folder.", costUsd: 0.55, turns: 15, via: "subscription", partial: true }));
+    expect(calls[1]).toMatchObject({ resume: "s-1", tools: [], maxTurns: 1, maxBudgetUsd: 0.3, settingSources: [] });
+    expect(String(calls[1]?.prompt)).toContain("Don't read anything more");
+    expect(answerSummary(r.ok ? r.value : { answer: "", costUsd: 0, turns: 0 })).toBe("partial answer (hit its limit) · Claude plan · 15 turns");
+    expect(answerForBrain({ owner: "noisysource", name: "noisysource", question: "q" }, r.ok ? r.value : { answer: "", costUsd: 0, turns: 0 }, "Claude Code")).toContain("this answer is partial");
+  });
+
+  it("if the wrap-up fails too, it says it hit the limit", async () => {
+    let n = 0;
+    const query = () =>
+      (async function* () {
+        n += 1;
+        yield n === 1 ? { type: "result", subtype: "error_max_turns", total_cost_usd: 0.3, num_turns: 25, session_id: "s-2" } : { type: "result", subtype: "error_during_execution", is_error: true, session_id: "s-2" };
+      })();
+    const r = await makeClaudeCodeAgent({ auth: "subscription", query }).ask(q);
+    expect(!r.ok && r.error).toEqual({ code: "limit", message: "It hit the 25-step limit for one question before answering" });
+  });
+
+  it("the agent is told its limit and to go straight to the folder", async () => {
+    let system = "";
+    const query = (p: { prompt: string; options: Record<string, unknown> }) => {
+      system = String(p.options.systemPrompt);
+      return (async function* () {
+        yield { type: "result", subtype: "success", is_error: false, result: "ok", total_cost_usd: 0, num_turns: 1 };
+      })();
+    };
+    await makeClaudeCodeAgent({ auth: "subscription", query }).ask(q);
+    expect(system).toContain("at most 25 steps");
+    expect(system).toContain("go straight to the folder");
+  });
+});
+
+describe("Jarvis doesn't narrate tool calls", () => {
+  it("is told to just call them", async () => {
+    const { barePrompt } = await import("../src/answer/bare.js");
+    expect(barePrompt("Renato", { tools: true, calendar: true })).toContain("don't announce or narrate it first");
+    expect(barePrompt("Renato", {})).not.toContain("don't announce or narrate it first");
+  });
+});
+
 describe("local copies of the repos", () => {
   it("clones once (shallow), refreshes when stale, with the token only in git's environment", async () => {
     const runs: { cmd: string; args: readonly string[]; cwd?: string; env: Record<string, string> }[] = [];

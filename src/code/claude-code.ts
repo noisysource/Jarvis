@@ -14,7 +14,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { err, ok, type Result } from "../result.js";
-import { CODE_AGENT_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
+import { codeAgentPrompt, WRAP_UP_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
 
 const TOOLS = ["Read", "Grep", "Glob"] as const;
 
@@ -64,6 +64,7 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
     q.signal?.addEventListener("abort", () => controller.abort());
     let result: Record<string, unknown> | undefined;
     let keySource: unknown;
+    let session: string | undefined;
     // Only what Claude Code needs to start and find its login; never Jarvis's other settings.
     const base = Object.fromEntries(
       (["PATH", "HOME", "USER", "LOGNAME", "TMPDIR"] as const).flatMap((k) => (process.env[k] ? [[k, process.env[k] ?? ""]] : [])),
@@ -81,7 +82,7 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
               ? { behavior: "allow", updatedInput: input }
               : { behavior: "deny", message: "Only reading and searching inside this repository is allowed." },
           settingSources: [],
-          systemPrompt: CODE_AGENT_PROMPT,
+          systemPrompt: codeAgentPrompt(q.maxTurns),
           maxTurns: q.maxTurns,
           maxBudgetUsd: q.maxUsd,
           ...(deps.model ? { model: deps.model } : {}),
@@ -96,6 +97,7 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
       })) {
         const m = message as Record<string, unknown>;
         if (m.type === "system" && m.subtype === "init") keySource = m.apiKeySource;
+        if (typeof m.session_id === "string") session = m.session_id;
         if (m.type === "result") result = m;
       }
     } catch {
@@ -106,8 +108,14 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
     if (!result) return err<CodeError>({ code: "agent", message: "The code agent gave no answer" });
     const costUsd = typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0;
     const turns = typeof result.num_turns === "number" ? result.num_turns : 0;
-    if (result.subtype === "error_max_budget_usd") return err<CodeError>({ code: "limit", message: `It hit the $${q.maxUsd.toFixed(2)} limit for one question before answering` });
-    if (result.subtype === "error_max_turns") return err<CodeError>({ code: "limit", message: `It hit the ${q.maxTurns}-step limit before answering` });
+    const via = withKey || (keySource !== undefined && keySource !== "none") ? "api-key" : "subscription";
+    if (result.subtype === "error_max_budget_usd" || result.subtype === "error_max_turns") {
+      const limit = result.subtype === "error_max_budget_usd" ? `the $${q.maxUsd.toFixed(2)} limit` : `the ${q.maxTurns}-step limit`;
+      // Don't throw away what it read: one short call, no tools, to answer from it.
+      const wrapped = session ? await wrapUp(session, q, withKey, base, run) : undefined;
+      if (wrapped) return ok({ answer: wrapped.answer, costUsd: costUsd + wrapped.costUsd, turns: turns + 1, via, partial: true });
+      return err<CodeError>({ code: "limit", message: `It hit ${limit} for one question before answering` });
+    }
     if (result.subtype !== "success" || result.is_error === true || typeof result.result !== "string") {
       const loginTrouble = typeof result.result === "string" && LOGIN_TROUBLE.test(result.result);
       return err<CodeError>(
@@ -119,8 +127,46 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
       );
     }
     // "none" means no API key: it ran on the Claude login, i.e. his plan.
-    const via = withKey || (keySource !== undefined && keySource !== "none") ? "api-key" : "subscription";
     return ok({ answer: result.result, costUsd, turns, via });
+  };
+
+  /**
+   * What the wrap-up may cost, on top of the question's limit.
+   */
+  const wrapUpBudget = (maxUsd: number): number => Math.max(0.25, Math.round(maxUsd * 60) / 100);
+
+  /**
+   * The same session, resumed for one turn with no tools: "answer from what
+   * you've read". Capped small. Undefined if that fails too.
+   */
+  const wrapUp = async (session: string, q: Parameters<CodeAgent["ask"]>[0], withKey: boolean, base: Record<string, string>, run: QueryFn): Promise<{ answer: string; costUsd: number } | undefined> => {
+    let result: Record<string, unknown> | undefined;
+    try {
+      for await (const message of run({
+        prompt: WRAP_UP_PROMPT,
+        options: {
+          resume: session,
+          cwd: q.dir,
+          tools: [],
+          permissionMode: "default",
+          canUseTool: async () => ({ behavior: "deny", message: "No more reading: answer now." }),
+          settingSources: [],
+          systemPrompt: codeAgentPrompt(q.maxTurns),
+          maxTurns: 1,
+          // Resuming re-sends everything it read, so this costs about as much as one more step over the whole lot.
+          maxBudgetUsd: wrapUpBudget(q.maxUsd),
+          ...(deps.model ? { model: deps.model } : {}),
+          env: { PATH: "/usr/bin:/bin", ...base, ...(withKey && deps.apiKey ? { ANTHROPIC_API_KEY: deps.apiKey } : {}), CLAUDE_AGENT_SDK_CLIENT_APP: "jarvis" },
+        },
+      })) {
+        const m = message as Record<string, unknown>;
+        if (m.type === "result") result = m;
+      }
+    } catch {
+      // fall through: use the result if there is one
+    }
+    if (!result || result.subtype !== "success" || result.is_error === true || typeof result.result !== "string" || result.result.trim() === "") return undefined;
+    return { answer: result.result, costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0 };
   };
 
   return {

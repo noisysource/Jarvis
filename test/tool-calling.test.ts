@@ -193,9 +193,7 @@ describe("native tool calling (#104)", () => {
 
   it(`stops offering tools after ${MAX_TOOL_ROUNDS} rounds`, async () => {
     const { llm, requests } = scripted([
-      calls("", read("a", "2026-11-11", "2026-11-11")),
-      calls("", read("b", "2026-11-12", "2026-11-12")),
-      calls("", read("c", "2026-11-13", "2026-11-13")),
+      ...Array.from({ length: MAX_TOOL_ROUNDS }, (_, i) => calls("", read(`r${i}`, `2026-11-${String(11 + i).padStart(2, "0")}`, `2026-11-${String(11 + i).padStart(2, "0")}`))),
       text("Here's your week so far."),
     ]);
     await answerer(llm, googleWith([]).read)({ context: personal, question: "This week?", history: [], memories: [], now: NOW });
