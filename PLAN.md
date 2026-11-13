@@ -588,7 +588,7 @@ with the evals, to see which jobs they can take. One PR at a time:
      `calendarForBrain` text; EC events stay "EC work, handled by Kiro".
      A refused call, an unknown tool or a failed read goes back as a tool
      error, so the brain can say so.
-   - At most 3 tool rounds (`MAX_TOOL_ROUNDS`); the last round gets no
+   - At most 5 tool rounds (`MAX_TOOL_ROUNDS`, 3 until #154); the last round gets no
      tools, so it has to answer.
    - Each call is on the path line (`by: model`); a read that worked lets
      the honesty guard pass what's on the calendar, as before.
@@ -961,6 +961,10 @@ Confirmed (2026-11-12):
   It reads a shallow copy in `data/repos/` with Read/Grep/Glob only, every
   call path-checked to stay inside the copy, the repo's settings and hooks
   not loaded, and a cost and turn cap per question.
+- **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
+  questions on his Claude plan (Claude Code's login on his Mac, no API key
+  passed), falling back to the API key when there's no login. Guests never
+  run on his plan.
 
 ## Out of scope for M0
 

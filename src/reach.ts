@@ -125,7 +125,13 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
     {
       id: "code",
       status: config.codeAgent.enabled && config.bareMode && config.toolCalling ? "on" : config.github.enabled ? "off" : "soon",
-      about: `Asks Claude Code about a repo: it reads a local copy (data/repos/) and can't change or run anything. Each question is capped at $${config.codeAgent.maxUsd.toFixed(2)} and ${config.codeAgent.maxTurns} steps.`,
+      about: `Asks Claude Code about a repo: it reads a local copy (data/repos/) and can't change or run anything. ${
+        config.codeAgent.auth === "api-key"
+          ? "Runs on the API key."
+          : config.codeAgent.auth === "subscription"
+            ? "Runs on your Claude plan (Claude Code's login on this Mac)."
+            : "Runs on your Claude plan when Claude Code is signed in on this Mac, otherwise on the API key."
+      } Each question is capped at $${config.codeAgent.maxUsd.toFixed(2)} and ${config.codeAgent.maxTurns} steps.`,
       tools: [{ name: "code_ask", does: "ask a question about a repo's code" }],
       ...(config.codeAgent.enabled ? {} : { hint: config.github.enabled ? "CODE_AGENT=on in .env" : "GITHUB=on and CODE_AGENT=on in .env" }),
     },
