@@ -393,6 +393,16 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        `CODE_AGENT_MAX_TURNS` (default 25); the cost shows on the path and
        the trace.
 
+       **Studying (#127):** say "study the noisysource repo" and Jarvis
+       studies it in the background, once and thoroughly (ceiling per repo
+       or app: `CODE_STUDY_MAX_USD`, default 5, and `CODE_STUDY_MAX_TURNS`,
+       default 150). In a monorepo he studies the top level, then each app.
+       What he learns is kept in `data/code/` (gitignored, readable only by
+       you): a note per repo or app, with a map of its parts. Later
+       questions are answered from the note (`code_notes`, instant and
+       free); `code_ask` is only for what the note doesn't cover. The Code
+       agent panel lists what's studied and what's under way.
+
        **Which account pays (`CODE_AGENT_AUTH`, #150):** `auto` (default)
        runs on your **Claude plan** when Claude Code is signed in on this Mac
        (`claude`, then `/login` with your Claude account), and on the API key

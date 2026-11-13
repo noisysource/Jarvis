@@ -44,6 +44,7 @@ import {
 } from "../github/github.js";
 import { answerForBrain, answerSummary, checkAskRequest, CODE_ASK_TOOL, type CodeAgent } from "../code/agent.js";
 import type { RepoCopies } from "../code/repos.js";
+import { checkStudyRequest, CODE_NOTES_TOOL, CODE_STUDY_TOOL, noteForBrain, noteKey, notesLine, type NoteStore, type Studies } from "../code/study.js";
 import { checkDraftRequest, draftLabel, GMAIL_DRAFT_DELETE_TOOL, GMAIL_DRAFT_TOOL, isDraftRef, type DraftBook, type GmailWriter, type PendingDrafts } from "../gmail/send.js";
 import { makeSkillTurn, SKILL_FOLLOW_TOOL, SKILL_PROPOSE_TOOL, skillsForPrompt, type SkillStore } from "../skills.js";
 import type { EcMatchers } from "../memory-rules.js";
@@ -223,6 +224,8 @@ export const barePrompt = (
     readonly github?: boolean;
     /** It can ask a code agent about a repo (#126). With GitHub only. */
     readonly code?: boolean;
+    /** It can study repos and keeps notes (#127). With the code agent only. */
+    readonly study?: boolean;
   } = {},
 ): string => {
   const you = userName ?? "the person you're talking to";
@@ -251,6 +254,11 @@ export const barePrompt = (
           ...(options.code === true
             ? [
                 "For questions that need understanding the code (how something works, where it's done, the architecture), call code_ask with the repo and one specific question: a code agent reads the repo and answers. It takes up to a minute and has a limit, so use it when github_read isn't enough. Ask narrow questions: in a big repo (a monorepo holding several apps), first list its folders with github_read to find where the app lives, then name that folder in the question (\"In apps/kidclub, how does it talk to Firebase?\"). Pass on its answer in your own words; if it couldn't find something or its answer is partial, say so.",
+                ...(options.study === true
+                  ? [
+                      "You keep notes on code you've studied; the list is at the end of this prompt. For a question about a repo or app on that list, read its note with code_notes first and answer from it; use code_ask only for what the note doesn't cover. When they ask you to study, learn or get to know a repo or app, call code_study: it runs in the background for several minutes, so say it's started, not what you found.",
+                    ]
+                  : []),
               ]
             : []),
         ]
@@ -491,6 +499,8 @@ export const makeBareAnswerer = (deps: {
     readonly isEc: (text: string) => boolean;
     readonly maxUsd: number;
     readonly maxTurns: number;
+    /** #127: studying repos in the background, and the notes kept from it. */
+    readonly study?: { readonly studies: Studies; readonly notes: NoteStore };
   };
 }): ((input: AnswerInput) => Promise<Result<AnswerOutcome, AppError>>) => {
   const max = deps.spokenSentences ?? DEFAULT_SPOKEN_SENTENCES;
@@ -499,7 +509,7 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}) };
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}), ...(deps.github && deps.code?.study && deps.tools === true ? { study: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
@@ -633,6 +643,9 @@ export const makeBareAnswerer = (deps: {
     const calendar = tools ? undefined : await calendarTurn(question, history, signal, onStep);
     // #146: which accounts are connected, checked now (a cheap file check), for "what can you see?".
     const connected = deps.connected ? connectedLine(await deps.connected().catch(() => ({}))) : undefined;
+    // #127: which code he has notes on, and what's being studied, so he reads notes before asking the agent.
+    const study = tools && deps.github ? deps.code?.study : undefined;
+    const studied = study ? notesLine(await study.notes.all().catch(() => []), study.studies.active()) : undefined;
     if (signal?.aborted) return err({ code: "cancelled", message: "Cancelled." });
     // The days read, worded by code, open the answer: a wrong day is then visible (#100).
     const lead = calendar?.lead;
@@ -655,6 +668,7 @@ export const makeBareAnswerer = (deps: {
         const suffix = [
           nowLine(now, deps.timeZone ?? deps.calendar?.timeZone ?? DEFAULT_TIME_ZONE),
           connected,
+          studied,
           toolsSoFar(history),
           memoryCore,
           skillList,
@@ -678,6 +692,7 @@ export const makeBareAnswerer = (deps: {
               ...(skillTurn ? [SKILL_FOLLOW_TOOL, SKILL_PROPOSE_TOOL] : []),
               ...(deps.github ? GITHUB_TOOLS : []),
               ...(deps.github && deps.code ? [CODE_ASK_TOOL] : []),
+              ...(deps.github && deps.code?.study ? [CODE_NOTES_TOOL, CODE_STUDY_TOOL] : []),
             ],
           }
         : {}),
@@ -716,6 +731,7 @@ export const makeBareAnswerer = (deps: {
         return runGmail(gmail, call);
       if (deps.github && GITHUB_TOOLS.some((t) => t.name === call.name)) return runGithub(deps.github, call);
       if (deps.github && deps.code && call.name === CODE_ASK_TOOL.name) return runCode(deps.code, call);
+      if (deps.github && deps.code?.study && (call.name === CODE_NOTES_TOOL.name || call.name === CODE_STUDY_TOOL.name)) return runStudy(deps.code, deps.code.study, call);
       const cal = deps.calendar;
       if (call.name === CALENDAR_CREATE_TOOL.name && cal?.create) {
         // Reach 2: never written here. Code checks it and keeps it for Renato's OK.
@@ -781,6 +797,49 @@ export const makeBareAnswerer = (deps: {
       const missing = unread.length > 0 ? ` (${unread.map((u) => `${u.account}: ${u.code === "not_connected" ? "not connected" : u.code}`).join(", ")})` : "";
       onStep?.({ kind: "tool", name: "calendar_read", args: label, by: "model", ok: true, result: `${count} ${count === 1 ? "event" : "events"}${missing}` });
       return { callId: call.id, content: calendarForBrain(range, events, cal.timeZone, read.value) };
+    };
+
+    /** #127: start a study in the background, or read a note from an earlier one. */
+    const runStudy = async (code: NonNullable<typeof deps.code>, study: NonNullable<NonNullable<typeof deps.code>["study"]>, call: LlmToolCall): Promise<LlmToolResult> => {
+      const checked = checkStudyRequest(call.input, await code.owners());
+      if (!checked.ok) {
+        onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: `refused: ${checked.error}` });
+        return { callId: call.id, content: `Refused: ${checked.error}. Use a repo from github_repos, and a folder inside it if you mean one app.`, isError: true };
+      }
+      const r = checked.value;
+      const repo = `${r.owner}/${r.name}`;
+      const args = noteKey(repo, r.folder);
+      if (isEcRepo({ name: r.name, description: "" }, code.isEc) || code.isEc(r.folder.replace(/[-_/]/g, " "))) {
+        onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: `refused: ${EC_REPO}` });
+        return { callId: call.id, content: "Refused: that's European Commission work, which Kiro handles. Say so.", isError: true };
+      }
+      if (call.name === CODE_NOTES_TOOL.name) {
+        const note = await study.notes.get(repo, r.folder);
+        if (!note) {
+          const busy = study.studies.active().find((s) => noteKey(s.repo, s.folder) === args);
+          onStep?.({ kind: "tool", name: "code_notes", args, by: "model", ok: false, error: busy && busy.state !== "failed" ? "still being studied" : "not studied yet" });
+          return {
+            callId: call.id,
+            content:
+              busy && busy.state !== "failed"
+                ? "That's still being studied; the note isn't ready. Say so, and that it takes a few minutes."
+                : "You have no note on that yet. Offer to study it (code_study), or use code_ask for this one question.",
+            isError: true,
+          };
+        }
+        onStep?.({ kind: "tool", name: "code_notes", args, by: "model", ok: true, result: `note from ${note.studiedAt.slice(0, 10)}${note.partial ? " (partial)" : ""}` });
+        return { callId: call.id, content: noteForBrain(note) };
+      }
+      const started = study.studies.start(r.owner, r.name, r.folder);
+      deps.log?.info("code study requested", { outcome: started, folder: r.folder !== "" });
+      onStep?.({ kind: "tool", name: "code_study", args, by: "model", ok: true, result: started === "queued" ? "started in the background" : "already under way" });
+      return {
+        callId: call.id,
+        content:
+          started === "queued"
+            ? `The study of ${args} has started in the background. It takes several minutes${r.folder ? "" : " (longer for a monorepo: each app is studied after the top level)"}. Say that it's started and that they can ask about it once it's done; you can't tell them when it finishes. Don't describe the code yet.`
+            : `${args} is already being studied. Say so.`,
+      };
     };
 
     /** #126: one question to the code agent, about a local copy of one repo, capped. */

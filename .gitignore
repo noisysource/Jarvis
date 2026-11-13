@@ -27,6 +27,8 @@ data/google-calendar-*.json
 data/github-tokens.json
 # Local copies of your repos for the code agent (#126)
 data/repos/
+# What Jarvis learned from studying your repos (#127)
+data/code/
 # Introspection reports (#108): your memories, local only, never commit
 data/introspection/
 # Skills (#116): your routines, local only, never commit

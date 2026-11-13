@@ -32,7 +32,7 @@ export const nodeOfTool = (tool) => {
   if (tool.startsWith("memory_")) return "memory";
   if (tool.startsWith("skill_")) return "skills";
   if (tool.startsWith("github_")) return "github";
-  if (tool === "code_ask") return "code";
+  if (tool.startsWith("code_")) return "code";
   return undefined;
 };
 

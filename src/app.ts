@@ -14,6 +14,7 @@ import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type Calen
 import type { CodeAgent } from "./code/agent.js";
 import { makeClaudeCodeAgent } from "./code/claude-code.js";
 import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
+import { makeNoteStore, makeStudies, type NoteFiles } from "./code/study.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
@@ -30,7 +31,8 @@ import { makeModelExtract } from "./memory-extract.js";
 import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
 import { runIntrospection } from "./introspection.js";
 import { makeSkillStore, type SkillStore } from "./skills.js";
-import { access, chmod, mkdir, readFile as readFileFs, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile as readFileFs, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { reachView } from "./reach.js";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
 import { makePrecheck } from "./precheck.js";
@@ -67,6 +69,8 @@ export type AppInputs = {
   /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
   readonly codeAgent?: CodeAgent;
   readonly repoCopies?: RepoCopies;
+  /** Tests: where code notes are kept (#127), instead of data/code/. */
+  readonly noteFiles?: NoteFiles;
   /** Tests: reads email instead of Gmail (Reach 3). */
   readonly gmailReader?: GmailReader;
 };
@@ -259,17 +263,35 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   // #125: GitHub, read-only, one fine-grained token per owner in data/github-tokens.json (mode 600).
   const githubTokens = makeGithubTokens({ readFile: () => readFileFs(config.github.tokensPath, "utf8") });
   const github = config.github.enabled ? { reader: inputs.githubReader ?? makeGithubReader({ tokens: githubTokens }), isEc: isEcText } : undefined;
+  // #127: what he's learned from studying repos: one note per repo or app, local, readable only by him.
+  const noteStore = makeNoteStore(
+    inputs.noteFiles ?? {
+      read: (name) => readFileFs(path.join(config.codeAgent.study.notesPath, name), "utf8"),
+      write: async (name, text) => {
+        await mkdir(config.codeAgent.study.notesPath, { recursive: true, mode: 0o700 });
+        await writeFile(path.join(config.codeAgent.study.notesPath, name), text, { mode: 0o600 });
+        await chmod(path.join(config.codeAgent.study.notesPath, name), 0o600);
+      },
+      list: () => readdir(config.codeAgent.study.notesPath),
+    },
+  );
+  const codeAgent = github && config.codeAgent.enabled ? (inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key, auth: config.codeAgent.auth })) : undefined;
+  const repoCopies = inputs.repoCopies ?? makeRepoCopies({ root: config.codeAgent.reposPath, token: githubTokens.token, run: runCommand });
+  const studies = codeAgent
+    ? makeStudies({ agent: codeAgent, copies: repoCopies, store: noteStore, isEc: isEcText, maxUsd: config.codeAgent.study.maxUsd, maxTurns: config.codeAgent.study.maxTurns, now, log })
+    : undefined;
   // #126: a code agent (Claude Code, read-only) on local copies of the repos GitHub reaches.
+  // #150: his own questions can run on his Claude plan (Claude Code's login on this Mac).
   const code =
-    github && config.codeAgent.enabled
+    github && codeAgent && studies
       ? {
-          // #150: his own questions can run on his Claude plan (Claude Code's login on this Mac).
-          agent: inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key, auth: config.codeAgent.auth }),
-          copies: inputs.repoCopies ?? makeRepoCopies({ root: config.codeAgent.reposPath, token: githubTokens.token, run: runCommand }),
+          agent: codeAgent,
+          copies: repoCopies,
           owners: githubTokens.owners,
           isEc: isEcText,
           maxUsd: config.codeAgent.maxUsd,
           maxTurns: config.codeAgent.maxTurns,
+          study: { studies, notes: noteStore },
         }
       : undefined;
   // #146: which accounts are connected, checked each turn (does the token file exist), for the brain's prompt.
@@ -361,6 +383,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         config,
         exists: fileExists,
         githubOwners: githubTokens.owners,
+        studied: async () => ({ notes: await noteStore.all(), active: studies?.active() ?? [] }),
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
     ...(gmailSend ? { gmailSend } : {}),

@@ -8,7 +8,7 @@ import { EMPTY, NODES, NODE_TAGS, applyReach, applyStep, connectCommand, isReach
 /** @typedef {import("./chat.js").PathStep} PathStep */
 /**
  * One node as GET /reach describes it (#133): names, on/off and counts only.
- * @typedef {{ id: string, status: string, about: string, tools: { name: string, does: string }[], accounts?: { name: string, connected: boolean }[], hint?: string, waiting?: number }} ReachNode
+ * @typedef {{ id: string, status: string, about: string, tools: { name: string, does: string }[], accounts?: { name: string, connected: boolean }[], hint?: string, waiting?: number, studied?: { name: string, state: string }[] }} ReachNode
  */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -195,6 +195,19 @@ export const makeBrainView = (root, options = {}) => {
         ul.append(li);
       }
       panel.append(ul);
+    }
+    if (info.studied) {
+      panel.append(text("h3", "", "Studied"));
+      if (info.studied.length === 0) panel.append(text("p", "brain-panel-hint", 'Nothing yet. Ask him to "study" a repo.'));
+      else {
+        const ul = el("ul", "brain-panel-list");
+        for (const s of info.studied) {
+          const li = el("li", s.state.startsWith("studied") ? "connected" : s.state.startsWith("failed") ? "not-connected" : "");
+          li.append(text("span", "", s.name), text("span", "", s.state));
+          ul.append(li);
+        }
+        panel.append(ul);
+      }
     }
     if (info.hint && info.status !== "on") panel.append(text("p", "brain-panel-hint", info.hint));
     const open = options.open?.[id];
