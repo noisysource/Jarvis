@@ -915,9 +915,10 @@ be pulled forward at any time.
    proposes the fix, and says so each morning.
    #160 CI results on fine-grained tokens · #158 code maps ·
    #161 Google Cloud errors and logs (dev first) ·
-   #162 code agent opens a PR after an OK · #49 daily brief (with what
-   failed overnight) · #128 keep code knowledge current ·
-   #138 he proposes fixes to himself.
+   #174 #175 only the tools a question needs (chosen locally) ·
+   #162 code agent opens a PR after two OKs · #49 daily brief (with what
+   failed overnight) · #177 the brief ready each morning ·
+   #128 keep code knowledge current · #138 he proposes fixes to himself.
 2. **Money, numbers and the house.**
    #7 #8 #9 #12 Vendus and KidClub numbers (read-only, GET only) ·
    #164 FinHub money questions, read-only · #165 money moves: he prepares,
