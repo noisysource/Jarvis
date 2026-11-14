@@ -422,7 +422,7 @@ describe("chat page", () => {
     app.request(`http://127.0.0.1:8080${path}`, { headers: { host: "127.0.0.1:8080" } });
 
   it.each([
-    ["/", "text/html", "<title>Jarvis</title>"],
+    ["/", "text/html", "<title>Jarvis · Noisy Source</title>"],
     ["/app.js", "text/javascript", 'from "./chat.js"'],
     ["/chat.js", "text/javascript", "export const replyView"],
     ["/app.css", "text/css", "prefers-color-scheme"],
