@@ -34,7 +34,7 @@ export type RouterMode = "model" | "rules" | "all";
 
 /** The group a tool belongs to; undefined for tools that are always offered. */
 export const groupOfTool = (name: string): ToolGroup | undefined => {
-  if (name.startsWith("calendar_")) return "calendar";
+  if (name.startsWith("calendar_") || name === "day_brief") return "calendar";
   if (name.startsWith("gmail_")) return "gmail";
   if (name.startsWith("github_")) return "github";
   if (name.startsWith("code_")) return "code";
@@ -63,7 +63,7 @@ const words = (list: string): RegExp =>
 const RULES: readonly { readonly pattern: RegExp; readonly groups: readonly ToolGroup[] }[] = [
   {
     pattern: words(`
-      calendar*, agenda*, meeting*, appointment*, schedul*, book, booked, booking, free, busy, availab*, event*,
+      calendar*, agenda*, brief*, resumo*, anything i should know, meeting*, appointment*, schedul*, book, booked, booking, free, busy, availab*, event*,
       today, tonight, tomorrow, yesterday, week*, weekend*, month, morning, afternoon, evening,
       monday, tuesday, wednesday, thursday, friday, saturday, sunday, plate, invite*, call, calls,
       calendario*, reuniao, reunioes, marcacao, marcar, marca, livre, ocupado, evento*, hoje, amanha, ontem, semana*,

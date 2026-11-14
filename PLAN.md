@@ -951,6 +951,15 @@ Confirmed (2026-11-12):
   connected account unless the brain names one; an account that can't be
   read is reported, never treated as an empty calendar.
 
+- **Daily brief (#49):** one read-only tool, `day_brief`, in the calendar
+  group. Code gathers in parallel: today on each connected calendar,
+  unread email from the last day (`is:unread newer_than:1d`, without
+  promotions, social, forums), errors in the last 24 h per connected Google
+  Cloud environment, CI on the default branch of up to six studied repos.
+  Each part fails on its own; EC events and emails are masked as before.
+  Claude words it (calendar, then people's email, then failures). Running
+  it on a schedule, so it's ready each morning, is #177.
+
 - **Tool groups (#175):** Claude no longer gets every tool on every
   question. Tools are grouped (calendar, gmail, github, code, cloud;
   memory and skills always on), and code picks the groups first: a word

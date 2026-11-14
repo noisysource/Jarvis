@@ -28,7 +28,7 @@ export const NODES = /** @type {const} */ ([
  * @returns {NodeId | undefined}
  */
 export const nodeOfTool = (tool) => {
-  if (tool.startsWith("calendar_")) return "calendar";
+  if (tool.startsWith("calendar_") || tool === "day_brief") return "calendar";
   if (tool.startsWith("gmail_")) return "gmail";
   if (tool.startsWith("memory_")) return "memory";
   if (tool.startsWith("skill_")) return "skills";

@@ -19,7 +19,7 @@ describe("GET /reach content (#133)", () => {
     const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
     expect(nodes.map((n) => n.id)).toEqual(["profile", "memory", "skills", "calendar", "gmail", "github", "cloud", "code", "kiro"]);
     expect(byId.calendar?.status).toBe("on");
-    expect(byId.calendar?.tools.map((t) => t.name)).toEqual(["calendar_read", "calendar_create"]);
+    expect(byId.calendar?.tools.map((t) => t.name)).toEqual(["calendar_read", "day_brief", "calendar_create"]);
     expect(byId.calendar?.accounts).toEqual([
       { name: "personal", connected: true },
       { name: "noisysource", connected: false },
@@ -39,7 +39,7 @@ describe("GET /reach content (#133)", () => {
     const calendar = nodes.find((n) => n.id === "calendar");
     expect(calendar?.status).toBe("off");
     expect(calendar?.hint).toBe("CALENDAR=on in .env");
-    expect(calendar?.tools.map((t) => t.name)).toEqual(["calendar_read"]);
+    expect(calendar?.tools.map((t) => t.name)).toEqual(["calendar_read", "day_brief"]);
     expect(nodes.find((n) => n.id === "memory")?.status).toBe("off");
   });
 

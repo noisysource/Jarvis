@@ -439,6 +439,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               // #161: errors and logs in his Google Cloud environments, read-only, with tools (Claude).
               ...(gcloud && config.toolCalling ? { gcloud } : {}),
               // #175: only the tool groups a question needs; the classifier model (Haiku) helps pick.
+              // #49: "what's on my plate?" in one read of everything connected.
+              ...(calendar && config.toolCalling ? { brief: true } : {}),
               route: { mode: config.toolRouter, ...(config.toolRouter === "model" ? { router: makeToolRouter({ llm: classifierLlm.value, log }) } : {}) },
               // Tests give their own calendar reader: no token files to check then.
               ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
