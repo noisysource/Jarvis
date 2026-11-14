@@ -903,6 +903,47 @@ SQLite store (`node:sqlite`) → #61 wrap-up extraction and rules → #62 list
 and delete (CLI, page panel, chat); #24 is now the Firestore store, with
 deployment.
 
+## Roadmap: four phases to a demo
+
+Agreed 13 Nov 2026. The goal: Jarvis solves Renato's own problem first
+(one assistant across the businesses, the money and the house), and that
+daily use becomes the pitch. Each phase is a GitHub milestone; the order
+inside a phase is the build order. Voice is used daily, so its fixes can
+be pulled forward at any time.
+
+1. **Watch and fix the apps.** He sees what fails, finds the cause,
+   proposes the fix, and says so each morning.
+   #160 CI results on fine-grained tokens · #158 code maps ·
+   #161 Google Cloud errors and logs (dev first) ·
+   #174 #175 only the tools a question needs (chosen locally) ·
+   #162 code agent opens a PR after two OKs · #49 daily brief (with what
+   failed overnight) · #177 the brief ready each morning ·
+   #128 keep code knowledge current · #138 he proposes fixes to himself.
+2. **Money, numbers and the house.**
+   #7 #8 #9 #12 Vendus and KidClub numbers (read-only, GET only) ·
+   #164 FinHub money questions, read-only · #165 money moves: he prepares,
+   Renato approves (the CFO decides; no bank write access) ·
+   #166 the house through the domotics app, actions behind an OK ·
+   #167 Google Cloud staging and prod, scoped read-only Firestore ·
+   #16 local dev with stubs.
+3. **Away from the Mac.**
+   #87 #54 #91 voice (mishearing, local speech, conversation feel) ·
+   #134 #132 brain view polish · #151 switches for tools ·
+   #19 #53 phone access · #17 #18 #24 hosting on Google Cloud ·
+   #152 guests and booking a call · #68 how he talks ·
+   #168 tools as plug-ins: one core, connectors swapped per person or
+   country.
+4. **Proof and pitch.**
+   #169 hours saved, counted by Jarvis · #170 demo, video and one-page
+   memo · #171 easy questions to the local model (idea from OpenJarvis;
+   only once there is data) · #55 #129 local brains.
+
+Boundaries that hold in every phase: EC/HRT goes to Kiro; Vendus is
+read-only; nothing that moves money, changes the house, sends email or
+writes code happens without Renato's OK; guests never see private data
+or run on his Claude plan; secrets and personal data are never logged or
+committed.
+
 ## Decisions
 
 Confirmed in #1 (2026-11-05):
