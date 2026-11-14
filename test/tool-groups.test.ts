@@ -247,6 +247,12 @@ describe("Claude with routed tools", () => {
     expect(requests[0]?.system).not.toContain("tools_more");
   });
 
+  it("tools ran but no words came back: an honest line, never a blank reply", async () => {
+    const script = [...Array.from({ length: MAX_TOOL_ROUNDS }, (_, i) => calls({ id: `e${i}`, name: "gcloud_errors", input: { env: "dev" } })), text("")];
+    const { result } = await run("what's failing in dev?", script, { mode: "rules" });
+    expect(result.ok && result.value.kind === "answer" && result.value.text).toBe("I ran out of steps before I could answer. I got as far as: gcloud_errors. Ask me again, a bit more narrowly, and I'll pick it up from there.");
+  });
+
   it("the prompt line is part of the cached prompt only when routing", () => {
     expect(barePrompt(undefined, { tools: true, github: true, routed: true })).toContain("tools_more");
     expect(barePrompt(undefined, { tools: true })).not.toContain("tools_more");

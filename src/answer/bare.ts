@@ -275,7 +275,7 @@ export const barePrompt = (
   const fixLines =
     options.fix === true && options.tools === true
       ? [
-          "When you've found a problem in his code and he wants it fixed (or asks you to fix it), propose it with code_fix: the repo, a short title, and the problem with its cause in a few sentences, no personal data. Nothing changes until he says so: then the code agent prepares it, he sees the diff, and only his second OK opens a draft pull request. You never push, merge or deploy.",
+          "When he asks for a change in his code (a fix, or a small edit like a title or a text), or wants a problem you found fixed, call code_fix straight away: the repo, a short title, and what to change or what fails (with the cause if you know it), no personal data. Don't look for the file yourself and don't ask code_ask first: the code agent finds the place. And don't ask him in words first: code_fix changes nothing, it shows him a card, and he decides there. Then he sees the diff, and only his second OK opens a draft pull request. You never push, merge or deploy.",
         ]
       : [];
   const briefLines =
@@ -820,7 +820,10 @@ export const makeBareAnswerer = (deps: {
     /** #175: the tools of the next rounds; tools_more adds a group. */
     let currentTools = request.tools;
     const used = new Set<ToolGroup>();
+    /** The tools that ran this turn, by name, for an honest line if no answer comes. */
+    const ran: string[] = [];
     const runTool = async (call: LlmToolCall): Promise<LlmToolResult> => {
+      ran.push(call.name);
       // The page's brain view (#130): only names Jarvis offered, never the model's free text.
       if (offered.has(call.name)) onReach?.(call.name);
       const group = groupOfTool(call.name);
@@ -1391,6 +1394,11 @@ export const makeBareAnswerer = (deps: {
     }
     if (result.value.kind === "json") return err({ code: "llm_failed", message: "Sorry, something went wrong answering that. Please try again." });
     const text = [...earlier, unrestated(result.value.text)].filter((t) => t.trim() !== "").join(" ");
+    // Tools ran but no words came back (the rounds ran out, or the brain said nothing): say so, never a blank reply.
+    if (text.trim() === "" && ran.length > 0) {
+      deps.log?.warn("bare answer was empty after tools", { tools: ran.length });
+      return ok({ kind: "answer", text: `I ran out of steps before I could answer. I got as far as: ${[...new Set(ran)].join(", ")}. Ask me again, a bit more narrowly, and I'll pick it up from there.` });
+    }
     return ok({ kind: "answer", text: withLead(text) });
   };
 };

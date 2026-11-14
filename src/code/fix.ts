@@ -27,14 +27,14 @@ import type { CodeAgent, CodeStep } from "./agent.js";
 export const CODE_FIX_TOOL: LlmTool = {
   name: "code_fix",
   description:
-    "Propose fixing a problem in one of his repos as a pull request. Nothing changes by this call: the app asks him first; on his OK the code agent prepares the change on a copy, he sees the diff, and only his second OK pushes a branch and opens a draft pull request. Use it once you know the problem and, ideally, its cause (from errors, CI or the code), and he wants it fixed.",
+    "Propose a change in one of his repos as a pull request: a fix, or a small edit he asked for. Nothing changes by this call: it shows him a card, so call it directly instead of asking in words. On his OK the code agent finds the place, prepares the change on a copy, and he sees the diff; only his second OK pushes a branch and opens a draft pull request.",
   inputSchema: {
     type: "object",
     properties: {
       repo: { type: "string", description: 'The repo as "owner/name"' },
       folder: { type: "string", description: "The app's folder in a monorepo, if the fix is in one app" },
       title: { type: "string", description: "A short pull request title, e.g. \"Fix timeout in billing cutoff\"" },
-      problem: { type: "string", description: "What fails, where, how often, and the cause if you found it, in a few sentences. No personal data (names, emails, family details)." },
+      problem: { type: "string", description: "What to change, or what fails, where and why if you know, in a few sentences. No personal data (names, emails, family details)." },
     },
     required: ["repo", "title", "problem"],
     additionalProperties: false,

@@ -305,7 +305,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       list: () => readdir(config.codeAgent.study.notesPath),
     },
   );
-  const codeAgent = github && config.codeAgent.enabled ? (inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key, auth: config.codeAgent.auth })) : undefined;
+  const codeAgent = github && config.codeAgent.enabled ? (inputs.codeAgent ?? makeClaudeCodeAgent({ apiKey: key.value.key, auth: config.codeAgent.auth, model: config.codeAgent.model })) : undefined;
   const repoCopies = inputs.repoCopies ?? makeRepoCopies({ root: config.codeAgent.reposPath, token: githubTokens.token, run: runCommand });
   const studies = codeAgent
     ? makeStudies({ agent: codeAgent, copies: repoCopies, store: noteStore, isEc: isEcText, maxUsd: config.codeAgent.study.maxUsd, maxTurns: config.codeAgent.study.maxTurns, now, log })

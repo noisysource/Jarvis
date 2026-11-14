@@ -250,7 +250,8 @@ describe("Claude proposing a fix", () => {
       onStep: (s) => steps.push(s),
     });
     expect(requests[0]?.tools?.map((t) => t.name)).toContain("code_fix");
-    expect(requests[0]?.system).toContain("propose it with code_fix");
+    expect(requests[0]?.system).toContain("call code_fix straight away");
+    expect(requests[0]?.system).toContain("don't ask him in words first");
     expect(steps[0]).toEqual({
       kind: "tool",
       name: "code_fix",

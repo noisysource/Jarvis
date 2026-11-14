@@ -137,6 +137,12 @@ export type Config = {
     /** #150: CODE_AGENT_AUTH: "auto" (default: his Claude login, else the API key), "subscription" or "api-key". */
     readonly auth: "auto" | "subscription" | "api-key";
     /**
+     * CODE_AGENT_MODEL (default claude-sonnet-5-5): the model the code agent
+     * runs on. Without it, Claude Code used the plan's default, the most
+     * expensive one, and a question hit its $0.50 ceiling in two steps.
+     */
+    readonly model: string;
+    /**
      * #127: the ceiling for one study (a repo, or one app in a monorepo):
      * CODE_STUDY_MAX_USD (default 5) and CODE_STUDY_MAX_TURNS (default 150).
      * High on purpose: a study reads a lot, once. Notes go to `notesPath`.
@@ -312,6 +318,10 @@ const EnvSchema = z.object({
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["auto", "subscription", "api-key"], { error: 'must be "auto", "subscription" or "api-key"' }).default("auto"),
+  ),
+  CODE_AGENT_MODEL: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().regex(/^claude-[a-z0-9.-]{3,60}$/, { error: "must be a Claude model id, e.g. claude-sonnet-5-5" }).default("claude-sonnet-5-5"),
   ),
   CODE_FIX: onOff,
   CODE_FIX_MAX_USD: z.preprocess(
@@ -510,7 +520,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
