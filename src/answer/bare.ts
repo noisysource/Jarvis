@@ -43,6 +43,7 @@ import {
   type GithubReader,
 } from "../github/github.js";
 import { checkFixRequest, CODE_FIX_TOOL, type Fixes } from "../code/fix.js";
+import { checkPrClose, GITHUB_PR_CLOSE_TOOL, type PrCloser } from "../github/pr-close.js";
 import { BRIEF_EMAIL_QUERY, briefForBrain, briefSummary, DAY_BRIEF_TOOL, gatherBrief } from "../brief.js";
 import { GROUP_ABOUT, groupOfTool, groupsByWords, groupsUsedLately, pickGroups, TOOL_GROUPS, TOOLS_MORE, toolsMoreTool, type RouterMode, type ToolGroup, type ToolRouter } from "./tool-groups.js";
 import { checkDbCollections, checkDbGet, checkDbQuery, collectionsForBrain, DB_COLLECTIONS_TOOL, DB_QUERY_TOOL, DB_TOOLS, docForBrain, docsForBrain, type DbReader } from "../gcloud/firestore.js";
@@ -556,7 +557,12 @@ export const makeBareAnswerer = (deps: {
   /** #146: which calendar and Gmail accounts are connected, checked each turn. */
   readonly connected?: () => Promise<Connected>;
   /** #125: his GitHub repos, read-only. With tools only. EC-looking repos are Kiro's. */
-  readonly github?: { readonly reader: GithubReader; readonly isEc: (text: string) => boolean };
+  readonly github?: {
+    readonly reader: GithubReader;
+    readonly isEc: (text: string) => boolean;
+    /** #183: closing a pull request, after his OK (with the write token). */
+    readonly prs?: PrCloser;
+  };
   /** #161: errors and logs in his Google Cloud environments, read-only. With tools only. */
   readonly gcloud?: { readonly reader: GcloudReader; /** #167: the database, read-only. */ readonly db?: DbReader };
   /**
@@ -706,7 +712,7 @@ export const makeBareAnswerer = (deps: {
       : g === "gmail"
         ? [GMAIL_SEARCH_TOOL, GMAIL_READ_TOOL, ...(deps.gmail?.writer ? [GMAIL_DRAFT_TOOL] : []), ...(deps.gmail?.writer?.book && deps.gmail.writer.deletions ? [GMAIL_DRAFT_DELETE_TOOL] : [])]
         : g === "github"
-          ? GITHUB_TOOLS
+          ? [...GITHUB_TOOLS, ...(deps.github?.prs ? [GITHUB_PR_CLOSE_TOOL] : [])]
           : g === "code"
             ? [CODE_ASK_TOOL, ...(deps.code?.study ? [CODE_NOTES_TOOL, CODE_STUDY_TOOL] : []), ...(deps.code?.fix ? [CODE_FIX_TOOL] : [])]
             : [...GCLOUD_TOOLS, ...(deps.gcloud?.db ? DB_TOOLS : [])];
@@ -889,6 +895,21 @@ export const makeBareAnswerer = (deps: {
           (call.name === GMAIL_DRAFT_DELETE_TOOL.name && gmail.writer?.book && gmail.writer.deletions))
       )
         return runGmail(gmail, call);
+      if (deps.github?.prs && call.name === GITHUB_PR_CLOSE_TOOL.name) {
+        const prs = deps.github.prs;
+        const checked = checkPrClose(call.input);
+        const refuse = (why: string, content: string): LlmToolResult => {
+          onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: `refused: ${why}` });
+          return { callId: call.id, content, isError: true };
+        };
+        if (!checked.ok) return refuse(checked.error, `Refused: ${checked.error}.`);
+        const r = checked.value;
+        if (deps.github.isEc(`${r.owner}/${r.name}`)) return refuse("EC repo", "Refused: that's EC work, which Kiro handles. Say so.");
+        if (!(await prs.canWrite(r.owner))) return refuse("no write token", `Refused: Jarvis can't write to ${r.owner}'s repos. Tell him to run npm run github:connect -- ${r.owner} --write.`);
+        const id = prs.propose(r);
+        onStep?.({ kind: "tool", name: call.name, args: `${r.owner}/${r.name}#${r.number}`, by: "model", ok: true, result: "waiting for your OK", confirm: { id, label: `${r.owner}/${r.name}#${r.number}`, kind: "pr-close" } });
+        return { callId: call.id, content: 'Not closed yet: the app is asking him "Close it" / "Keep it". Say in one sentence that it needs his OK. Never say it\'s closed.' };
+      }
       if (deps.github && GITHUB_TOOLS.some((t) => t.name === call.name)) return runGithub(deps.github, call);
       if (deps.gcloud && GCLOUD_TOOLS.some((t) => t.name === call.name)) return runGcloud(deps.gcloud, call);
       if (deps.gcloud?.db && DB_TOOLS.some((t) => t.name === call.name)) return runGcloudDb(deps.gcloud.reader, deps.gcloud.db, call);
