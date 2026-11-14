@@ -4,6 +4,7 @@
 // context id is a branded string that only the contexts parser should create.
 
 import type { Fixes } from "./code/fix.js";
+import type { MorningBriefs } from "./morning.js";
 import type { PrCloser } from "./github/pr-close.js";
 import type { CodeMapView, Studies } from "./code/study.js";
 import type { ReachNode } from "./reach.js";
@@ -351,6 +352,8 @@ export type Deps = {
   readonly reach?: () => Promise<readonly ReachNode[]>;
   /** #108: reviews short-term memory (drop, promote, merge; skill and tool drafts). With MEMORY=on. */
   readonly introspect?: () => Promise<IntrospectionReport>;
+  /** #177: the morning brief, prepared at BRIEF_AT and shown on the page (GET /brief/today). */
+  readonly morningBrief?: MorningBriefs;
   /** STICKY_CONTEXT=on (#76): spoken follow-ups skip the classifier and stay in the last answered context. */
   readonly stickyContext?: boolean;
   /** SPECULATIVE_ANSWER=on (#76): start the personal answer while the classifier runs; discard it if it disagrees. */

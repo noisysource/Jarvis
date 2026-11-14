@@ -1690,3 +1690,16 @@ li[data-status="waiting"] > .t-leaf .t-result {
 .message .confirm .fix-diff .diff-hunk { color: #6f7fd6; }
 .message .confirm .fix-diff .diff-file { font-weight: 600; }
 .message .confirm .fix-note { font-size: 0.85em; color: var(--muted, #888); }
+
+/* #177: the morning brief, above the conversation. */
+.morning {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  background: rgba(255, 196, 64, 0.08);
+}
+.morning-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.morning-head h2 { margin: 0; font-size: 1rem; }
+.morning p { margin: 0.5rem 0 0; line-height: 1.45; }
+.morning .morning-summary { font-size: 0.85em; color: var(--muted, #888); }

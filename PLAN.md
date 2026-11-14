@@ -999,7 +999,10 @@ Confirmed (2026-11-12):
   Cloud environment, CI on the default branch of up to six studied repos.
   Each part fails on its own; EC events and emails are masked as before.
   Claude words it (calendar, then people's email, then failures). Running
-  it on a schedule, so it's ready each morning, is #177.
+  it on a schedule (#177): `BRIEF_AT` (07:30) prepares it daily with one
+  Claude call, kept in `data/brief/<day>.json` (mode 600), shown as a card
+  (`GET /brief/today`); a page load after `BRIEF_AT` with none kept
+  prepares it (one at a time). Phone delivery waits for #19.
 
 - **Tool groups (#175):** Claude no longer gets every tool on every
   question. Tools are grouped (calendar, gmail, github, code, cloud;

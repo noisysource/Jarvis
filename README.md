@@ -321,6 +321,12 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        last 24 h in each connected Google Cloud environment, and CI on the
        default branch of each studied repo. A part that fails is said
        plainly; EC items are named only as EC work.
+       **Each morning (#177)** it's prepared at `BRIEF_AT` (default 07:30,
+       your time) and waits as a card above the conversation until you
+       click **Got it**. If Jarvis wasn't running then, the first page load
+       after it prepares one. It's kept for the day in `data/brief/`
+       (gitignored). "Good morning" or "bom dia" also gets you the brief.
+       `BRIEF_SCHEDULE=off` turns the morning card off.
      - **Only the tools a question needs (#175).** Tools come in groups
        (calendar, Gmail, GitHub, code, Google Cloud); memory and skills
        are always there. Before Claude sees a question, Jarvis picks the

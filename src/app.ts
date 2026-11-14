@@ -7,6 +7,8 @@ import { readFile } from "node:fs/promises";
 import { makeToolRouter } from "./answer/tool-groups.js";
 import { makeFixes, type Fixes, type RunOut } from "./code/fix.js";
 import { makePrCloser } from "./github/pr-close.js";
+import { briefSources } from "./brief.js";
+import { makeMorningBriefs, type BriefStore, type MorningBrief } from "./morning.js";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
@@ -401,6 +403,49 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           return { ok: true, text: addedSentence(created.value, config.timeZone, localDate(now(), config.timeZone)), tool: `calendar_create ${proposalPathLabel(proposal)} → added` };
         }
       : undefined;
+  // #177: the morning brief, kept for the day in data/brief/<day>.json (mode 600: email senders and subjects).
+  const briefStore: BriefStore = {
+    read: async (day) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+      const text = await readFileFs(path.join(config.morningBrief.path, `${day}.json`), "utf8").catch(() => undefined);
+      if (!text) return undefined;
+      try {
+        const b = JSON.parse(text) as Partial<MorningBrief>;
+        return typeof b.day === "string" && typeof b.text === "string" && typeof b.summary === "string" && typeof b.preparedAt === "string"
+          ? { day: b.day, text: b.text, summary: b.summary, preparedAt: b.preparedAt }
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    write: async (b) => {
+      await mkdir(config.morningBrief.path, { recursive: true, mode: 0o700 });
+      const file = path.join(config.morningBrief.path, `${b.day}.json`);
+      await writeFile(file, JSON.stringify(b), { mode: 0o600 });
+      await chmod(file, 0o600);
+    },
+  };
+  const morningBrief =
+    config.morningBrief.enabled && calendar && config.toolCalling
+      ? makeMorningBriefs({
+          sources: () =>
+            briefSources({
+              calendar,
+              ...(gmail ? { gmail } : {}),
+              ...(gcloud ? { cloud: gcloud.reader } : {}),
+              ...(github ? { github: github.reader } : {}),
+              ...(code?.study ? { studiedRepos: async () => (await noteStore.all()).map((n) => n.repo) } : {}),
+            }),
+          llm: answerLlm.value,
+          store: briefStore,
+          timeZone: config.timeZone,
+          at: { hour: config.morningBrief.hour, minute: config.morningBrief.minute },
+          isEc: isEcText,
+          now,
+          ...(config.userName ? { userName: config.userName } : {}),
+          log,
+        })
+      : undefined;
   const answerers = personalWith(answerLlm.value);
   const localAnswerers = personalWith(localLlm.value);
   const background = inputs.background ?? makeBackgroundTasks({ log });
@@ -449,6 +494,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(gmailDelete ? { gmailDelete } : {}),
     ...(studies ? { codeStudies: studies, codeMaps: async () => mapViews(await noteStore.all()) } : {}),
     ...(fixes ? { codeFixes: fixes } : {}),
+    ...(morningBrief ? { morningBrief } : {}),
     ...(prs ? { prClose: prs } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
