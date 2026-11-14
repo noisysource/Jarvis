@@ -454,6 +454,19 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        Anthropic allows the Agent SDK on your own plan for your own use; it's
        for you only, never for guests. The trace shows "Claude plan" or the
        dollar cost for each question.
+     - **Fixes as pull requests (`CODE_FIX=on`, with `CODE_AGENT=on`).**
+       When Jarvis has found a problem and you want it fixed, he proposes
+       it (`code_fix`) and you get a card: **Prepare it** / **Not now**.
+       On "Prepare it" the code agent makes the change on a fresh copy in
+       `data/fixes/` (it can edit files there, never `.git` or `.github`,
+       and can't run anything), and the card shows the diff: **Open the
+       pull request** / **Throw it away**. Only that second OK pushes a new
+       `jarvis/fix-…` branch and opens a draft pull request. He never
+       pushes to the default branch, forces, merges or deploys. It needs a
+       separate write token: `npm run github:connect -- noisysource --write`
+       with Contents and Pull requests set to Read and write (not
+       Workflows). `CODE_FIX_MAX_USD` (default 2) and `CODE_FIX_MAX_TURNS`
+       (default 60) cap each fix.
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

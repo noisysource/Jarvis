@@ -3,6 +3,7 @@
 // Contexts are not hard-coded: they're read from contexts.md (#22), so a
 // context id is a branded string that only the contexts parser should create.
 
+import type { Fixes } from "./code/fix.js";
 import type { CodeMapView, Studies } from "./code/study.js";
 import type { ReachNode } from "./reach.js";
 import type { Result } from "./result.js";
@@ -135,7 +136,7 @@ export type PathStep =
        * card with "Add it" / "Don't add", and POSTs `id` to /calendar/confirm.
        * Page only: the path is never logged.
        */
-      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" | "email" | "draft-delete" };
+      readonly confirm?: { readonly id: string; readonly label: string; readonly kind?: "calendar" | "skill" | "email" | "draft-delete" | "fix" };
     }
   | {
       readonly kind: "guard";
@@ -337,6 +338,8 @@ export type Deps = {
   readonly codeStudies?: Pick<Studies, "active" | "finished" | "stop">;
   /** #158: the map from each study, for the page (GET /code/maps): parts and connections, no note text. */
   readonly codeMaps?: () => Promise<readonly CodeMapView[]>;
+  /** #162: fixes as pull requests: his OK to prepare one (POST /code/fix), its progress and diff (GET /code/fixes/:id), his OK to publish (POST /code/fixes/publish). */
+  readonly codeFixes?: Pick<Fixes, "decide" | "view" | "publish">;
   /** #124: his answer to deleting a draft Jarvis wrote (POST /gmail/delete). Only "yes" deletes. */
   readonly gmailDelete?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #116: skills, with MEMORY=on: drafts and approved routines. */

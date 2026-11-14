@@ -14,29 +14,45 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { err, ok, type Result } from "../result.js";
-import { codeAgentPrompt, stepOf, WRAP_UP_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
+import { codeAgentPrompt, fixAgentPrompt, stepOf, WRAP_UP_PROMPT, type CodeAgent, type CodeAnswer, type CodeError } from "./agent.js";
 
 const TOOLS = ["Read", "Grep", "Glob"] as const;
+/** #162: a fix may also edit and create files, still only inside its own copy. */
+const CHANGE_TOOLS = [...TOOLS, "Edit", "Write"] as const;
+/** Never written by a fix: git's own folder (hooks run commands) and GitHub's (workflows run with the repo's secrets). */
+const NO_WRITE = [".git", ".github"];
 
 /**
  * Whether a tool call stays inside `root`: the paths it names resolve under
- * it (after symlinks), and patterns are relative with no "..".
+ * it (after symlinks), and patterns are relative with no "..". In "change"
+ * mode (#162) Edit and Write are allowed too, never under .git or .github.
  */
-export const insideRepo = async (root: string, tool: string, input: Record<string, unknown>, resolve: (p: string) => Promise<string> = realpath): Promise<boolean> => {
-  if (!(TOOLS as readonly string[]).includes(tool)) return false;
+export const insideRepo = async (
+  root: string,
+  tool: string,
+  input: Record<string, unknown>,
+  resolve: (p: string) => Promise<string> = realpath,
+  mode: "read" | "change" = "read",
+): Promise<boolean> => {
+  if (!((mode === "change" ? CHANGE_TOOLS : TOOLS) as readonly string[]).includes(tool)) return false;
   const base = await resolve(root).catch(() => undefined);
   if (!base) return false;
+  const writes = tool === "Edit" || tool === "Write";
   const within = async (p: unknown): Promise<boolean> => {
     if (p === undefined) return true;
     if (typeof p !== "string" || p === "") return false;
     const full = path.resolve(base, p);
     // A file that doesn't exist yet can't be resolved; check its folder instead.
     const real = await resolve(full).catch(async () => path.join(await resolve(path.dirname(full)).catch(() => "/"), path.basename(full)));
-    return real === base || real.startsWith(`${base}${path.sep}`);
+    if (real !== base && !real.startsWith(`${base}${path.sep}`)) return false;
+    if (writes && (real === base || NO_WRITE.includes(real.slice(base.length + 1).split(path.sep)[0] ?? ""))) return false;
+    return true;
   };
   const pattern = input.pattern;
   if (tool === "Glob" && (typeof pattern !== "string" || path.isAbsolute(pattern) || pattern.split(/[/\\]/).includes(".."))) return false;
   if (tool === "Grep" && typeof input.glob === "string" && (path.isAbsolute(input.glob) || input.glob.split(/[/\\]/).includes(".."))) return false;
+  // An edit always names its file.
+  if (writes && typeof input.file_path !== "string") return false;
   return (await within(input.file_path)) && (await within(input.path)) && (await within(input.notebook_path));
 };
 
@@ -58,7 +74,7 @@ const LOGIN_TROUBLE = /not logged in|log ?in|\/login|invalid api key|api key|aut
 export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly auth?: CodeAuth; readonly query?: QueryFn; readonly model?: string }): CodeAgent => {
   const auth = deps.auth ?? (deps.apiKey ? "api-key" : "subscription");
 
-  const once = async (q: Parameters<CodeAgent["ask"]>[0], withKey: boolean): Promise<Result<CodeAnswer, CodeError>> => {
+  const once = async (q: Parameters<CodeAgent["ask"]>[0], withKey: boolean, mode: "read" | "change" = "read"): Promise<Result<CodeAnswer, CodeError>> => {
     const run: QueryFn = deps.query ?? ((await import("@anthropic-ai/claude-agent-sdk")).query as unknown as QueryFn);
     const controller = new AbortController();
     q.signal?.addEventListener("abort", () => controller.abort());
@@ -74,15 +90,18 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
         prompt: q.question,
         options: {
           cwd: q.dir,
-          tools: [...TOOLS],
-          disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"],
+          tools: mode === "change" ? [...CHANGE_TOOLS] : [...TOOLS],
+          disallowedTools: ["Bash", ...(mode === "change" ? [] : ["Write", "Edit"]), "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"],
           permissionMode: "default",
           canUseTool: async (tool: string, input: Record<string, unknown>) =>
-            (await insideRepo(q.dir, tool, input))
+            (await insideRepo(q.dir, tool, input, realpath, mode))
               ? { behavior: "allow", updatedInput: input }
-              : { behavior: "deny", message: "Only reading and searching inside this repository is allowed." },
+              : {
+                  behavior: "deny",
+                  message: mode === "change" ? "Only reading, and editing files inside this repository (not .git or .github), is allowed." : "Only reading and searching inside this repository is allowed.",
+                },
           settingSources: [],
-          systemPrompt: codeAgentPrompt(q.maxTurns),
+          systemPrompt: mode === "change" ? fixAgentPrompt(q.maxTurns) : codeAgentPrompt(q.maxTurns),
           maxTurns: q.maxTurns,
           maxBudgetUsd: q.maxUsd,
           ...(deps.model ? { model: deps.model } : {}),
@@ -116,6 +135,10 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
     const costUsd = typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0;
     const turns = typeof result.num_turns === "number" ? result.num_turns : 0;
     const via = withKey || (keySource !== undefined && keySource !== "none") ? "api-key" : "subscription";
+    if ((result.subtype === "error_max_budget_usd" || result.subtype === "error_max_turns") && mode === "change") {
+      // A fix cut off half way is not a fix: nothing is kept (#162).
+      return err<CodeError>({ code: "limit", message: `It hit ${result.subtype === "error_max_budget_usd" ? `the $${q.maxUsd.toFixed(2)} limit` : `the ${q.maxTurns}-step limit`} before finishing the fix` });
+    }
     if (result.subtype === "error_max_budget_usd" || result.subtype === "error_max_turns") {
       const limit = result.subtype === "error_max_budget_usd" ? `the $${q.maxUsd.toFixed(2)} limit` : `the ${q.maxTurns}-step limit`;
       // Don't throw away what it read: one short call, no tools, to answer from it.
@@ -176,14 +199,17 @@ export const makeClaudeCodeAgent = (deps: { readonly apiKey?: string; readonly a
     return { answer: result.result, costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0 };
   };
 
+  const signedIn = async (mode: "read" | "change", q: Parameters<CodeAgent["ask"]>[0]): Promise<Result<CodeAnswer, CodeError>> => {
+    if (auth === "api-key") return once(q, true, mode);
+    const first = await once(q, false, mode);
+    // auto: no Claude login on this Mac, so use the API key instead.
+    if (auth === "auto" && !first.ok && first.error.code === "login" && deps.apiKey) return once(q, true, mode);
+    return first;
+  };
+
   return {
     name: "Claude Code",
-    ask: async (q) => {
-      if (auth === "api-key") return once(q, true);
-      const first = await once(q, false);
-      // auto: no Claude login on this Mac, so use the API key instead.
-      if (auth === "auto" && !first.ok && first.error.code === "login" && deps.apiKey) return once(q, true);
-      return first;
-    },
+    ask: (q) => signedIn("read", q),
+    change: (q) => signedIn("change", q),
   };
 };

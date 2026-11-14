@@ -1016,6 +1016,18 @@ Confirmed (2026-11-12):
   (apps, modules, services, data, outside), lines for connections, pick a
   part to see its links, path and one-line description. The page gets the
   maps only (`GET /code/maps`), never the notes' text.
+- **Fixes as pull requests (#162):** `code_fix` only proposes. Two OKs
+  from Renato: the first prepares the change locally (fresh shallow clone
+  with a separate write token, the agent in "change" mode: Read, Grep,
+  Glob, Edit, Write, path-checked to the copy, never `.git` or `.github`,
+  no shell); he sees the diff; the second commits (hooks off,
+  `--no-verify`), pushes `HEAD:refs/heads/jarvis/fix-<slug>-<id>` (never
+  the default branch, never forced) and opens a draft PR (a normal one if
+  the plan has no drafts). The diff is shown before anything leaves the
+  Mac because a pushed branch can run CI with the repo's secrets. A fix
+  cut off by its limit keeps nothing. Jobs live in memory (a day); copies
+  in `data/fixes/` are removed when published or thrown away.
+
 - **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
   questions on his Claude plan (Claude Code's login on his Mac, no API key
   passed), falling back to the API key when there's no login. Guests never

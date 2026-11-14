@@ -12,7 +12,7 @@
 //   CORS preflight, which this server never answers.
 
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -346,6 +346,33 @@ export const makeServer = (
         return c.json({ stopped: codeStudies.stop(body.data.repo, body.data.folder) });
       },
     );
+  }
+
+  // #162: fixes as pull requests. Each step is his answer; nothing is pushed without the second one.
+  const codeFixes = deps.codeFixes;
+  if (codeFixes) {
+    const FixBody = z.object({ id: z.string().regex(/^[a-f0-9]{8,64}$/), decision: z.enum(["yes", "no"]) }).strict();
+    const jsonOnly = (route: string) => async (c: Context, next: () => Promise<void>) => {
+      if (!isJson(c.req.header("content-type"))) return c.json(errorBody(`POST ${route} needs Content-Type: application/json.`), 415);
+      await next();
+      return undefined;
+    };
+    for (const [route, act] of [
+      ["/code/fix", codeFixes.decide],
+      ["/code/fixes/publish", codeFixes.publish],
+    ] as const) {
+      app.post(route, jsonOnly(route), bodyLimit({ maxSize: 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }), async (c) => {
+        const body = FixBody.safeParse(await c.req.json().catch(() => undefined));
+        if (!body.success) return c.json(errorBody('Send { id, decision: "yes" | "no" }.'), 400);
+        return c.json(await act(body.data.id, body.data.decision));
+      });
+    }
+    app.get("/code/fixes/:id", (c) => {
+      c.header("Cache-Control", "no-store");
+      const id = c.req.param("id");
+      const view = /^[a-f0-9]{8,64}$/.test(id) ? codeFixes.view(id) : undefined;
+      return view ? c.json(view) : c.json(errorBody("No such fix."), 404);
+    });
   }
 
   // #158: the code maps from his studies.
