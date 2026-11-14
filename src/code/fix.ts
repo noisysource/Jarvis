@@ -35,6 +35,7 @@ export const CODE_FIX_TOOL: LlmTool = {
       folder: { type: "string", description: "The app's folder in a monorepo, if the fix is in one app" },
       title: { type: "string", description: "A short pull request title, e.g. \"Fix timeout in billing cutoff\"" },
       problem: { type: "string", description: "What to change, or what fails, where and why if you know, in a few sentences. No personal data (names, emails, family details)." },
+      issue: { type: "number", description: "The number of the issue in that repo this closes, if there is one (he named it, or you saw it with github_issues). The pull request will say Closes #N." },
     },
     required: ["repo", "title", "problem"],
     additionalProperties: false,
@@ -44,7 +45,15 @@ export const CODE_FIX_TOOL: LlmTool = {
 const REPO = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})$/;
 const FOLDER = /^[A-Za-z0-9_./ -]{1,200}$/;
 
-export type FixRequest = { readonly owner: string; readonly name: string; readonly folder: string; readonly title: string; readonly problem: string };
+export type FixRequest = {
+  readonly owner: string;
+  readonly name: string;
+  readonly folder: string;
+  readonly title: string;
+  readonly problem: string;
+  /** #181: the issue the pull request closes. */
+  readonly issue?: number;
+};
 
 /** Code checks the proposal: a plain repo, a folder inside it, short texts. */
 export const checkFixRequest = (v: unknown): Result<FixRequest, string> => {
@@ -60,7 +69,12 @@ export const checkFixRequest = (v: unknown): Result<FixRequest, string> => {
   if (title === "" || title.length > 100) return err("a title of up to 100 characters");
   const problem = typeof o.problem === "string" ? o.problem.trim() : "";
   if (problem.length < 10 || problem.length > 2000) return err("a problem of 10 to 2000 characters");
-  return ok({ owner: repo[1] ?? "", name: repo[2] ?? "", folder, title, problem });
+  let issue: number | undefined;
+  if (o.issue !== undefined && o.issue !== null) {
+    if (typeof o.issue !== "number" || !Number.isInteger(o.issue) || o.issue < 1 || o.issue > 999_999) return err("issue is an issue number");
+    issue = o.issue;
+  }
+  return ok({ owner: repo[1] ?? "", name: repo[2] ?? "", folder, title, problem, ...(issue ? { issue } : {}) });
 };
 
 /** "Fix timeout in billing cutoff" → "fix-timeout-in-billing-cutoff" */
@@ -97,6 +111,7 @@ export type FixView = {
   readonly repo: string;
   readonly folder: string;
   readonly title: string;
+  readonly issue?: number;
   readonly status: FixStatus;
   /** While working: the agent's latest step ("Read src/billing.ts"). */
   readonly step?: string;
@@ -217,7 +232,7 @@ export const makeFixes = (deps: {
       sweep();
       const id = newId();
       jobs.set(id, {
-        view: { id, repo: `${r.owner}/${r.name}`, folder: r.folder, title: r.title, status: "waiting" },
+        view: { id, repo: `${r.owner}/${r.name}`, folder: r.folder, title: r.title, ...(r.issue ? { issue: r.issue } : {}), status: "waiting" },
         request: r,
         dir: path.join(deps.root, r.owner, `${r.name}-${id.slice(0, 8)}`),
         base: "",
@@ -244,6 +259,17 @@ export const makeFixes = (deps: {
       if (!token) {
         jobs.delete(id);
         return { ok: false, text: `I can't write to ${r.owner}'s repos yet: run npm run github:connect -- ${r.owner} --write. Nothing was prepared.` };
+      }
+      // #181: the issue it closes must be an open issue in that repo (not a pull request).
+      if (r.issue) {
+        const res = await doFetch(`https://api.github.com/repos/${r.owner}/${r.name}/issues/${r.issue}`, {
+          headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "jarvis" },
+        }).catch(() => undefined);
+        const found = res?.ok ? ((await res.json().catch(() => ({}))) as { state?: unknown; pull_request?: unknown }) : undefined;
+        if (!found || found.pull_request !== undefined || found.state !== "open") {
+          jobs.delete(id);
+          return { ok: false, text: `#${r.issue} isn't an open issue in ${r.owner}/${r.name}, so nothing was prepared. Ask me again with the right issue, or without one.` };
+        }
       }
       job.token = token;
       job.until = now() + 24 * 60 * 60_000;
@@ -272,6 +298,7 @@ export const makeFixes = (deps: {
       const env = fixGitEnv(job.token);
       const branch = `jarvis/fix-${slug(r.title)}-${id.slice(0, 6)}`;
       const body = [
+        ...(r.issue ? [`Closes #${r.issue}`, ""] : []),
         maskEmails(r.problem),
         "",
         "## What changed",

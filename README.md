@@ -467,6 +467,9 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        with Contents and Pull requests set to Read and write (not
        Workflows). `CODE_FIX_MAX_USD` (default 2) and `CODE_FIX_MAX_TURNS`
        (default 60) cap each fix.
+       If there's an issue for the fix, he passes its number and the pull
+       request says `Closes #N` (Jarvis's own repo requires one); he checks
+       it's an open issue in that repo before preparing anything.
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

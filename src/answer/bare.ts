@@ -275,7 +275,7 @@ export const barePrompt = (
   const fixLines =
     options.fix === true && options.tools === true
       ? [
-          "When he asks for a change in his code (a fix, or a small edit like a title or a text), or wants a problem you found fixed, call code_fix straight away: the repo, a short title, and what to change or what fails (with the cause if you know it), no personal data. Don't look for the file yourself and don't ask code_ask first: the code agent finds the place. And don't ask him in words first: code_fix changes nothing, it shows him a card, and he decides there. Then he sees the diff, and only his second OK opens a draft pull request. You never push, merge or deploy.",
+          "When he asks for a change in his code (a fix, or a small edit like a title or a text), or wants a problem you found fixed, call code_fix straight away: the repo, a short title, and what to change or what fails (with the cause if you know it), no personal data. Don't look for the file yourself and don't ask code_ask first: the code agent finds the place. If there's an issue for it (he named one, or you saw it with github_issues), pass its number so the pull request closes it; some repos, like Jarvis, require one. And don't ask him in words first: code_fix changes nothing, it shows him a card, and he decides there. Then he sees the diff, and only his second OK opens a draft pull request. You never push, merge or deploy.",
         ]
       : [];
   const briefLines =
@@ -1055,7 +1055,7 @@ export const makeBareAnswerer = (deps: {
         by: "model",
         ok: true,
         result: "waiting for your OK",
-        confirm: { id, label: `${r.owner}/${r.name}: ${r.title}`, kind: "fix" },
+        confirm: { id, label: `${r.owner}/${r.name}: ${r.title}${r.issue ? ` (closes #${r.issue})` : ""}`, kind: "fix" },
       });
       return {
         callId: call.id,
