@@ -1669,3 +1669,24 @@ li[data-status="waiting"] > .t-leaf .t-result {
   border-radius: 0.5rem;
   background: var(--surface);
 }
+
+/* #162: a fix's progress and diff, inside its card. */
+.message .confirm .fix-status { margin: 0.5rem 0 0; color: var(--muted, #888); font-size: 0.9em; }
+.message .confirm .fix-ready { margin-top: 0.5rem; }
+.message .confirm .fix-summary { white-space: pre-wrap; }
+.message .confirm .fix-stat,
+.message .confirm .fix-diff {
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.5rem;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  white-space: pre;
+}
+.message .confirm .fix-diff .diff-add { color: #2e9d50; }
+.message .confirm .fix-diff .diff-del { color: #d0453a; }
+.message .confirm .fix-diff .diff-hunk { color: #6f7fd6; }
+.message .confirm .fix-diff .diff-file { font-weight: 600; }
+.message .confirm .fix-note { font-size: 0.85em; color: var(--muted, #888); }

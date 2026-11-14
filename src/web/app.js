@@ -3,6 +3,7 @@
 // /transcribe, #74) and speech synthesis (the browser's voices). Conversation history
 // lives in this page's memory only; reload or "New conversation" clears it.
 
+import { followFix } from "./fix.js";
 import { makeBrainView } from "./brain.js";
 import { makeCodeMapView } from "./codemap.js";
 import { makeStudiesView } from "./studies.js";
@@ -194,7 +195,7 @@ const refreshReach = async () => {
 };
 
 /** Cards still waiting for an OK, counted per node for the badges (#133). */
-const NODE_OF_CARD = { calendar: "calendar", email: "gmail", "draft-delete": "gmail", skill: "skills" };
+const NODE_OF_CARD = { calendar: "calendar", email: "gmail", "draft-delete": "gmail", skill: "skills", fix: "code" };
 const refreshPending = () => {
   /** @type {Record<string, number>} */
   const counts = {};
@@ -253,13 +254,14 @@ const CARDS = {
   skill: { ask: (/** @type {string} */ l) => `New skill: ${l}. Approve it?`, yes: "Approve skill", no: "Not now", endpoint: "/skills/decide", failed: "nothing changed" },
   email: { ask: (/** @type {string} */ l) => `Draft saved. ${l}. Send it?`, yes: "Send it", no: "Keep as draft", endpoint: "/gmail/send", failed: "nothing was sent" },
   "draft-delete": { ask: (/** @type {string} */ l) => `Delete the draft ${l}?`, yes: "Delete it", no: "Keep it", endpoint: "/gmail/delete", failed: "nothing was deleted" },
+  fix: { ask: (/** @type {string} */ l) => `Prepare a fix in ${l}? You'll see the change before anything is pushed.`, yes: "Prepare it", no: "Not now", endpoint: "/code/fix", failed: "nothing was prepared" },
 };
 
 /**
  * A card for something waiting for Renato's OK: a calendar event (Reach 2), a
  * skill (#116) or an email draft (#120). Only the first button acts; the reply
  * is worded by code and goes into the history with what really ran.
- * @param {{ id: string, label: string, kind?: "calendar" | "skill" | "email" | "draft-delete" }} proposal
+ * @param {{ id: string, label: string, kind?: "calendar" | "skill" | "email" | "draft-delete" | "fix" }} proposal
  */
 const confirmCard = (proposal) => {
   const kind = proposal.kind ?? "calendar";
@@ -282,7 +284,7 @@ const confirmCard = (proposal) => {
       b.classList.add("picked");
       card.dataset.pending = "false";
       refreshPending();
-      /** @type {{ ok?: boolean, text?: string, tool?: string }} */
+      /** @type {{ ok?: boolean, text?: string, tool?: string, job?: string }} */
       let result;
       try {
         if (kind === "skill" && decision === "no") {
@@ -299,6 +301,26 @@ const confirmCard = (proposal) => {
       addMessage(result.ok ? "answer" : "error", text);
       state.history = appendTurn(state.history, "assistant", text, typeof result.tool === "string" ? [result.tool] : []);
       void refreshReach();
+      // #162: a fix being prepared: the card follows it, then asks again before anything is pushed.
+      if (kind === "fix" && result.ok && typeof result.job === "string")
+        followFix(card, result.job, {
+          say: (ok, said, url, tool) => {
+            const item = addMessage(ok ? "answer" : "error", said);
+            if (url && url.startsWith("https://github.com/")) {
+              const link = document.createElement("a");
+              link.href = url;
+              link.target = "_blank";
+              link.rel = "noopener noreferrer";
+              link.textContent = "Open the pull request";
+              item.querySelector("p")?.append(" ", link);
+            }
+            state.history = appendTurn(state.history, "assistant", said, tool ? [tool] : []);
+          },
+          pending: (waiting) => {
+            card.dataset.pending = waiting ? "true" : "false";
+            refreshPending();
+          },
+        });
     });
     return b;
   };

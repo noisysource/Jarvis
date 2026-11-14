@@ -25,6 +25,9 @@ data/google-gmail-*.json
 data/google-calendar-*.json
 # GitHub (#125): read-only tokens, local only, never commit
 data/github-tokens.json
+# #162: write tokens for fixes, and the fixes being prepared
+data/github-write-tokens.json
+data/fixes/
 # Google Cloud (#161): which project each environment is, local only
 data/gcloud/
 # Local copies of your repos for the code agent (#126)

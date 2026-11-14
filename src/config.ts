@@ -142,6 +142,14 @@ export type Config = {
      * High on purpose: a study reads a lot, once. Notes go to `notesPath`.
      */
     readonly study: { readonly maxUsd: number; readonly maxTurns: number; readonly notesPath: string };
+    /**
+     * CODE_FIX=on (#162): Jarvis can propose a fix; after Renato's OK the agent
+     * prepares it on a copy (data/fixes), he sees the diff, and his second OK
+     * pushes a branch and opens a draft pull request. Needs a write token per
+     * owner (npm run github:connect -- <owner> --write, in writeTokensPath).
+     * CODE_FIX_MAX_USD (default 2) and CODE_FIX_MAX_TURNS (default 60) per fix.
+     */
+    readonly fix: { readonly enabled: boolean; readonly maxUsd: number; readonly maxTurns: number; readonly writeTokensPath: string; readonly fixesPath: string };
   };
   /**
    * MEMORY=on (#107), with BARE_MODE=on and Claude's tools: Jarvis remembers
@@ -305,6 +313,20 @@ const EnvSchema = z.object({
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.enum(["auto", "subscription", "api-key"], { error: 'must be "auto", "subscription" or "api-key"' }).default("auto"),
   ),
+  CODE_FIX: onOff,
+  CODE_FIX_MAX_USD: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ error: "must be a number from 0.25 to 20" }).min(0.25, { error: "must be a number from 0.25 to 20" }).max(20, { error: "must be a number from 0.25 to 20" }).default(2),
+  ),
+  CODE_FIX_MAX_TURNS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce
+      .number({ error: "must be a whole number from 5 to 200" })
+      .int({ error: "must be a whole number from 5 to 200" })
+      .min(5, { error: "must be a whole number from 5 to 200" })
+      .max(200, { error: "must be a whole number from 5 to 200" })
+      .default(60),
+  ),
   CODE_STUDY_MAX_USD: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.coerce.number({ error: "must be a number from 0.5 to 50" }).min(0.5, { error: "must be a number from 0.5 to 50" }).max(50, { error: "must be a number from 0.5 to 50" }).default(5),
@@ -439,6 +461,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
   }
   if (raw("CODE_AGENT") === "on" && raw("GITHUB") !== "on") errors.push("CODE_AGENT: needs GITHUB=on (it reads the repos GitHub reaches)");
+  if (raw("CODE_FIX") === "on") {
+    if (raw("CODE_AGENT") !== "on") errors.push("CODE_FIX: needs CODE_AGENT=on (the code agent makes the fix)");
+    if (production) errors.push("CODE_FIX: local only for now (its write tokens are files on this Mac)");
+  }
   if (raw("GCLOUD") === "on") {
     if (production) errors.push("GCLOUD: local only for now (it signs in through gcloud on this Mac)");
     if (raw("BARE_MODE") !== "on") errors.push("GCLOUD: needs BARE_MODE=on");
@@ -484,7 +510,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" } },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },

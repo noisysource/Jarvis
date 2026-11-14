@@ -160,6 +160,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
         { name: "code_notes", does: "read his note on code he's studied" },
         { name: "code_study", does: "study a repo or app in the background" },
         { name: "code_ask", does: "ask a question about a repo's code" },
+        ...(config.codeAgent.fix.enabled ? [{ name: "code_fix", does: "propose a fix: prepared after your OK, a draft pull request after your second" }] : []),
       ],
       studied: [
         ...studied.notes.map((n) => ({ name: noteKey(n.repo, n.folder), state: `studied ${n.studiedAt.slice(0, 10)}${n.partial ? " (partial)" : ""}` })),

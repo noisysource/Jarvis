@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { makeToolRouter } from "./answer/tool-groups.js";
+import { makeFixes, type Fixes, type RunOut } from "./code/fix.js";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
@@ -34,7 +35,7 @@ import { makeModelExtract } from "./memory-extract.js";
 import { makeEcMatchers, parseNeverRemember } from "./memory-rules.js";
 import { runIntrospection } from "./introspection.js";
 import { makeSkillStore, type SkillStore } from "./skills.js";
-import { access, chmod, mkdir, readdir, readFile as readFileFs, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile as readFileFs, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { reachView } from "./reach.js";
 import { makeMemoryStoreInMemory, type MemoryStore } from "./memory-store.js";
@@ -71,6 +72,8 @@ export type AppInputs = {
   readonly githubReader?: GithubReader;
   readonly gcloudReader?: GcloudReader;
   readonly gcloudDb?: DbReader;
+  /** #162: tests give their own fixes. */
+  readonly codeFixes?: Fixes;
   /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
   readonly codeAgent?: CodeAgent;
   readonly repoCopies?: RepoCopies;
@@ -101,6 +104,14 @@ export const capabilitiesText = (contexts: readonly Context[], answered: Readonl
   ].join("\n");
 
 /** Runs one command (git, #126) without a shell; output is ignored, only the exit code counts. */
+/** #162: one command without a shell, with its output (git status and diff for a fix). */
+const runWithOutput: RunOut = (cmd, args, options) =>
+  new Promise((resolve) => {
+    execFile(cmd, [...args], { ...(options.cwd ? { cwd: options.cwd } : {}), env: options.env, timeout: 5 * 60_000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) =>
+      resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout) }),
+    );
+  });
+
 const runCommand: Run = (cmd, args, options) =>
   new Promise((resolve) => {
     execFile(cmd, [...args], { ...(options.cwd ? { cwd: options.cwd } : {}), env: options.env, timeout: 5 * 60_000, maxBuffer: 1024 * 1024 }, (error) =>
@@ -299,6 +310,29 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const studies = codeAgent
     ? makeStudies({ agent: codeAgent, copies: repoCopies, store: noteStore, isEc: isEcText, maxUsd: config.codeAgent.study.maxUsd, maxTurns: config.codeAgent.study.maxTurns, now, log })
     : undefined;
+  // #162: fixes as pull requests, with a separate write token per owner; every step after his OK.
+  const writeTokens = makeGithubTokens({ readFile: () => readFileFs(config.codeAgent.fix.writeTokensPath, "utf8") });
+  const fixesRoot = path.resolve(config.codeAgent.fix.fixesPath);
+  const fixes: Fixes | undefined =
+    codeAgent && config.codeAgent.fix.enabled
+      ? (inputs.codeFixes ??
+        makeFixes({
+          agent: codeAgent,
+          writeToken: writeTokens.token,
+          isEc: isEcText,
+          root: fixesRoot,
+          run: runWithOutput,
+          // Only ever a fix's own copy under data/fixes.
+          remove: async (dir) => {
+            const full = path.resolve(dir);
+            if (full.startsWith(`${fixesRoot}${path.sep}`)) await rm(full, { recursive: true, force: true });
+          },
+          maxUsd: config.codeAgent.fix.maxUsd,
+          maxTurns: config.codeAgent.fix.maxTurns,
+          now: () => now().getTime(),
+          log,
+        }))
+      : undefined;
   // #126: a code agent (Claude Code, read-only) on local copies of the repos GitHub reaches.
   // #150: his own questions can run on his Claude plan (Claude Code's login on this Mac).
   const code =
@@ -311,6 +345,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           maxUsd: config.codeAgent.maxUsd,
           maxTurns: config.codeAgent.maxTurns,
           study: { studies, notes: noteStore },
+          ...(fixes ? { fix: fixes } : {}),
         }
       : undefined;
   // #146: which accounts are connected, checked each turn (does the token file exist), for the brain's prompt.
@@ -410,6 +445,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(gmailSend ? { gmailSend } : {}),
     ...(gmailDelete ? { gmailDelete } : {}),
     ...(studies ? { codeStudies: studies, codeMaps: async () => mapViews(await noteStore.all()) } : {}),
+    ...(fixes ? { codeFixes: fixes } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
