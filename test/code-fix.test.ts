@@ -117,6 +117,16 @@ describe("preparing and publishing a fix", () => {
       maxTurns: 60,
       newId: () => `${"a".repeat(23)}${(ids += 1)}`,
       fetch: (async (url: string, init: RequestInit) => {
+        // #181: reading an issue: 7 is open, 8 is a pull request, 9 is closed.
+        const issue = /\/issues\/(\d+)$/.exec(url)?.[1];
+        if (issue)
+          return issue === "7"
+            ? new Response(JSON.stringify({ state: "open" }))
+            : issue === "8"
+              ? new Response(JSON.stringify({ state: "open", pull_request: {} }))
+              : issue === "9"
+                ? new Response(JSON.stringify({ state: "closed" }))
+                : new Response("{}", { status: 404 });
         posted.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
         return new Response(JSON.stringify({ html_url: "https://github.com/noisysource/noisysource/pull/42" }), { status: 201 });
       }) as typeof fetch,
@@ -199,6 +209,24 @@ describe("preparing and publishing a fix", () => {
     await until(() => refused.fixes.view(d)?.status === "ready");
     expect(await refused.fixes.publish(d, "yes")).toMatchObject({ ok: false, text: expect.stringContaining("GitHub refused the push") });
     expect(refused.posted).toEqual([]);
+  });
+
+  it("an issue (#181): checked before anything is prepared, then the pull request closes it", async () => {
+    const { fixes, posted, git } = setup();
+    const id = fixes.propose({ ...request, issue: 7 });
+    expect(fixes.view(id)?.issue).toBe(7);
+    await fixes.decide(id, "yes");
+    await until(() => fixes.view(id)?.status === "ready");
+    await fixes.publish(id, "yes");
+    expect(String(posted[0]?.body.body)).toMatch(/^Closes #7\n/);
+    for (const wrong of [8, 9, 10]) {
+      const other = fixes.propose({ ...request, issue: wrong });
+      expect(await fixes.decide(other, "yes")).toMatchObject({ ok: false, text: expect.stringContaining(`#${wrong} isn't an open issue`) });
+    }
+    expect(git.ran.filter((r) => r.args[0] === "clone")).toHaveLength(1);
+    expect(checkFixRequest({ repo: "a/b", title: "t", problem: request.problem, issue: 7 })).toMatchObject({ value: { issue: 7 } });
+    expect(checkFixRequest({ repo: "a/b", title: "t", problem: request.problem, issue: 1.5 }).ok).toBe(false);
+    expect(checkFixRequest({ repo: "a/b", title: "t", problem: request.problem, issue: "#7" }).ok).toBe(false);
   });
 
   it("a change under .github is refused even if the agent made one", async () => {
