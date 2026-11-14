@@ -14,7 +14,7 @@ import { CALENDAR_ACCOUNTS, calendarTokensPath, type CalendarAccount, type Calen
 import type { CodeAgent } from "./code/agent.js";
 import { makeClaudeCodeAgent } from "./code/claude-code.js";
 import { makeRepoCopies, type RepoCopies, type Run } from "./code/repos.js";
-import { makeNoteStore, makeStudies, type NoteFiles } from "./code/study.js";
+import { makeNoteStore, makeStudies, mapViews, type NoteFiles } from "./code/study.js";
 import { makeGithubReader, makeGithubTokens, type GithubReader } from "./github/github.js";
 import { GMAIL_ACCOUNTS, makeGmailReader, type GmailAccount, type GmailReader } from "./gmail/gmail.js";
 import { makeDraftBook, makeGmailWriter, makePendingDrafts, type GmailWriter } from "./gmail/send.js";
@@ -388,7 +388,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
       }),
     ...(gmailSend ? { gmailSend } : {}),
     ...(gmailDelete ? { gmailDelete } : {}),
-    ...(studies ? { codeStudies: studies } : {}),
+    ...(studies ? { codeStudies: studies, codeMaps: async () => mapViews(await noteStore.all()) } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,

@@ -50,7 +50,7 @@ const el = (tag, className) => {
  * Clicking a node opens its panel (#133); `open` adds a button there for
  * nodes with a fuller view of their own (Memory, Skills).
  * @param {HTMLElement} root
- * @param {{ open?: Partial<Record<string, { label: string, run: () => void }>> }} [options]
+ * @param {{ open?: Partial<Record<string, { label: string, run: () => void }>>, onMap?: (key: string) => void }} [options] onMap: open a studied repo's code map (#158)
  */
 export const makeBrainView = (root, options = {}) => {
   root.replaceChildren();
@@ -206,6 +206,16 @@ export const makeBrainView = (root, options = {}) => {
         for (const s of info.studied) {
           const li = el("li", s.state.startsWith("studied") ? "connected" : s.state.startsWith("failed") ? "not-connected" : "");
           li.append(text("span", "", s.name), text("span", "", s.state));
+          // #158: a studied repo or app has a map.
+          if (s.state.startsWith("studied") && options.onMap) {
+            const map = document.createElement("button");
+            map.type = "button";
+            map.className = "brain-panel-map";
+            map.textContent = "Map";
+            map.setAttribute("aria-label", `Map of ${s.name}`);
+            map.addEventListener("click", () => options.onMap?.(s.name));
+            li.append(map);
+          }
           ul.append(li);
         }
         panel.append(ul);

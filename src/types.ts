@@ -3,7 +3,7 @@
 // Contexts are not hard-coded: they're read from contexts.md (#22), so a
 // context id is a branded string that only the contexts parser should create.
 
-import type { Studies } from "./code/study.js";
+import type { CodeMapView, Studies } from "./code/study.js";
 import type { ReachNode } from "./reach.js";
 import type { Result } from "./result.js";
 
@@ -335,6 +335,8 @@ export type Deps = {
   readonly gmailSend?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #156: studies under way and finished, for the page (GET /code/studies), and stopping them (POST /code/studies/stop). Names, counts and file paths only. */
   readonly codeStudies?: Pick<Studies, "active" | "finished" | "stop">;
+  /** #158: the map from each study, for the page (GET /code/maps): parts and connections, no note text. */
+  readonly codeMaps?: () => Promise<readonly CodeMapView[]>;
   /** #124: his answer to deleting a draft Jarvis wrote (POST /gmail/delete). Only "yes" deletes. */
   readonly gmailDelete?: (id: string, decision: "yes" | "no") => Promise<CalendarConfirmResult>;
   /** #116: skills, with MEMORY=on: drafts and approved routines. */

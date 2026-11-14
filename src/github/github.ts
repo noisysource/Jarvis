@@ -363,7 +363,28 @@ export const makeGithubReader = (deps: { readonly tokens: GithubTokens; readonly
         ref = typeof branch === "string" ? branch : "main";
       }
       const got = await get(r.repo.owner, `${repoPath(r.repo)}/commits/${encodeURIComponent(ref)}/check-runs?per_page=50`, signal);
-      if (!got.ok) return got;
+      if (!got.ok) {
+        // #160: fine-grained tokens often can't read check runs (that needs "Checks", which
+        // "Actions: read" doesn't cover). The workflow runs say the same for CI on Actions.
+        if (got.error.code !== "forbidden") return got;
+        const isSha = /^[0-9a-f]{7,40}$/i.test(ref);
+        const actions = await get(r.repo.owner, `${repoPath(r.repo)}/actions/runs?${isSha ? "head_sha" : "branch"}=${encodeURIComponent(ref)}&per_page=30`, signal);
+        if (!actions.ok)
+          return actions.error.code === "forbidden"
+            ? err({ code: "forbidden", message: "GitHub didn't allow reading CI results: the token needs Actions: Read-only (or Checks: Read-only)" })
+            : actions;
+        const all = (Array.isArray(object(actions.value)?.workflow_runs) ? (object(actions.value)?.workflow_runs as unknown[]) : []).map(object).filter((o): o is Record<string, unknown> => o !== undefined);
+        // Only the newest commit's runs, and the latest run of each workflow.
+        const head = all[0]?.head_sha;
+        const seen = new Set<string>();
+        return ok({
+          ref,
+          checks: all
+            .filter((o) => o.head_sha === head && typeof o.name === "string")
+            .filter((o) => (seen.has(String(o.name)) ? false : (seen.add(String(o.name)), true)))
+            .map((o) => ({ name: String(o.name), status: typeof o.status === "string" ? o.status : "", conclusion: typeof o.conclusion === "string" ? o.conclusion : "" })),
+        });
+      }
       const runs = object(got.value)?.check_runs;
       return ok({
         ref,
