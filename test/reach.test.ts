@@ -17,7 +17,7 @@ describe("GET /reach content (#133)", () => {
     const files = new Set(["data/google-tokens.json", "data/google-gmail-personal.json"]);
     const nodes = await reachView({ config, exists: async (p) => files.has(p), draftSkills: async () => 2 });
     const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
-    expect(nodes.map((n) => n.id)).toEqual(["profile", "memory", "skills", "calendar", "gmail", "github", "vendus", "cloud", "code", "kiro"]);
+    expect(nodes.map((n) => n.id)).toEqual(["profile", "memory", "skills", "calendar", "gmail", "github", "vendus", "house", "cloud", "code", "kiro"]);
     expect(byId.calendar?.status).toBe("on");
     expect(byId.calendar?.tools.map((t) => t.name)).toEqual(["calendar_read", "day_brief", "calendar_create"]);
     expect(byId.calendar?.accounts).toEqual([

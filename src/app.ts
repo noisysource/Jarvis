@@ -563,6 +563,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(gcloud && config.toolCalling ? { gcloud } : {}),
               // #9: KidClub's invoices in Vendus, GET only, with tools (Claude).
               ...(vendusGet && config.toolCalling ? { vendus: { get: vendusGet, timeZone: config.timeZone } } : {}),
+              // #166: the house now, read-only, from the domotics bridge's state document.
+              ...(gcloud && config.house.enabled && config.toolCalling ? { house: { db: gcloud.db, env: config.house.env, timeZone: config.timeZone } } : {}),
               // #175: only the tool groups a question needs; the classifier model (Haiku) helps pick.
               // #49: "what's on my plate?" in one read of everything connected.
               ...(calendar && config.toolCalling ? { brief: true } : {}),

@@ -42,6 +42,7 @@ import {
   reposForBrain,
   type GithubReader,
 } from "../github/github.js";
+import { HOUSE_NOW_TOOL, HOUSE_STATE_PATH, houseForBrain, houseSummary } from "../house/house.js";
 import { checkInvoicesRequest, invoiceForBrain, invoicesForBrain, listInvoices, VENDUS_INVOICES_TOOL, VENDUS_TOOLS, type VendusGet } from "../vendus/vendus.js";
 import { staleNote, staleSuffix, type CodeRefresh } from "../code/freshness.js";
 import { checkFixRequest, CODE_FIX_TOOL, type Fixes } from "../code/fix.js";
@@ -248,6 +249,8 @@ export const barePrompt = (
     readonly gcloud?: boolean;
     /** It can read KidClub's invoices in Vendus (#9). With tools only. */
     readonly vendus?: boolean;
+    /** It can read the house's state (#166). With tools only. */
+    readonly house?: boolean;
     /** It can read the environments' database, read-only (#167). With gcloud only. */
     readonly gcloudDb?: boolean;
     /** Not every tool group is offered on every question (#175); tools_more adds one. */
@@ -299,6 +302,12 @@ export const barePrompt = (
     options.vendus === true && options.tools === true
       ? [
           "You can read KidClub's invoices in Vendus, read-only: vendus_invoices gives a period's count and totals (with VAT, without, by month and type) and the latest few; vendus_invoice reads one by its id. Use them for invoicing, revenue and VAT questions about KidClub, and give amounts with VAT first, then without. You can't issue, change or cancel invoices. Numbers only from what the tools returned. KidClub's invoices are Noisy Phocus's business; EC invoicing isn't in Vendus and stays with Kiro.",
+        ]
+      : [];
+  const houseLines =
+    options.house === true && options.tools === true
+      ? [
+          "You can see the house right now, read-only, with house_now: what the heating automation is doing and why, today's plan, room and outdoor temperatures, each thermostat, the heat pump, solar, battery, grid and consumption. Answer from it in plain words; quote the automation's reason when he asks why. You can't change anything in the house yet: say so if he asks, and that it's coming with an OK step.",
         ]
       : [];
   const cloudLines =
@@ -356,6 +365,7 @@ export const barePrompt = (
           ...githubLines,
           ...cloudLines,
           ...vendusLines,
+          ...houseLines,
           ...routedLines,
           ...briefLines,
           ...fixLines,
@@ -368,18 +378,20 @@ export const barePrompt = (
             ...githubLines,
             ...cloudLines,
             ...vendusLines,
+            ...houseLines,
             ...routedLines,
             ...briefLines,
             ...fixLines,
             "What you really did for earlier answers is listed at the end of this prompt; trust that list.",
             `You can't see a calendar. ${cannot} When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.`,
           ]
-        : githubLines.length + cloudLines.length + vendusLines.length > 0
+        : githubLines.length + cloudLines.length + vendusLines.length + houseLines.length > 0
           ? [
-              `What you can do right now: talk, and read ${githubLines.length > 0 ? "his GitHub repositories" : cloudLines.length > 0 ? "errors and logs in his Google Cloud environments" : "KidClub's invoices"}.`,
+              `What you can do right now: talk, and read ${githubLines.length > 0 ? "his GitHub repositories" : cloudLines.length > 0 ? "errors and logs in his Google Cloud environments" : vendusLines.length > 0 ? "KidClub's invoices" : "the house's state"}.`,
               ...githubLines,
               ...cloudLines,
               ...vendusLines,
+              ...houseLines,
               ...routedLines,
               ...briefLines,
               ...fixLines,
@@ -580,6 +592,8 @@ export const makeBareAnswerer = (deps: {
   readonly gcloud?: { readonly reader: GcloudReader; /** #167: the database, read-only. */ readonly db?: DbReader };
   /** #9: KidClub's invoices in Vendus, GET only. With tools only. */
   readonly vendus?: { readonly get: VendusGet; readonly timeZone: string };
+  /** #166: the house now, read-only, from the domotics bridge's state in an environment's database. */
+  readonly house?: { readonly db: DbReader; readonly env: string; readonly timeZone: string };
   /**
    * #175: which tool groups Claude gets per question. Without it, every tool
    * every time. "rules": the words of the question and the last answers;
@@ -613,7 +627,7 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}), ...(deps.github && deps.code?.study && deps.tools === true ? { study: true } : {}), ...(deps.gcloud && deps.tools === true ? { gcloud: true, tools: true } : {}), ...(deps.vendus && deps.tools === true ? { vendus: true, tools: true } : {}), ...(deps.gcloud?.db && deps.tools === true ? { gcloudDb: true } : {}), ...(deps.route && deps.route.mode !== "all" && deps.tools === true ? { routed: true } : {}), ...(deps.brief === true && deps.calendar && deps.tools === true ? { brief: true } : {}), ...(deps.github && deps.code?.fix && deps.tools === true ? { fix: true } : {}) };
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}), ...(deps.github && deps.code?.study && deps.tools === true ? { study: true } : {}), ...(deps.gcloud && deps.tools === true ? { gcloud: true, tools: true } : {}), ...(deps.vendus && deps.tools === true ? { vendus: true, tools: true } : {}), ...(deps.house && deps.tools === true ? { house: true, tools: true } : {}), ...(deps.gcloud?.db && deps.tools === true ? { gcloudDb: true } : {}), ...(deps.route && deps.route.mode !== "all" && deps.tools === true ? { routed: true } : {}), ...(deps.brief === true && deps.calendar && deps.tools === true ? { brief: true } : {}), ...(deps.github && deps.code?.fix && deps.tools === true ? { fix: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
@@ -724,7 +738,7 @@ export const makeBareAnswerer = (deps: {
   };
   /** #175: the groups that are connected, and each group's tools, in the order they're offered. */
   const connectedGroups: readonly ToolGroup[] = TOOL_GROUPS.filter((g) =>
-    g === "calendar" ? deps.calendar !== undefined : g === "gmail" ? deps.gmail !== undefined : g === "github" ? deps.github !== undefined : g === "code" ? deps.github !== undefined && deps.code !== undefined : g === "cloud" ? deps.gcloud !== undefined : deps.vendus !== undefined,
+    g === "calendar" ? deps.calendar !== undefined : g === "gmail" ? deps.gmail !== undefined : g === "github" ? deps.github !== undefined : g === "code" ? deps.github !== undefined && deps.code !== undefined : g === "cloud" ? deps.gcloud !== undefined : g === "invoices" ? deps.vendus !== undefined : deps.house !== undefined,
   );
   const toolsOf = (g: ToolGroup): readonly LlmTool[] =>
     g === "calendar"
@@ -737,7 +751,9 @@ export const makeBareAnswerer = (deps: {
             ? [CODE_ASK_TOOL, ...(deps.code?.study ? [CODE_NOTES_TOOL, CODE_STUDY_TOOL] : []), ...(deps.code?.fix ? [CODE_FIX_TOOL] : [])]
             : g === "cloud"
               ? [...GCLOUD_TOOLS, ...(deps.gcloud?.db ? DB_TOOLS : [])]
-              : VENDUS_TOOLS;
+              : g === "invoices"
+                ? VENDUS_TOOLS
+                : [HOUSE_NOW_TOOL];
   const routing = deps.tools === true && deps.route !== undefined && deps.route.mode !== "all";
 
   return async ({ question, history, onText, signal, spoken, onStep, onReach, onOffered, now, remember, onToolSucceeded }) => {
@@ -761,7 +777,7 @@ export const makeBareAnswerer = (deps: {
     // Native tool calling (#104): the brain reads the calendar itself, and answers "did you
     // check?" from the record of what really ran (toolsSoFar). Code only checks each call.
     // Without tools (the local brain), code decides and words the date sentence, as before.
-    const tools = deps.tools === true && (deps.calendar !== undefined || deps.gmail !== undefined || deps.memory !== undefined || deps.github !== undefined || deps.gcloud !== undefined || deps.vendus !== undefined);
+    const tools = deps.tools === true && (deps.calendar !== undefined || deps.gmail !== undefined || deps.memory !== undefined || deps.github !== undefined || deps.gcloud !== undefined || deps.vendus !== undefined || deps.house !== undefined);
     // #107: this turn's memory: recent short-term notes go in the prompt; the rest is recalled on demand.
     const memoryTurn = tools && deps.memory ? makeMemoryTurn(deps.memory, { question, remember: remember !== false, now, ...(onStep ? { onStep } : {}) }) : undefined;
     const memoryCore = memoryTurn ? await memoryTurn.core() : undefined;
@@ -812,6 +828,7 @@ export const makeBareAnswerer = (deps: {
         ...(on.includes("code") ? toolsOf("code") : []),
         ...(on.includes("cloud") ? toolsOf("cloud") : []),
         ...(on.includes("invoices") ? toolsOf("invoices") : []),
+        ...(on.includes("house") ? toolsOf("house") : []),
         ...(routing && missing.length > 0 ? [toolsMoreTool(missing)] : []),
       ];
       return list;
@@ -931,6 +948,17 @@ export const makeBareAnswerer = (deps: {
       if (deps.github && GITHUB_TOOLS.some((t) => t.name === call.name)) return runGithub(deps.github, call);
       if (deps.gcloud && GCLOUD_TOOLS.some((t) => t.name === call.name)) return runGcloud(deps.gcloud, call);
       if (deps.vendus && VENDUS_TOOLS.some((t) => t.name === call.name)) return runVendus(deps.vendus, call);
+      if (deps.house && call.name === HOUSE_NOW_TOOL.name) {
+        const got = await deps.house.db.get({ env: deps.house.env, path: [...HOUSE_STATE_PATH] }, signal);
+        if (!got.ok) {
+          deps.log?.warn("house read failed", { code: got.error.code });
+          onStep?.({ kind: "tool", name: call.name, args: deps.house.env, by: "model", ok: false, error: got.error.code });
+          return { callId: call.id, content: `The house: ${got.error.message}. Say so plainly; don't guess.`, isError: true };
+        }
+        const fields = got.value?.fields;
+        onStep?.({ kind: "tool", name: call.name, args: deps.house.env, by: "model", ok: true, result: houseSummary(fields, now) });
+        return { callId: call.id, content: houseForBrain(fields, now, deps.house.timeZone) };
+      }
       if (deps.gcloud?.db && DB_TOOLS.some((t) => t.name === call.name)) return runGcloudDb(deps.gcloud.reader, deps.gcloud.db, call);
       if (deps.github && deps.code && call.name === CODE_ASK_TOOL.name) return runCode(deps.code, call);
       if (deps.github && deps.code?.fix && call.name === CODE_FIX_TOOL.name) return runFix(deps.code.fix, deps.code.isEc, call);

@@ -406,6 +406,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        `VENDUS=on` in `.env` and restart. Jarvis can only GET two paths
        with it; he can't issue, change or cancel anything. Contract and
        checks: [docs/vendus.md](docs/vendus.md).
+     - **The house (`HOUSE=on`, with `GCLOUD=on`), read-only.** "Is the
+       heating on?", "why is the pump on?", "how much solar now?". The
+       domotics bridge on the Pi publishes the house's state to the
+       database of `HOUSE_ENV` (default `dev`, where it runs today), and
+       Jarvis reads that one document: the heating automation's own
+       explanation and plan, room and outdoor temperatures, each
+       thermostat, the heat pump, solar, battery, grid and consumption.
+       If the bridge hasn't reported for 15 minutes he says so. He can't
+       change anything in the house yet.
      - **Google Cloud (`GCLOUD=on`, ☁️ Claude), read-only.** Errors and
        logs in your environments, one at a time (start with dev). No key
        file (the organisation blocks service account keys): in that

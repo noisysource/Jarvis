@@ -1025,6 +1025,15 @@ Confirmed (2026-11-12):
   `docs/vendus.md`. The old "KidClub answerer" design (#12) is replaced by
   this tool group: the same answerer, routing and trace as everything else.
 
+- **The house, read-only (#166, part 1):** `house_now` reads
+  `domotics_state/tuya` (the bridge's live state) through the read-only
+  database access (#167) in `HOUSE_ENV` (dev today), and words the
+  automation's own sentences, temperatures, thermostats (tenths of a
+  degree; `valve_state` open = heating), the pump's switch (its
+  `temp_current` is compressor Hz, never shown), and the inverter. Shapes
+  mirror the monorepo's domotics app. Part 2, controls (commands to
+  `domotics_commands` for the bridge), comes behind an OK card.
+
 - **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
   logs, read-only, from Cloud Logging. Each environment is a project and a
   read-only service account (`jarvis-read`, Logs Viewer only) named in

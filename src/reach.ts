@@ -11,7 +11,7 @@ import { GMAIL_ACCOUNTS } from "./gmail/gmail.js";
 export type ReachTool = { readonly name: string; readonly does: string };
 export type ReachAccount = { readonly name: string; readonly connected: boolean };
 export type ReachNode = {
-  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "vendus" | "github" | "cloud" | "code" | "kiro";
+  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "vendus" | "house" | "github" | "cloud" | "code" | "kiro";
   /** "on": in use; "off": built but switched off in .env; "soon": not built yet. */
   readonly status: "on" | "off" | "soon";
   /** One line about what it is, for the panel. */
@@ -27,7 +27,7 @@ export type ReachNode = {
 };
 
 export type ReachInput = {
-  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "gcloud" | "vendus" | "codeAgent">;
+  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "gcloud" | "vendus" | "house" | "codeAgent">;
   /** Whether a token file exists: connected, as far as Jarvis can tell without calling Google. */
   readonly exists: (path: string) => Promise<boolean>;
   /** How many draft skills wait for review. */
@@ -146,6 +146,14 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       ],
       accounts: vendusOn ? [{ name: "kidclub", connected: true }] : [],
       ...(config.vendus.enabled ? (vendusOn ? {} : { hint: "npm run vendus:connect" }) : { hint: "VENDUS=on in .env" }),
+    },
+    {
+      id: "house",
+      status: config.house.enabled ? onOff(true) : "soon",
+      about: `Sees the house right now, read-only: the heating automation and why, temperatures, the heat pump, solar, battery and energy, from the domotics bridge's state in ${config.house.env}. He can't change anything in the house yet.`,
+      tools: [{ name: "house_now", does: "the house right now" }],
+      accounts: [],
+      ...(config.house.enabled ? {} : { hint: "HOUSE=on in .env (with GCLOUD=on)" }),
     },
     {
       id: "cloud",

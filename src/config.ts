@@ -130,6 +130,13 @@ export type Config = {
    */
   readonly vendus: { readonly enabled: boolean; readonly keyPath: string };
   /**
+   * HOUSE=on (#166): Claude can read the house's live state, published by the
+   * domotics bridge to the database of HOUSE_ENV (default dev, where the
+   * bridge runs today). Needs GCLOUD=on, with that environment's database
+   * readable. Read-only.
+   */
+  readonly house: { readonly enabled: boolean; readonly env: string };
+  /**
    * CODE_AGENT=on (#126): Claude can ask a code agent (Claude Code, read-only,
    * on a local copy in data/repos/) about one of the repos GITHUB=on reaches.
    * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
@@ -334,6 +341,8 @@ const EnvSchema = z.object({
   GITHUB: onOff,
   GCLOUD: onOff,
   VENDUS: onOff,
+  HOUSE: onOff,
+  HOUSE_ENV: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().regex(/^[a-z][a-z0-9-]{0,19}$/, { error: "must be an environment name like dev" }).default("dev")),
   CODE_AGENT: onOff,
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -508,6 +517,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("CODE_AGENT") !== "on") errors.push("CODE_FIX: needs CODE_AGENT=on (the code agent makes the fix)");
     if (production) errors.push("CODE_FIX: local only for now (its write tokens are files on this Mac)");
   }
+  if (raw("HOUSE") === "on" && raw("GCLOUD") !== "on") errors.push("HOUSE: needs GCLOUD=on (the house's state is in an environment's database)");
   if (raw("VENDUS") === "on") {
     if (production) errors.push("VENDUS: local only for now (its key is a file on this Mac, not in Secret Manager)");
     if (raw("BARE_MODE") !== "on") errors.push("VENDUS: needs BARE_MODE=on");
@@ -564,6 +574,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
     vendus: { enabled: e.VENDUS === "on", keyPath: "data/vendus.json" },
+    house: { enabled: e.HOUSE === "on" && e.GCLOUD === "on", env: e.HOUSE_ENV },
     codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, refresh: { mode: e.CODE_REFRESH, maxStudies: e.CODE_REFRESH_MAX }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,

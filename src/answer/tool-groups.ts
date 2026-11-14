@@ -14,10 +14,10 @@
 import type { LlmCall, LlmTool } from "../llm/types.js";
 import type { Logger } from "../types.js";
 
-export type ToolGroup = "calendar" | "gmail" | "github" | "code" | "cloud" | "invoices";
+export type ToolGroup = "calendar" | "gmail" | "github" | "code" | "cloud" | "invoices" | "house";
 
 /** In the order tools are offered: a fixed order keeps the same choice cacheable. */
-export const TOOL_GROUPS: readonly ToolGroup[] = ["calendar", "gmail", "github", "code", "cloud", "invoices"];
+export const TOOL_GROUPS: readonly ToolGroup[] = ["calendar", "gmail", "github", "code", "cloud", "invoices", "house"];
 
 /** One line each, for the router and for tools_more. */
 export const GROUP_ABOUT: Record<ToolGroup, string> = {
@@ -27,6 +27,7 @@ export const GROUP_ABOUT: Record<ToolGroup, string> = {
   code: "understanding his code: notes on studied repos and apps, studying, asking the code agent",
   cloud: "his Google Cloud environments: errors, logs and the database",
   invoices: "KidClub's invoices in Vendus: totals, VAT, one invoice",
+  house: "the house now: heating, heat pump, temperatures, solar, battery, energy",
 };
 
 export const TOOLS_MORE = "tools_more";
@@ -41,6 +42,7 @@ export const groupOfTool = (name: string): ToolGroup | undefined => {
   if (name.startsWith("code_")) return "code";
   if (name.startsWith("gcloud_")) return "cloud";
   if (name.startsWith("vendus_")) return "invoices";
+  if (name.startsWith("house_")) return "house";
   return undefined;
 };
 
@@ -106,6 +108,14 @@ const RULES: readonly { readonly pattern: RegExp; readonly groups: readonly Tool
       invoic*, billed, billing, revenue, sales, turnover, vat, receipt*, credit note*, vendus, earned, income,
       fatura*, faturacao, faturamos, faturado*, faturei, recibo*, receita*, vendas, iva, nota de credito, notas de credito, ganhamos, quanto ganh*`),
     groups: ["invoices"],
+  },
+  {
+    pattern: words(`
+      house, home, heating, heater, heat pump, pump, thermostat*, temperature*, warm*, cold, room*, solar, panel*, battery,
+      inverter, energy, power, electricity, consumption, grid, domotics,
+      casa, aquecimento, aquecer, bomba, termostato*, temperatura*, frio, quente, quarto*, sala, painei*, paineis, bateria,
+      energia, eletricidade, consumo, rede`),
+    groups: ["house"],
   },
   {
     // Something failing: where it shows (logs, CI) and where the cause is (code).
