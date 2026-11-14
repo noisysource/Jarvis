@@ -191,7 +191,10 @@ const handleBare = async (deps: Deps, bare: Deps["answer"], request: AskRequest,
     ...(meta.onReach ? { onReach: meta.onReach } : {}),
     onOffered: (tools) => {
       const step: PathStep = { kind: "tools", offered: tools };
-      path.push(step);
+      // #175: tools_more widens what was offered; the path keeps one, the latest.
+      const i = path.findIndex((s) => s.kind === "tools");
+      if (i === -1) path.push(step);
+      else path[i] = step;
       meta.onStep?.(step);
     },
     onStep: (step) => {

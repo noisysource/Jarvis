@@ -951,6 +951,19 @@ Confirmed (2026-11-12):
   connected account unless the brain names one; an account that can't be
   read is reported, never treated as an empty calendar.
 
+- **Tool groups (#175):** Claude no longer gets every tool on every
+  question. Tools are grouped (calendar, gmail, github, code, cloud;
+  memory and skills always on), and code picks the groups first: a word
+  dictionary (EN/PT, plus studied app names), the groups the last two
+  answers used, and a one-word pick by the classifier model (Haiku) run
+  in parallel with the turn's other setup (4 s cap; on failure the words
+  decide). The union is offered in a fixed order (cache-friendly), with
+  `tools_more` as the safety net; rounds that only add tools don't count
+  towards the round limit. Offered vs used is logged by group name, the
+  data for tuning or a learned router later (#171). Tools are sent
+  without strict mode (#174): its compiled grammar outgrew Anthropic's
+  limit, and code checks every call anyway.
+
 - **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
   logs, read-only, from Cloud Logging. Each environment is a project and a
   read-only service account (`jarvis-read`, Logs Viewer only) named in

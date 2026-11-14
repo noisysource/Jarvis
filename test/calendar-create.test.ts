@@ -275,7 +275,7 @@ describe("Renato's answer", () => {
     };
     const created: Proposal[] = [];
     const made = await buildDeps({
-      config: configWith({ BARE_MODE: "on", CALENDAR: "on", CALENDAR_WRITE: "on" }),
+      config: configWith({ BARE_MODE: "on", CALENDAR: "on", CALENDAR_WRITE: "on", TOOL_ROUTER: "rules" }),
       env: { ANTHROPIC_API_KEY: "sk-ant-test" },
       log: silent,
       profileFs: { readFile: async () => "Name: Alex", stat: async () => ({ mtimeMs: 1 }) } as never,

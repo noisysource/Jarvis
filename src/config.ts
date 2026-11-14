@@ -153,6 +153,13 @@ export type Config = {
   readonly introspection: boolean;
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
+  /**
+   * TOOL_ROUTER (#175, default model): which tools Claude gets per question.
+   * "model": the question's words, the last answers' tools and a one-word
+   * pick by the classifier model (Haiku), in parallel; "rules": the words and
+   * last answers only; "all": every connected tool every time (as before).
+   */
+  readonly toolRouter: "model" | "rules" | "all";
   /** Your name for the persona (JARVIS_USER_NAME, in the gitignored .env); none: "the person you're talking to". */
   readonly userName: string | undefined;
   /** Names and phrases memories must never contain (colleagues and the like). Gitignored; missing is fine. */
@@ -288,6 +295,7 @@ const EnvSchema = z.object({
     z.enum(["on", "off"], { error: 'must be "on" or "off"' }).optional(),
   ),
   TOOL_CALLING: onOff,
+  TOOL_ROUTER: z.enum(["model", "rules", "all"]).optional(),
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
   GITHUB: onOff,
@@ -470,6 +478,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
       tokensPath: e.GOOGLE_TOKENS_PATH ?? DEFAULTS.googleTokensPath,
     },
     toolCalling: e.TOOL_CALLING !== "off",
+    toolRouter: e.TOOL_ROUTER ?? "model",
     bareMemory: e.MEMORY === "on",
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
