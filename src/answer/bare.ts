@@ -43,6 +43,7 @@ import {
   type GithubReader,
 } from "../github/github.js";
 import { checkInvoicesRequest, invoiceForBrain, invoicesForBrain, listInvoices, VENDUS_INVOICES_TOOL, VENDUS_TOOLS, type VendusGet } from "../vendus/vendus.js";
+import { staleNote, staleSuffix, type CodeRefresh } from "../code/freshness.js";
 import { checkFixRequest, CODE_FIX_TOOL, type Fixes } from "../code/fix.js";
 import { checkPrClose, GITHUB_PR_CLOSE_TOOL, type PrCloser } from "../github/pr-close.js";
 import { BRIEF_EMAIL_QUERY, briefForBrain, briefSources, briefSummary, DAY_BRIEF_TOOL, gatherBrief } from "../brief.js";
@@ -596,7 +597,12 @@ export const makeBareAnswerer = (deps: {
     readonly maxUsd: number;
     readonly maxTurns: number;
     /** #127: studying repos in the background, and the notes kept from it. */
-    readonly study?: { readonly studies: Studies; readonly notes: NoteStore };
+    readonly study?: {
+      readonly studies: Studies;
+      readonly notes: NoteStore;
+      /** #128: the nightly check of what changed since each study. */
+      readonly refresh?: CodeRefresh;
+    };
     /** #162: fixes as pull requests, each step after Renato's OK. */
     readonly fix?: Fixes;
   };
@@ -768,7 +774,9 @@ export const makeBareAnswerer = (deps: {
     // #127: which code he has notes on, and what's being studied, so he reads notes before asking the agent.
     const study = tools && deps.github ? deps.code?.study : undefined;
     const notes = study ? await study.notes.all().catch(() => []) : [];
-    const studied = study ? notesLine(notes, study.studies.active()) : undefined;
+    // #128: notes that changed since he studied them say so ("5 commits since").
+    const fresh = study?.refresh ? await study.refresh.freshness().catch(() => ({})) : {};
+    const studied = study ? notesLine(notes, study.studies.active(), (n) => staleSuffix(n, fresh)) : undefined;
     // #175: the groups this question gets. Without routing, all that are connected.
     let groups: readonly ToolGroup[] = connectedGroups;
     if (tools && routing) {
@@ -1159,7 +1167,8 @@ export const makeBareAnswerer = (deps: {
           };
         }
         onStep?.({ kind: "tool", name: "code_notes", args, by: "model", ok: true, result: `note from ${note.studiedAt.slice(0, 10)}${note.partial ? " (partial)" : ""}` });
-        return { callId: call.id, content: noteForBrain(note) };
+        const changed = study.refresh ? staleNote(note, await study.refresh.freshness().catch(() => ({}))) : undefined;
+        return { callId: call.id, content: changed ? `${noteForBrain(note)}\n${changed}` : noteForBrain(note) };
       }
       // He already has a complete note: don't redo the reading unless they asked to study it again.
       const have = r.again ? undefined : await study.notes.get(repo, r.folder);

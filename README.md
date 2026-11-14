@@ -470,6 +470,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        Anthropic allows the Agent SDK on your own plan for your own use; it's
        for you only, never for guests. The trace shows "Claude plan" or the
        dollar cost for each question.
+     - **Keeping the code notes current (#128).** Each night at 04:00 (and
+       a minute after starting, if the last check is a day old) Jarvis asks
+       GitHub, read-only, how many commits touched each studied app since
+       he studied it. Stale notes are marked ("5 commits since") and he
+       says so when he uses them. `CODE_REFRESH=check` (default) only
+       flags; `study` also re-studies up to `CODE_REFRESH_MAX` (default 2)
+       stale apps a night, most changed first, on your Claude plan; `off`
+       turns it off. A whole monorepo's note counts as stale only after 20
+       commits.
      - **Fixes as pull requests (`CODE_FIX=on`, with `CODE_AGENT=on`).**
        When Jarvis has found a problem and you want it fixed, he proposes
        it (`code_fix`) and you get a card: **Prepare it** / **Not now**.
