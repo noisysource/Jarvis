@@ -73,6 +73,9 @@ export const GITHUB_TOOLS: readonly LlmTool[] = [GITHUB_REPOS_TOOL, GITHUB_READ_
 
 export type RepoRef = { readonly owner: string; readonly name: string };
 export type ReadRequest = { readonly repo: RepoRef; readonly path: string; readonly ref?: string };
+export type CommitsRequest = { readonly repo: RepoRef; readonly path?: string; readonly since: string; readonly max: number };
+export type Commit = { readonly sha: string; readonly date: string; readonly message: string };
+
 export type IssuesRequest = { readonly repo: RepoRef; readonly kind: "issues" | "prs"; readonly state: "open" | "closed" | "all" };
 export type ChecksRequest = { readonly repo: RepoRef; readonly ref?: string };
 
@@ -228,6 +231,11 @@ export type GithubReader = {
   readonly issues: (r: IssuesRequest, signal?: AbortSignal) => Promise<Result<readonly Item[], GithubError>>;
   /** The check runs, and the ref they're for (the default branch when none was asked). */
   readonly checks: (r: ChecksRequest, signal?: AbortSignal) => Promise<Result<{ readonly ref: string; readonly checks: readonly Check[] }, GithubError>>;
+  /**
+   * #128: commits on the default branch since a time, touching a folder (or
+   * anywhere), newest first. For code: not offered to the brain as a tool.
+   */
+  readonly commits?: (r: CommitsRequest, signal?: AbortSignal) => Promise<Result<readonly Commit[], GithubError>>;
 };
 
 export type GithubTokens = {
@@ -352,6 +360,22 @@ export const makeGithubReader = (deps: { readonly tokens: GithubTokens; readonly
                 ]
               : [],
           ),
+      );
+    },
+    commits: async (r, signal) => {
+      const query = new URLSearchParams({ since: r.since, per_page: String(Math.min(100, Math.max(1, r.max))) });
+      if (r.path) query.set("path", r.path);
+      const got = await get(r.repo.owner, `${repoPath(r.repo)}/commits?${query.toString()}`, signal);
+      if (!got.ok) return got;
+      return ok(
+        (Array.isArray(got.value) ? got.value : []).flatMap((x) => {
+          const o = object(x);
+          const c = object(o?.commit);
+          const sha = typeof o?.sha === "string" ? o.sha.slice(0, 7) : "";
+          const message = typeof c?.message === "string" ? (c.message.split("\n")[0] ?? "").slice(0, 120) : "";
+          const date = typeof object(c?.committer)?.date === "string" ? String(object(c?.committer)?.date) : "";
+          return sha ? [{ sha, date, message }] : [];
+        }),
       );
     },
     checks: async (r, signal) => {

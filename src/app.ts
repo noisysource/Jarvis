@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { makeToolRouter } from "./answer/tool-groups.js";
 import { makeFixes, type Fixes, type RunOut } from "./code/fix.js";
 import { makePrCloser } from "./github/pr-close.js";
+import { makeCodeRefresh } from "./code/freshness.js";
 import { briefSources } from "./brief.js";
 import { makeMorningBriefs, type BriefStore, type MorningBrief } from "./morning.js";
 import { makeBareAnswerer } from "./answer/bare.js";
@@ -313,6 +314,26 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const studies = codeAgent
     ? makeStudies({ agent: codeAgent, copies: repoCopies, store: noteStore, isEc: isEcText, maxUsd: config.codeAgent.study.maxUsd, maxTurns: config.codeAgent.study.maxTurns, now, log })
     : undefined;
+  // #128: what changed on GitHub since each study, checked nightly (read-only); "study" mode re-studies a few.
+  const freshnessFile = path.join(config.codeAgent.study.notesPath, "_freshness.json");
+  const commits = github?.reader.commits;
+  const codeRefresh =
+    studies && commits && config.codeAgent.refresh.mode !== "off"
+      ? makeCodeRefresh({
+          mode: config.codeAgent.refresh.mode,
+          maxStudies: config.codeAgent.refresh.maxStudies,
+          notes: () => noteStore.all(),
+          commits: (r) => commits(r),
+          start: (owner, name, folder) => studies.start(owner, name, folder),
+          read: () => readFileFs(freshnessFile, "utf8"),
+          write: async (text) => {
+            await mkdir(config.codeAgent.study.notesPath, { recursive: true, mode: 0o700 });
+            await writeFile(freshnessFile, text, { mode: 0o600 });
+          },
+          now,
+          log,
+        })
+      : undefined;
   // #162: fixes as pull requests, with a separate write token per owner; every step after his OK.
   const writeTokens = makeGithubTokens({ readFile: () => readFileFs(config.codeAgent.fix.writeTokensPath, "utf8") });
   const fixesRoot = path.resolve(config.codeAgent.fix.fixesPath);
@@ -349,7 +370,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           isEc: isEcText,
           maxUsd: config.codeAgent.maxUsd,
           maxTurns: config.codeAgent.maxTurns,
-          study: { studies, notes: noteStore },
+          study: { studies, notes: noteStore, ...(codeRefresh ? { refresh: codeRefresh } : {}) },
           ...(fixes ? { fix: fixes } : {}),
         }
       : undefined;
@@ -495,6 +516,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(studies ? { codeStudies: studies, codeMaps: async () => mapViews(await noteStore.all()) } : {}),
     ...(fixes ? { codeFixes: fixes } : {}),
     ...(morningBrief ? { morningBrief } : {}),
+    ...(codeRefresh ? { codeRefresh } : {}),
     ...(prs ? { prClose: prs } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
