@@ -64,7 +64,7 @@ describe("brain view: one answer's state (#131)", () => {
 
 describe("brain view: geometry (#131)", () => {
   it("places the nodes evenly around the centre, Profile at the top", () => {
-    expect(NODES).toHaveLength(9);
+    expect(NODES).toHaveLength(10);
     expect(nodePosition(-90)).toEqual({ left: 50, top: expect.closeTo(14.167, 2) });
     expect(nodePosition(0)).toEqual({ left: expect.closeTo(85.833, 2), top: 50 });
   });

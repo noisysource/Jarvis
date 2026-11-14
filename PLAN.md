@@ -1017,6 +1017,14 @@ Confirmed (2026-11-12):
   without strict mode (#174): its compiled grammar outgrew Anthropic's
   limit, and code checks every call anyway.
 
+- **Vendus (#7, #8, #9):** KidClub's invoices, read-only, as a tool group
+  (`invoices`: `vendus_invoices` for a period's totals with and without
+  VAT, by month and type; `vendus_invoice` for one). Two locks: a Vendus
+  user of Jarvis's own with the fewest rights, and a GET-only client with a
+  two-path, five-field allowlist (`src/vendus/vendus.ts`). Contract in
+  `docs/vendus.md`. The old "KidClub answerer" design (#12) is replaced by
+  this tool group: the same answerer, routing and trace as everything else.
+
 - **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
   logs, read-only, from Cloud Logging. Each environment is a project and a
   read-only service account (`jarvis-read`, Logs Viewer only) named in
@@ -1071,6 +1079,15 @@ Confirmed (2026-11-12):
   Mac because a pushed branch can run CI with the repo's secrets. A fix
   cut off by its limit keeps nothing. Jobs live in memory (a day); copies
   in `data/fixes/` are removed when published or thrown away.
+
+- **Code notes stay current (#128):** a nightly (04:00) read-only check
+  of GitHub commits since each study (`path=` the app's folder), kept in
+  `data/code/_freshness.json`. Apps are stale after 1 commit, a whole repo
+  after 20. Stale notes are marked in the prompt's notes line and in
+  `code_notes`. `CODE_REFRESH=study` queues up to `CODE_REFRESH_MAX`
+  re-studies a night (apps first, most changed first); the default
+  `check` only flags, to spare the Claude plan. The decisions log from
+  this issue moved to #186.
 
 - **Code agent sign-in (#150):** `CODE_AGENT_AUTH=auto` runs Renato's own
   questions on his Claude plan (Claude Code's login on his Mac, no API key

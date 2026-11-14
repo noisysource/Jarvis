@@ -430,9 +430,9 @@ export const noteForBrain = (n: CodeNote): string =>
   ].join("\n");
 
 /** One line for the end of the prompt: what he's studied, and what's in progress. */
-export const notesLine = (notes: readonly CodeNote[], active: readonly StudyState[]): string | undefined => {
+export const notesLine = (notes: readonly CodeNote[], active: readonly StudyState[], stale: (n: CodeNote) => string = () => ""): string | undefined => {
   if (notes.length === 0 && active.length === 0) return undefined;
-  const have = notes.map((n) => `${noteKey(n.repo, n.folder)} (${n.studiedAt.slice(0, 10)})`);
+  const have = notes.map((n) => `${noteKey(n.repo, n.folder)} (${n.studiedAt.slice(0, 10)}${stale(n)})`);
   const busy = active.filter((s) => s.state !== "failed").map((s) => noteKey(s.repo, s.folder));
   const failed = active.filter((s) => s.state === "failed").map((s) => `${noteKey(s.repo, s.folder)} (${s.error ?? "failed"})`);
   return [

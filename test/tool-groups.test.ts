@@ -37,7 +37,8 @@ describe("tool groups: the words of a question", () => {
     expect(groupsByWords("Avisa a Marisa que chego tarde")).toContain("gmail");
     expect(groupsByWords("Tell me a joke")).toEqual([]);
     expect(groupsByWords("Is the CI green on the Jarvis repo?")).toEqual(["github"]);
-    expect(groupsByWords("How does the billing module work?")).toEqual(["code"]);
+    // "billing" also points at the invoices: a few extra tools, never a missing one.
+    expect(groupsByWords("How does the billing module work?")).toEqual(["code", "invoices"]);
     expect(groupsByWords("What's in the dev database?")).toEqual(["cloud"]);
   });
 

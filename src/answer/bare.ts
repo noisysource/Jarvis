@@ -42,6 +42,8 @@ import {
   reposForBrain,
   type GithubReader,
 } from "../github/github.js";
+import { checkInvoicesRequest, invoiceForBrain, invoicesForBrain, listInvoices, VENDUS_INVOICES_TOOL, VENDUS_TOOLS, type VendusGet } from "../vendus/vendus.js";
+import { staleNote, staleSuffix, type CodeRefresh } from "../code/freshness.js";
 import { checkFixRequest, CODE_FIX_TOOL, type Fixes } from "../code/fix.js";
 import { checkPrClose, GITHUB_PR_CLOSE_TOOL, type PrCloser } from "../github/pr-close.js";
 import { BRIEF_EMAIL_QUERY, briefForBrain, briefSources, briefSummary, DAY_BRIEF_TOOL, gatherBrief } from "../brief.js";
@@ -244,6 +246,8 @@ export const barePrompt = (
     readonly study?: boolean;
     /** It can read errors and logs in his Google Cloud environments (#161). With tools only. */
     readonly gcloud?: boolean;
+    /** It can read KidClub's invoices in Vendus (#9). With tools only. */
+    readonly vendus?: boolean;
     /** It can read the environments' database, read-only (#167). With gcloud only. */
     readonly gcloudDb?: boolean;
     /** Not every tool group is offered on every question (#175); tools_more adds one. */
@@ -289,6 +293,12 @@ export const barePrompt = (
     options.routed === true && options.tools === true
       ? [
           "Not every tool is offered on every question: Jarvis offers the groups the question seems to need. If you need a group that isn't offered, call tools_more with it first, then use its tools. Never say you can't do something because its tool isn't offered right now.",
+        ]
+      : [];
+  const vendusLines =
+    options.vendus === true && options.tools === true
+      ? [
+          "You can read KidClub's invoices in Vendus, read-only: vendus_invoices gives a period's count and totals (with VAT, without, by month and type) and the latest few; vendus_invoice reads one by its id. Use them for invoicing, revenue and VAT questions about KidClub, and give amounts with VAT first, then without. You can't issue, change or cancel invoices. Numbers only from what the tools returned. KidClub's invoices are Noisy Phocus's business; EC invoicing isn't in Vendus and stays with Kiro.",
         ]
       : [];
   const cloudLines =
@@ -345,6 +355,7 @@ export const barePrompt = (
           ...emailLines,
           ...githubLines,
           ...cloudLines,
+          ...vendusLines,
           ...routedLines,
           ...briefLines,
           ...fixLines,
@@ -356,17 +367,19 @@ export const barePrompt = (
             ...emailLines,
             ...githubLines,
             ...cloudLines,
+            ...vendusLines,
             ...routedLines,
             ...briefLines,
             ...fixLines,
             "What you really did for earlier answers is listed at the end of this prompt; trust that list.",
             `You can't see a calendar. ${cannot} When something needs one of those, say plainly that you can't do that yet, and offer what you can do instead, like talking it through.`,
           ]
-        : githubLines.length + cloudLines.length > 0
+        : githubLines.length + cloudLines.length + vendusLines.length > 0
           ? [
-              `What you can do right now: talk, and read ${githubLines.length > 0 ? "his GitHub repositories" : "errors and logs in his Google Cloud environments"}.`,
+              `What you can do right now: talk, and read ${githubLines.length > 0 ? "his GitHub repositories" : cloudLines.length > 0 ? "errors and logs in his Google Cloud environments" : "KidClub's invoices"}.`,
               ...githubLines,
               ...cloudLines,
+              ...vendusLines,
               ...routedLines,
               ...briefLines,
               ...fixLines,
@@ -565,6 +578,8 @@ export const makeBareAnswerer = (deps: {
   };
   /** #161: errors and logs in his Google Cloud environments, read-only. With tools only. */
   readonly gcloud?: { readonly reader: GcloudReader; /** #167: the database, read-only. */ readonly db?: DbReader };
+  /** #9: KidClub's invoices in Vendus, GET only. With tools only. */
+  readonly vendus?: { readonly get: VendusGet; readonly timeZone: string };
   /**
    * #175: which tool groups Claude gets per question. Without it, every tool
    * every time. "rules": the words of the question and the last answers;
@@ -582,7 +597,12 @@ export const makeBareAnswerer = (deps: {
     readonly maxUsd: number;
     readonly maxTurns: number;
     /** #127: studying repos in the background, and the notes kept from it. */
-    readonly study?: { readonly studies: Studies; readonly notes: NoteStore };
+    readonly study?: {
+      readonly studies: Studies;
+      readonly notes: NoteStore;
+      /** #128: the nightly check of what changed since each study. */
+      readonly refresh?: CodeRefresh;
+    };
     /** #162: fixes as pull requests, each step after Renato's OK. */
     readonly fix?: Fixes;
   };
@@ -593,7 +613,7 @@ export const makeBareAnswerer = (deps: {
   const prompts = (profile?: string) => {
     // JARVIS_USER_NAME wins; otherwise the profile's "Name:" line.
     const name = deps.userName ?? (profile ? profileName(profile) : undefined);
-    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}), ...(deps.github && deps.code?.study && deps.tools === true ? { study: true } : {}), ...(deps.gcloud && deps.tools === true ? { gcloud: true, tools: true } : {}), ...(deps.gcloud?.db && deps.tools === true ? { gcloudDb: true } : {}), ...(deps.route && deps.route.mode !== "all" && deps.tools === true ? { routed: true } : {}), ...(deps.brief === true && deps.calendar && deps.tools === true ? { brief: true } : {}), ...(deps.github && deps.code?.fix && deps.tools === true ? { fix: true } : {}) };
+    const extra = { ...(profile ? { profile } : {}), ...(deps.calendar ? { calendar: true } : {}), ...(deps.calendar && deps.tools === true ? { tools: true } : {}), ...(deps.calendar?.create && deps.tools === true ? { create: true } : {}), ...(deps.gmail && deps.tools === true ? { email: true, tools: true } : {}), ...(deps.gmail?.writer && deps.tools === true ? { emailDrafts: true } : {}), ...(deps.memory && deps.tools === true ? { memory: true, tools: true } : {}), ...(deps.memory && deps.skills && deps.tools === true ? { skills: true } : {}), ...(deps.github && deps.tools === true ? { github: true, tools: true } : {}), ...(deps.github && deps.code && deps.tools === true ? { code: true } : {}), ...(deps.github && deps.code?.study && deps.tools === true ? { study: true } : {}), ...(deps.gcloud && deps.tools === true ? { gcloud: true, tools: true } : {}), ...(deps.vendus && deps.tools === true ? { vendus: true, tools: true } : {}), ...(deps.gcloud?.db && deps.tools === true ? { gcloudDb: true } : {}), ...(deps.route && deps.route.mode !== "all" && deps.tools === true ? { routed: true } : {}), ...(deps.brief === true && deps.calendar && deps.tools === true ? { brief: true } : {}), ...(deps.github && deps.code?.fix && deps.tools === true ? { fix: true } : {}) };
     return { typed: barePrompt(name, extra), spoken: barePrompt(name, { spoken: true, maxSentences: max, pauses, ...extra }) };
   };
   const withoutProfile = prompts();
@@ -704,7 +724,7 @@ export const makeBareAnswerer = (deps: {
   };
   /** #175: the groups that are connected, and each group's tools, in the order they're offered. */
   const connectedGroups: readonly ToolGroup[] = TOOL_GROUPS.filter((g) =>
-    g === "calendar" ? deps.calendar !== undefined : g === "gmail" ? deps.gmail !== undefined : g === "github" ? deps.github !== undefined : g === "code" ? deps.github !== undefined && deps.code !== undefined : deps.gcloud !== undefined,
+    g === "calendar" ? deps.calendar !== undefined : g === "gmail" ? deps.gmail !== undefined : g === "github" ? deps.github !== undefined : g === "code" ? deps.github !== undefined && deps.code !== undefined : g === "cloud" ? deps.gcloud !== undefined : deps.vendus !== undefined,
   );
   const toolsOf = (g: ToolGroup): readonly LlmTool[] =>
     g === "calendar"
@@ -715,7 +735,9 @@ export const makeBareAnswerer = (deps: {
           ? [...GITHUB_TOOLS, ...(deps.github?.prs ? [GITHUB_PR_CLOSE_TOOL] : [])]
           : g === "code"
             ? [CODE_ASK_TOOL, ...(deps.code?.study ? [CODE_NOTES_TOOL, CODE_STUDY_TOOL] : []), ...(deps.code?.fix ? [CODE_FIX_TOOL] : [])]
-            : [...GCLOUD_TOOLS, ...(deps.gcloud?.db ? DB_TOOLS : [])];
+            : g === "cloud"
+              ? [...GCLOUD_TOOLS, ...(deps.gcloud?.db ? DB_TOOLS : [])]
+              : VENDUS_TOOLS;
   const routing = deps.tools === true && deps.route !== undefined && deps.route.mode !== "all";
 
   return async ({ question, history, onText, signal, spoken, onStep, onReach, onOffered, now, remember, onToolSucceeded }) => {
@@ -739,7 +761,7 @@ export const makeBareAnswerer = (deps: {
     // Native tool calling (#104): the brain reads the calendar itself, and answers "did you
     // check?" from the record of what really ran (toolsSoFar). Code only checks each call.
     // Without tools (the local brain), code decides and words the date sentence, as before.
-    const tools = deps.tools === true && (deps.calendar !== undefined || deps.gmail !== undefined || deps.memory !== undefined || deps.github !== undefined || deps.gcloud !== undefined);
+    const tools = deps.tools === true && (deps.calendar !== undefined || deps.gmail !== undefined || deps.memory !== undefined || deps.github !== undefined || deps.gcloud !== undefined || deps.vendus !== undefined);
     // #107: this turn's memory: recent short-term notes go in the prompt; the rest is recalled on demand.
     const memoryTurn = tools && deps.memory ? makeMemoryTurn(deps.memory, { question, remember: remember !== false, now, ...(onStep ? { onStep } : {}) }) : undefined;
     const memoryCore = memoryTurn ? await memoryTurn.core() : undefined;
@@ -752,7 +774,9 @@ export const makeBareAnswerer = (deps: {
     // #127: which code he has notes on, and what's being studied, so he reads notes before asking the agent.
     const study = tools && deps.github ? deps.code?.study : undefined;
     const notes = study ? await study.notes.all().catch(() => []) : [];
-    const studied = study ? notesLine(notes, study.studies.active()) : undefined;
+    // #128: notes that changed since he studied them say so ("5 commits since").
+    const fresh = study?.refresh ? await study.refresh.freshness().catch(() => ({})) : {};
+    const studied = study ? notesLine(notes, study.studies.active(), (n) => staleSuffix(n, fresh)) : undefined;
     // #175: the groups this question gets. Without routing, all that are connected.
     let groups: readonly ToolGroup[] = connectedGroups;
     if (tools && routing) {
@@ -787,6 +811,7 @@ export const makeBareAnswerer = (deps: {
         ...(on.includes("github") ? toolsOf("github") : []),
         ...(on.includes("code") ? toolsOf("code") : []),
         ...(on.includes("cloud") ? toolsOf("cloud") : []),
+        ...(on.includes("invoices") ? toolsOf("invoices") : []),
         ...(routing && missing.length > 0 ? [toolsMoreTool(missing)] : []),
       ];
       return list;
@@ -905,6 +930,7 @@ export const makeBareAnswerer = (deps: {
       }
       if (deps.github && GITHUB_TOOLS.some((t) => t.name === call.name)) return runGithub(deps.github, call);
       if (deps.gcloud && GCLOUD_TOOLS.some((t) => t.name === call.name)) return runGcloud(deps.gcloud, call);
+      if (deps.vendus && VENDUS_TOOLS.some((t) => t.name === call.name)) return runVendus(deps.vendus, call);
       if (deps.gcloud?.db && DB_TOOLS.some((t) => t.name === call.name)) return runGcloudDb(deps.gcloud.reader, deps.gcloud.db, call);
       if (deps.github && deps.code && call.name === CODE_ASK_TOOL.name) return runCode(deps.code, call);
       if (deps.github && deps.code?.fix && call.name === CODE_FIX_TOOL.name) return runFix(deps.code.fix, deps.code.isEc, call);
@@ -1047,6 +1073,40 @@ export const makeBareAnswerer = (deps: {
       return done(args, got.value ? "1 document" : "not found", docForBrain(r, got.value), got.value ? 1 : 0);
     };
 
+    /** #9: KidClub's invoices, read-only. Code checks the period and builds every request. */
+    const runVendus = async (vendus: NonNullable<typeof deps.vendus>, call: LlmToolCall): Promise<LlmToolResult> => {
+      const started = performance.now();
+      const failed = (args: string, e: { readonly code: string; readonly message: string }): LlmToolResult => {
+        deps.log?.warn("vendus failed", { tool: call.name, code: e.code });
+        onStep?.({ kind: "tool", name: call.name, args, by: "model", ok: false, error: e.code });
+        return { callId: call.id, content: `Vendus: ${e.message}. Say so plainly; don't guess numbers.`, isError: true };
+      };
+      if (call.name === VENDUS_INVOICES_TOOL.name) {
+        const checked = checkInvoicesRequest(call.input, localDate(now, vendus.timeZone));
+        if (!checked.ok) {
+          onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: `refused: ${checked.error}` });
+          return { callId: call.id, content: `Refused: ${checked.error}.`, isError: true };
+        }
+        const r = checked.value;
+        const args = `${r.since} → ${r.until}${r.type === "FR" ? "" : ` · ${r.type}`}`;
+        const got = await listInvoices(vendus.get, r, signal);
+        if (!got.ok) return failed(args, got.error);
+        deps.log?.info("vendus read", { tool: call.name, docs: got.value.docs.length, ms: Math.round(performance.now() - started) });
+        onStep?.({ kind: "tool", name: call.name, args, by: "model", ok: true, result: `${got.value.docs.length}${got.value.capped ? "+" : ""} ${got.value.docs.length === 1 ? "document" : "documents"}` });
+        return { callId: call.id, content: invoicesForBrain(r, got.value.docs, got.value.capped) };
+      }
+      const id = (call.input as Record<string, unknown> | undefined)?.id;
+      if (typeof id !== "number" || !Number.isInteger(id) || id < 1 || id > 999_999_999_999_999) {
+        onStep?.({ kind: "tool", name: call.name, args: "", by: "model", ok: false, error: "refused: not a document id" });
+        return { callId: call.id, content: "Refused: not a document id; use an id from vendus_invoices.", isError: true };
+      }
+      const got = await vendus.get(`/documents/${id}/`, {}, signal);
+      if (!got.ok) return failed(`id ${id}`, got.error);
+      deps.log?.info("vendus read", { tool: call.name, ms: Math.round(performance.now() - started) });
+      onStep?.({ kind: "tool", name: call.name, args: `id ${id}`, by: "model", ok: true, result: "1 document" });
+      return { callId: call.id, content: invoiceForBrain(got.value) };
+    };
+
     /** #162: a fix is only proposed here; the app asks Renato, and each later step needs his OK. */
     const runFix = async (fixes: Fixes, isEc: (text: string) => boolean, call: LlmToolCall): Promise<LlmToolResult> => {
       const refuse = (why: string, content: string): LlmToolResult => {
@@ -1107,7 +1167,8 @@ export const makeBareAnswerer = (deps: {
           };
         }
         onStep?.({ kind: "tool", name: "code_notes", args, by: "model", ok: true, result: `note from ${note.studiedAt.slice(0, 10)}${note.partial ? " (partial)" : ""}` });
-        return { callId: call.id, content: noteForBrain(note) };
+        const changed = study.refresh ? staleNote(note, await study.refresh.freshness().catch(() => ({}))) : undefined;
+        return { callId: call.id, content: changed ? `${noteForBrain(note)}\n${changed}` : noteForBrain(note) };
       }
       // He already has a complete note: don't redo the reading unless they asked to study it again.
       const have = r.again ? undefined : await study.notes.get(repo, r.folder);
