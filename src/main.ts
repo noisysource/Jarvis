@@ -68,6 +68,24 @@ const morning = deps.ok ? deps.value.morningBrief : undefined;
 const stopMorning = morning
   ? startDailyAt(() => morning.prepare(), { timeZone: cfg.timeZone, hour: cfg.morningBrief.hour, minute: cfg.morningBrief.minute, msUntil, onError: () => log.warn("morning brief failed", { reason: "unexpected" }) })
   : undefined;
+// #128: every night at 04:00, what changed since each code study (and, with CODE_REFRESH=study, a few re-studies).
+const refresh = deps.ok ? deps.value.codeRefresh : undefined;
+const stopRefresh = refresh
+  ? startDailyAt(() => refresh.run(), { timeZone: cfg.timeZone, hour: 4, minute: 0, msUntil, onError: () => log.warn("code refresh failed", { reason: "unexpected" }) })
+  : undefined;
+// The first check runs a minute after starting, if the last one is older than a day.
+if (refresh) {
+  const first = setTimeout(() => {
+    void refresh
+      .freshness()
+      .then((f) => {
+        const last = Object.values(f).map((x) => Date.parse(x.checkedAt)).sort((a, b) => b - a)[0];
+        return last === undefined || Date.now() - last > 20 * 3_600_000 ? refresh.run() : undefined;
+      })
+      .catch(() => log.warn("code refresh failed", { reason: "unexpected" }));
+  }, 60_000);
+  first.unref();
+}
 // Locally the server has no login, so only accept requests addressed to
 // localhost on our port (DNS-rebinding guard). On Cloud Run, IAM protects it.
 // The /voices audition page is dev-only (#73).
@@ -177,6 +195,7 @@ const shutdown = (signal: string): void => {
       stopPurge?.();
       stopIntrospection?.();
       stopMorning?.();
+      stopRefresh?.();
       if (sqlite?.ok) sqlite.value.close();
       log.info("stopped");
       process.exit(0);

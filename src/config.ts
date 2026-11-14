@@ -149,6 +149,13 @@ export type Config = {
      */
     readonly study: { readonly maxUsd: number; readonly maxTurns: number; readonly notesPath: string };
     /**
+     * #128: CODE_REFRESH: each night at 04:00, "check" (default) asks GitHub
+     * what changed since each study and flags stale notes; "study" also
+     * re-studies up to CODE_REFRESH_MAX (default 2) stale ones (Claude plan);
+     * "off" does neither.
+     */
+    readonly refresh: { readonly mode: "off" | "check" | "study"; readonly maxStudies: number };
+    /**
      * CODE_FIX=on (#162): Jarvis can propose a fix; after Renato's OK the agent
      * prepares it on a copy (data/fixes), he sees the diff, and his second OK
      * pushes a branch and opens a draft pull request. Needs a write token per
@@ -328,6 +335,14 @@ const EnvSchema = z.object({
   CODE_AGENT_MODEL: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().regex(/^claude-[a-z0-9.-]{3,60}$/, { error: "must be a Claude model id, e.g. claude-sonnet-5-5" }).default("claude-sonnet-5-5"),
+  ),
+  CODE_REFRESH: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["off", "check", "study"], { error: 'must be "off", "check" or "study"' }).default("check"),
+  ),
+  CODE_REFRESH_MAX: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ error: "must be a whole number from 0 to 10" }).int({ error: "must be a whole number from 0 to 10" }).min(0, { error: "must be a whole number from 0 to 10" }).max(10, { error: "must be a whole number from 0 to 10" }).default(2),
   ),
   CODE_FIX: onOff,
   CODE_FIX_MAX_USD: z.preprocess(
@@ -537,7 +552,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, refresh: { mode: e.CODE_REFRESH, maxStudies: e.CODE_REFRESH_MAX }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
