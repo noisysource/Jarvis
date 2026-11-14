@@ -470,6 +470,10 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        If there's an issue for the fix, he passes its number and the pull
        request says `Closes #N` (Jarvis's own repo requires one); he checks
        it's an open issue in that repo before preparing anything.
+       He can also close a pull request (`github_pr_close`), behind a
+       **Close it** / **Keep it** card, with the same write token. It's
+       never merged, and its branch is deleted only when it's one of his own
+       (`jarvis/…` in the same repo).
      - **Adding events (`CALENDAR_WRITE=on`, ☁️ Claude).** Ask "add a
        meeting called Work tomorrow at 9pm". Claude proposes it; a card
        shows the event with **Add it** / **Don't add**, and nothing is

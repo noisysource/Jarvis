@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { makeToolRouter } from "./answer/tool-groups.js";
 import { makeFixes, type Fixes, type RunOut } from "./code/fix.js";
+import { makePrCloser } from "./github/pr-close.js";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
@@ -333,6 +334,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
           log,
         }))
       : undefined;
+  // #183: closing pull requests after his OK, with the same write token (on with CODE_FIX).
+  const prs = fixes ? makePrCloser({ writeToken: writeTokens.token, isEc: isEcText, log }) : undefined;
   // #126: a code agent (Claude Code, read-only) on local copies of the repos GitHub reaches.
   // #150: his own questions can run on his Claude plan (Claude Code's login on this Mac).
   const code =
@@ -446,6 +449,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
     ...(gmailDelete ? { gmailDelete } : {}),
     ...(studies ? { codeStudies: studies, codeMaps: async () => mapViews(await noteStore.all()) } : {}),
     ...(fixes ? { codeFixes: fixes } : {}),
+    ...(prs ? { prClose: prs } : {}),
     classify: makeClassifier({ contexts: contexts.value, llm: classifierLlm.value, log, thinking: config.turn.classifierThinking }),
     stickyContext: config.turn.stickyContext,
     speculativeAnswer: config.turn.speculativeAnswer,
@@ -470,7 +474,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
                 : {}),
               ...(skillStore && config.toolCalling ? { skills: { store: skillStore, ec: memoryEc } } : {}),
               // #125: his GitHub repos, read-only, with tools (Claude).
-              ...(github && config.toolCalling ? { github } : {}),
+              ...(github && config.toolCalling ? { github: { ...github, ...(prs ? { prs } : {}) } } : {}),
               ...(code && config.toolCalling ? { code } : {}),
               // #161: errors and logs in his Google Cloud environments, read-only, with tools (Claude).
               ...(gcloud && config.toolCalling ? { gcloud } : {}),

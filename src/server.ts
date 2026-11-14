@@ -360,6 +360,7 @@ export const makeServer = (
     for (const [route, act] of [
       ["/code/fix", codeFixes.decide],
       ["/code/fixes/publish", codeFixes.publish],
+      ...(deps.prClose ? ([["/github/pr-close", deps.prClose.decide]] as const) : []),
     ] as const) {
       app.post(route, jsonOnly(route), bodyLimit({ maxSize: 1024, onError: (c) => c.json(errorBody("The request is too large."), 413) }), async (c) => {
         const body = FixBody.safeParse(await c.req.json().catch(() => undefined));

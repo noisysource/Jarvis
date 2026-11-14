@@ -128,6 +128,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
         { name: "github_read", does: "read a file or list a folder" },
         { name: "github_issues", does: "list issues or pull requests" },
         { name: "github_checks", does: "CI results for a branch" },
+        ...(config.codeAgent.fix.enabled ? [{ name: "github_pr_close", does: "close a pull request, after your OK (deletes its branch if it's one of Jarvis's)" }] : []),
       ],
       accounts: githubOwners.map((name) => ({ name, connected: true })),
       ...(config.github.enabled ? (githubOwners.length === 0 ? { hint: "npm run github:connect -- <owner>" } : {}) : { hint: "GITHUB=on in .env" }),
