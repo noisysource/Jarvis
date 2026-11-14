@@ -34,7 +34,9 @@ const owner = process.argv[2] ?? "";
 const write = process.argv.slice(3).includes("--write");
 if (!/^[A-Za-z0-9-]{1,39}$/.test(owner)) fail("Say whose repos: npm run github:connect -- <owner> (your username or an organisation)");
 
-const configResult = loadConfig({ ...process.env, GITHUB: "off" });
+// The features that need GitHub are off here too, or their checks would refuse
+// (CODE_AGENT=on needs GITHUB=on): this script only needs the file paths.
+const configResult = loadConfig({ ...process.env, GITHUB: "off", CODE_AGENT: "off", CODE_FIX: "off" });
 const config = configResult.ok ? configResult.value : fail(configResult.ok ? "" : configResult.error);
 if (config.env === "production") fail("GitHub is local only: run this on your Mac, not in production.");
 const path = write ? config.codeAgent.fix.writeTokensPath : config.github.tokensPath;
