@@ -124,6 +124,12 @@ export type Config = {
    */
   readonly gcloud: { readonly enabled: boolean; readonly keysPath: string };
   /**
+   * VENDUS=on (#8): Claude can read KidClub's invoices in Vendus, GET only, two
+   * paths. The key of Jarvis's own Vendus user is in a file under data/
+   * (npm run vendus:connect). Local only for now.
+   */
+  readonly vendus: { readonly enabled: boolean; readonly keyPath: string };
+  /**
    * CODE_AGENT=on (#126): Claude can ask a code agent (Claude Code, read-only,
    * on a local copy in data/repos/) about one of the repos GITHUB=on reaches.
    * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
@@ -320,6 +326,7 @@ const EnvSchema = z.object({
   GMAIL: onOff,
   GITHUB: onOff,
   GCLOUD: onOff,
+  VENDUS: onOff,
   CODE_AGENT: onOff,
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -486,6 +493,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("CODE_AGENT") !== "on") errors.push("CODE_FIX: needs CODE_AGENT=on (the code agent makes the fix)");
     if (production) errors.push("CODE_FIX: local only for now (its write tokens are files on this Mac)");
   }
+  if (raw("VENDUS") === "on") {
+    if (production) errors.push("VENDUS: local only for now (its key is a file on this Mac, not in Secret Manager)");
+    if (raw("BARE_MODE") !== "on") errors.push("VENDUS: needs BARE_MODE=on");
+  }
   if (raw("GCLOUD") === "on") {
     if (production) errors.push("GCLOUD: local only for now (it signs in through gcloud on this Mac)");
     if (raw("BARE_MODE") !== "on") errors.push("GCLOUD: needs BARE_MODE=on");
@@ -537,6 +548,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
+    vendus: { enabled: e.VENDUS === "on", keyPath: "data/vendus.json" },
     codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,

@@ -17,6 +17,7 @@
     "eval:identity": "tsx --env-file-if-exists=.env scripts/eval-identity.ts",
     "calendar:connect": "tsx --env-file-if-exists=.env scripts/calendar-connect.ts",
     "gmail:connect": "tsx --env-file-if-exists=.env scripts/gmail-connect.ts",
+    "vendus:connect": "tsx --env-file-if-exists=.env scripts/vendus-connect.ts",
     "gcloud:connect": "tsx --env-file-if-exists=.env scripts/gcloud-connect.ts",
     "github:connect": "tsx --env-file-if-exists=.env scripts/github-connect.ts",
     "memory:reflect": "tsx --env-file-if-exists=.env scripts/memory-reflect.ts",

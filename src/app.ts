@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { makeToolRouter } from "./answer/tool-groups.js";
 import { makeFixes, type Fixes, type RunOut } from "./code/fix.js";
 import { makePrCloser } from "./github/pr-close.js";
+import { makeVendusGet, type VendusGet } from "./vendus/vendus.js";
 import { briefSources } from "./brief.js";
 import { makeMorningBriefs, type BriefStore, type MorningBrief } from "./morning.js";
 import { makeBareAnswerer } from "./answer/bare.js";
@@ -75,6 +76,8 @@ export type AppInputs = {
   readonly githubReader?: GithubReader;
   readonly gcloudReader?: GcloudReader;
   readonly gcloudDb?: DbReader;
+  /** #9: tests give their own Vendus. */
+  readonly vendusGet?: VendusGet;
   /** #162: tests give their own fixes. */
   readonly codeFixes?: Fixes;
   /** Tests: a code agent and repo copies instead of Claude Code and git (#126). */
@@ -313,6 +316,17 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
   const studies = codeAgent
     ? makeStudies({ agent: codeAgent, copies: repoCopies, store: noteStore, isEc: isEcText, maxUsd: config.codeAgent.study.maxUsd, maxTurns: config.codeAgent.study.maxTurns, now, log })
     : undefined;
+  // #8: Vendus, GET only, with the key of Jarvis's own Vendus user (data/vendus.json, mode 600).
+  const vendusKey = async (): Promise<string | undefined> => {
+    const text = await readFileFs(config.vendus.keyPath, "utf8").catch(() => undefined);
+    try {
+      const k = text ? (JSON.parse(text) as { apiKey?: unknown }).apiKey : undefined;
+      return typeof k === "string" && k !== "" ? k : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const vendusGet = config.vendus.enabled ? (inputs.vendusGet ?? makeVendusGet({ apiKey: vendusKey })) : undefined;
   // #162: fixes as pull requests, with a separate write token per owner; every step after his OK.
   const writeTokens = makeGithubTokens({ readFile: () => readFileFs(config.codeAgent.fix.writeTokensPath, "utf8") });
   const fixesRoot = path.resolve(config.codeAgent.fix.fixesPath);
@@ -487,6 +501,7 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
         exists: fileExists,
         githubOwners: githubTokens.owners,
         cloudEnvs: gcloudEnvs.envs,
+        vendusConnected: async () => (await vendusKey()) !== undefined,
         studied: async () => ({ notes: await noteStore.all(), active: studies?.active() ?? [] }),
         ...(skillStore ? { draftSkills: async () => (await skillStore.list()).filter((s) => s.status === "draft").length } : {}),
       }),
@@ -524,6 +539,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(code && config.toolCalling ? { code } : {}),
               // #161: errors and logs in his Google Cloud environments, read-only, with tools (Claude).
               ...(gcloud && config.toolCalling ? { gcloud } : {}),
+              // #9: KidClub's invoices in Vendus, GET only, with tools (Claude).
+              ...(vendusGet && config.toolCalling ? { vendus: { get: vendusGet, timeZone: config.timeZone } } : {}),
               // #175: only the tool groups a question needs; the classifier model (Haiku) helps pick.
               // #49: "what's on my plate?" in one read of everything connected.
               ...(calendar && config.toolCalling ? { brief: true } : {}),

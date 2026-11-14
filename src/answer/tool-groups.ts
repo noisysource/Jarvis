@@ -14,10 +14,10 @@
 import type { LlmCall, LlmTool } from "../llm/types.js";
 import type { Logger } from "../types.js";
 
-export type ToolGroup = "calendar" | "gmail" | "github" | "code" | "cloud";
+export type ToolGroup = "calendar" | "gmail" | "github" | "code" | "cloud" | "invoices";
 
 /** In the order tools are offered: a fixed order keeps the same choice cacheable. */
-export const TOOL_GROUPS: readonly ToolGroup[] = ["calendar", "gmail", "github", "code", "cloud"];
+export const TOOL_GROUPS: readonly ToolGroup[] = ["calendar", "gmail", "github", "code", "cloud", "invoices"];
 
 /** One line each, for the router and for tools_more. */
 export const GROUP_ABOUT: Record<ToolGroup, string> = {
@@ -26,6 +26,7 @@ export const GROUP_ABOUT: Record<ToolGroup, string> = {
   github: "his GitHub repos: files, issues, pull requests, CI checks",
   code: "understanding his code: notes on studied repos and apps, studying, asking the code agent",
   cloud: "his Google Cloud environments: errors, logs and the database",
+  invoices: "KidClub's invoices in Vendus: totals, VAT, one invoice",
 };
 
 export const TOOLS_MORE = "tools_more";
@@ -39,6 +40,7 @@ export const groupOfTool = (name: string): ToolGroup | undefined => {
   if (name.startsWith("github_")) return "github";
   if (name.startsWith("code_")) return "code";
   if (name.startsWith("gcloud_")) return "cloud";
+  if (name.startsWith("vendus_")) return "invoices";
   return undefined;
 };
 
@@ -98,6 +100,12 @@ const RULES: readonly { readonly pattern: RegExp; readonly groups: readonly Tool
       cloud, gcp, google cloud, log, logs, logging, firestore, database, db, collection*, document*, dev, staging, prod,
       production, deploy*, server*, base de dados, colec*, producao`),
     groups: ["cloud"],
+  },
+  {
+    pattern: words(`
+      invoic*, billed, billing, revenue, sales, turnover, vat, receipt*, credit note*, vendus, earned, income,
+      fatura*, faturacao, faturamos, faturado*, faturei, recibo*, receita*, vendas, iva, nota de credito, notas de credito, ganhamos, quanto ganh*`),
+    groups: ["invoices"],
   },
   {
     // Something failing: where it shows (logs, CI) and where the cause is (code).

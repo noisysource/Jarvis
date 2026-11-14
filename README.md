@@ -396,6 +396,16 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and restart. Ask "anything from the school this week?" or "unread
        at Noisy Source?". Jarvis can't send, delete or label; EC email shows
        only as "EC email, handled by Kiro".
+     - **Vendus (`VENDUS=on`, ☁️ Claude), read-only.** KidClub's invoices:
+       "how much did we invoice this month?", "quanto faturámos em
+       outubro?", VAT for a quarter, one invoice. In Vendus, create a user
+       for Jarvis with the fewest rights (it only needs to see documents),
+       sign in as it, copy its API key (APPS → API), then
+       `npm run vendus:connect` (it checks the key with one read and keeps
+       it in `data/vendus.json`, gitignored, readable only by you), put
+       `VENDUS=on` in `.env` and restart. Jarvis can only GET two paths
+       with it; he can't issue, change or cancel anything. Contract and
+       checks: [docs/vendus.md](docs/vendus.md).
      - **Google Cloud (`GCLOUD=on`, ☁️ Claude), read-only.** Errors and
        logs in your environments, one at a time (start with dev). No key
        file (the organisation blocks service account keys): in that

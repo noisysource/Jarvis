@@ -1017,6 +1017,14 @@ Confirmed (2026-11-12):
   without strict mode (#174): its compiled grammar outgrew Anthropic's
   limit, and code checks every call anyway.
 
+- **Vendus (#7, #8, #9):** KidClub's invoices, read-only, as a tool group
+  (`invoices`: `vendus_invoices` for a period's totals with and without
+  VAT, by month and type; `vendus_invoice` for one). Two locks: a Vendus
+  user of Jarvis's own with the fewest rights, and a GET-only client with a
+  two-path, five-field allowlist (`src/vendus/vendus.ts`). Contract in
+  `docs/vendus.md`. The old "KidClub answerer" design (#12) is replaced by
+  this tool group: the same answerer, routing and trace as everything else.
+
 - **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
   logs, read-only, from Cloud Logging. Each environment is a project and a
   read-only service account (`jarvis-read`, Logs Viewer only) named in
