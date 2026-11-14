@@ -24,7 +24,7 @@ export const EMPTY_TRACE = { offered: undefined, calls: [], handoff: false };
 const SERVICES = { calendar: "Calendar", gmail: "Gmail", memory: "Memory", skills: "Skills", github: "GitHub", cloud: "Google Cloud", code: "Code agent" };
 
 /** The service a tool reaches: "Gmail" for gmail_search. @param {string} tool */
-export const serviceOf = (tool) => SERVICES[nodeOfTool(tool) ?? ""] ?? "Unknown";
+export const serviceOf = (tool) => (tool === "tools_more" ? "More tools" : (SERVICES[nodeOfTool(tool) ?? ""] ?? "Unknown"));
 
 const ACCOUNT = /^(personal|noisysource)(?: · (.*))?$/;
 

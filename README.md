@@ -314,6 +314,17 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        remembers which reads really ran for it, so "did you check?" gets
        a true answer. `TOOL_CALLING=off` in `.env` switches back to
        the code-driven way below. 🧠 Local always uses the code-driven way.
+     - **Only the tools a question needs (#175).** Tools come in groups
+       (calendar, Gmail, GitHub, code, Google Cloud); memory and skills
+       are always there. Before Claude sees a question, Jarvis picks the
+       groups from its words (English and Portuguese, and the names of
+       the apps he has studied), from what the last answers used, and
+       from a one-word pick by the small model (Haiku), asked in parallel
+       and given up after 4 seconds. If a group is missing, Claude asks
+       for it with `tools_more`: one more step, never a wrong "I can't".
+       The trace shows what was offered; the log keeps offered against
+       used (names only). `TOOL_ROUTER=rules` skips Haiku; `all` offers
+       every tool every time, as before.
      - **Which days (code-driven):** code works them out, in Europe/Lisbon, from
        phrases like today, tomorrow, the day after tomorrow, yesterday,
        Friday, next Friday, this week, next week, this weekend, 12

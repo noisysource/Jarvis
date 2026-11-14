@@ -162,7 +162,7 @@ describe("Claude drafts, Renato sends", () => {
       round += 1;
       return ok(round % 2 === 1 ? { ...common, kind: "tool_calls" as const, text: "", calls: [{ id: `t${round}`, name: "gmail_draft", input: late }] } : { ...common, kind: "text" as const, text: "Drafted; send it when you're ready." });
     };
-    const config = loadConfig({ BARE_MODE: "on", GMAIL: "on", GMAIL_WRITE: "on" });
+    const config = loadConfig({ BARE_MODE: "on", GMAIL: "on", GMAIL_WRITE: "on", TOOL_ROUTER: "rules" });
     if (!config.ok) throw new Error(config.error);
     const made = await buildDeps({
       config: config.value,
@@ -238,7 +238,7 @@ describe("deleting a draft Jarvis wrote (#124)", () => {
       const next = script.shift();
       return ok(next ?? { ...common, kind: "text" as const, text: "Okay." });
     };
-    const config = loadConfig({ BARE_MODE: "on", GMAIL: "on", GMAIL_WRITE: "on" });
+    const config = loadConfig({ BARE_MODE: "on", GMAIL: "on", GMAIL_WRITE: "on", TOOL_ROUTER: "rules" });
     if (!config.ok) throw new Error(config.error);
     const made = await buildDeps({
       config: config.value,

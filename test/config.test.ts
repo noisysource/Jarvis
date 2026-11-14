@@ -30,6 +30,7 @@ describe("loadConfig", () => {
       bareProfile: false,
       calendar: { enabled: false, write: false, clientPath: "data/google-oauth-client.json", tokensPath: "data/google-tokens.json" },
       toolCalling: true,
+      toolRouter: "model",
       gmail: { enabled: false, write: false, tokensPath: expect.any(Function) },
       github: { enabled: false, tokensPath: "data/github-tokens.json" },
       gcloud: { enabled: false, keysPath: "data/gcloud" },

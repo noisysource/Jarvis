@@ -4,6 +4,7 @@
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { makeToolRouter } from "./answer/tool-groups.js";
 import { makeBareAnswerer } from "./answer/bare.js";
 import { makePersonalAnswerer } from "./answer/personal.js";
 import { makeAnswerRouter, makeBrainRouter } from "./answer/router.js";
@@ -437,6 +438,8 @@ export const buildDeps = async (inputs: AppInputs): Promise<Result<Deps, string>
               ...(code && config.toolCalling ? { code } : {}),
               // #161: errors and logs in his Google Cloud environments, read-only, with tools (Claude).
               ...(gcloud && config.toolCalling ? { gcloud } : {}),
+              // #175: only the tool groups a question needs; the classifier model (Haiku) helps pick.
+              route: { mode: config.toolRouter, ...(config.toolRouter === "model" ? { router: makeToolRouter({ llm: classifierLlm.value, log }) } : {}) },
               // Tests give their own calendar reader: no token files to check then.
               ...(inputs.calendarReader || inputs.gmailReader ? {} : { connected }),
               log,
