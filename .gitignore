@@ -25,6 +25,8 @@ data/google-gmail-*.json
 data/google-calendar-*.json
 # GitHub (#125): read-only tokens, local only, never commit
 data/github-tokens.json
+# Google Cloud (#161): which project each environment is, local only
+data/gcloud/
 # Local copies of your repos for the code agent (#126)
 data/repos/
 # What Jarvis learned from studying your repos (#127)

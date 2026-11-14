@@ -21,7 +21,7 @@ import { nodeOfTool } from "./brain-lib.js";
 export const EMPTY_TRACE = { offered: undefined, calls: [], handoff: false };
 
 /** @type {Record<string, string>} */
-const SERVICES = { calendar: "Calendar", gmail: "Gmail", memory: "Memory", skills: "Skills", github: "GitHub", code: "Code agent" };
+const SERVICES = { calendar: "Calendar", gmail: "Gmail", memory: "Memory", skills: "Skills", github: "GitHub", cloud: "Google Cloud", code: "Code agent" };
 
 /** The service a tool reaches: "Gmail" for gmail_search. @param {string} tool */
 export const serviceOf = (tool) => SERVICES[nodeOfTool(tool) ?? ""] ?? "Unknown";
@@ -40,7 +40,7 @@ export const targetOf = (tool, args) => {
   if (tool === "calendar_read" && args !== "") return { target: "all calendars", detail: args };
   // #125: "owner/repo · path" → the repo, then the rest.
   if (tool.startsWith("code_") && args !== "") return { target: args, detail: "" };
-  if (tool.startsWith("github_") && args !== "") {
+  if ((tool.startsWith("github_") || tool.startsWith("gcloud_")) && args !== "") {
     const [repo, ...rest] = args.split(" · ");
     return { target: repo ?? args, detail: rest.join(" · ") };
   }

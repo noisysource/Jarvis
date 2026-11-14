@@ -120,11 +120,13 @@ export const buildParams = (model: string, request: LlmRequest): CreateParams =>
   messages: request.messages.map(toMessageParam),
   ...(request.tools && request.tools.length > 0
     ? {
+        // Not strict (#174): Anthropic compiles strict tools into one grammar, which
+        // failed ("too large") once Jarvis had twenty-odd tools. Nothing relies on
+        // it: code checks every tool call against its own rules.
         tools: request.tools.map((t) => ({
           name: t.name,
           description: t.description,
           input_schema: t.inputSchema as Anthropic.Beta.Messages.BetaTool.InputSchema,
-          strict: true,
         })),
       }
     : {}),
@@ -201,7 +203,13 @@ export const mapError = (e: unknown): LlmError => {
     return { kind: "auth", message: `Anthropic API rejected the key (${e.status})`, retryable: false };
   }
   if (e instanceof BadRequestError || e instanceof NotFoundError) {
-    return { kind: "bad_request", message: `Anthropic API rejected the request (${e.status}): ${e.message}`, retryable: false };
+    // Said on the page too: it's about the request or the account (credit, limits), never the key or the prompt.
+    return {
+      kind: "bad_request",
+      message: `Anthropic API rejected the request (${e.status}): ${e.message}`,
+      userMessage: `Claude refused the request (${e.status}): ${e.message.replace(/\s+/g, " ").slice(0, 300)}`,
+      retryable: false,
+    };
   }
   if (e instanceof InternalServerError) {
     return { kind: "server", message: `Anthropic API error (${e.status})`, retryable: true };

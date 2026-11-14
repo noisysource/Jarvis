@@ -936,7 +936,7 @@ Confirmed for M0 (2026-11-06):
 Confirmed for the page (2026-11-11):
 
 - **Brain view (#130–#134):** the page shows Jarvis as a core with nodes
-  around it (Profile, Memory, Skills, Calendar, Gmail, GitHub, Code agent,
+  around it (Profile, Memory, Skills, Calendar, Gmail, GitHub, Google Cloud, Code agent,
   Kiro). A line goes to a node only when a real path step reaches it (live
   `reach`/`step` events, then the final path): blue while reaching and when
   used, amber while an action waits for Renato's OK, red and short when it
@@ -950,6 +950,29 @@ Confirmed (2026-11-12):
   separate Google accounts, each connected on its own. A read covers every
   connected account unless the brain names one; an account that can't be
   read is reported, never treated as an empty calendar.
+
+- **Google Cloud (#161):** Jarvis (not the code agent) reads errors and
+  logs, read-only, from Cloud Logging. Each environment is a project and a
+  read-only service account (`jarvis-read`, Logs Viewer only) named in
+  `data/gcloud/<env>.json`; access grows by connecting environments, dev
+  first, prod last. No key is stored (the organisation blocks service
+  account keys): `gcloud` on the Mac gives a 30-minute token of that
+  account by impersonation, so read-only rests on that account's single
+  role, and Jarvis never holds Renato's own login. Errors are
+  `severity>=ERROR` or anything on stderr (`console.error` arrives with
+  no severity). The filter is built in code from checked values; email
+  addresses are masked. Two tools: `gcloud_errors`
+  (grouped) and `gcloud_logs`.
+- **The database (#167, dev):** the apps keep their best error records in
+  Firestore, so the same account also gets Cloud Datastore Viewer and
+  Jarvis three reading tools (`gcloud_db_collections`, `gcloud_db_query`,
+  `gcloud_db_get`). Renato chose the whole dev database rather than a
+  list of collections. Code builds every query from checked values,
+  makes reading calls only, caps and cuts what comes back, masks email
+  addresses, and shows only the field names of filters on the page.
+  Staging and prod are a separate decision.
+  The fix loop (code agent proposes, PR after his OK) is #162; the code
+  agent never gets cloud credentials.
 
 - **GitHub (#125):** read-only, GET only, through fine-grained read-only
   tokens, one per owner, in `data/github-tokens.json` (local, mode 600).

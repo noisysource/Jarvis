@@ -126,13 +126,13 @@ describe("buildParams", () => {
     ]);
   });
 
-  it("maps tools as strict tools", () => {
+  it("maps tools, not strict (#174)", () => {
     const params = buildParams("claude-sonnet-5-5", {
       ...base,
       tools: [{ name: "get_invoice", description: "Read one invoice", inputSchema: classifySchema }],
     });
     expect(params.tools).toEqual([
-      { name: "get_invoice", description: "Read one invoice", input_schema: classifySchema, strict: true },
+      { name: "get_invoice", description: "Read one invoice", input_schema: classifySchema },
     ]);
   });
 

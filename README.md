@@ -372,6 +372,25 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and restart. Ask "anything from the school this week?" or "unread
        at Noisy Source?". Jarvis can't send, delete or label; EC email shows
        only as "EC email, handled by Kiro".
+     - **Google Cloud (`GCLOUD=on`, ☁️ Claude), read-only.** Errors and
+       logs in your environments, one at a time (start with dev). No key
+       file (the organisation blocks service account keys): in that
+       environment's project there is a service account `jarvis-read` with
+       one role, **Logs Viewer**, and your own Google account has
+       **Service Account Token Creator** on it. With `gcloud` installed and
+       signed in, run `npm run gcloud:connect -- dev <project-id>` (it
+       checks with one read and writes `data/gcloud/dev.json`: names only),
+       put `GCLOUD=on` in `.env` and restart. Ask "what's failing in dev?".
+       Jarvis asks `gcloud` for a 30-minute token of `jarvis-read`, never
+       your own login; builds the log filter himself; counts `console.error`
+       output as errors (it arrives without a severity); and masks email
+       addresses before the brain sees a line. To let him read the
+       environment's **database** too (Firestore, where the apps keep
+       client errors and failed emails), give `jarvis-read` the **Cloud
+       Datastore Viewer** role; the connect command prints the exact line
+       and tells you whether logs and database are readable. He can't
+       write, change or deploy anything. Add `staging` or `prod` the same
+       way later.
      - **GitHub (`GITHUB=on`, ☁️ Claude), read-only.** Your repos: files,
        folders, issues, PRs and CI. Create a **fine-grained token** per owner
        (your account, the `noisysource` org): Repository access *All*, and

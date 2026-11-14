@@ -116,6 +116,14 @@ export type Config = {
    */
   readonly github: { readonly enabled: boolean; readonly tokensPath: string };
   /**
+   * GCLOUD=on (#161): Claude can read errors and logs in Renato's Google Cloud
+   * environments, read-only. Each environment is a project and a
+   * read-only service account, named in a file under data/
+   * (npm run gcloud:connect -- <env> <project-id>); no key is stored.
+   * Local only for now.
+   */
+  readonly gcloud: { readonly enabled: boolean; readonly keysPath: string };
+  /**
    * CODE_AGENT=on (#126): Claude can ask a code agent (Claude Code, read-only,
    * on a local copy in data/repos/) about one of the repos GITHUB=on reaches.
    * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
@@ -283,6 +291,7 @@ const EnvSchema = z.object({
   CALENDAR_WRITE: onOff,
   GMAIL: onOff,
   GITHUB: onOff,
+  GCLOUD: onOff,
   CODE_AGENT: onOff,
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -422,6 +431,10 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("BARE_MODE") !== "on") errors.push("GMAIL: needs BARE_MODE=on for now");
   }
   if (raw("CODE_AGENT") === "on" && raw("GITHUB") !== "on") errors.push("CODE_AGENT: needs GITHUB=on (it reads the repos GitHub reaches)");
+  if (raw("GCLOUD") === "on") {
+    if (production) errors.push("GCLOUD: local only for now (it signs in through gcloud on this Mac)");
+    if (raw("BARE_MODE") !== "on") errors.push("GCLOUD: needs BARE_MODE=on");
+  }
   if (raw("GITHUB") === "on") {
     if (production) errors.push("GITHUB: local only for now (its tokens are a file on this Mac, not in Secret Manager)");
     if (raw("BARE_MODE") !== "on") errors.push("GITHUB: needs BARE_MODE=on");
@@ -461,6 +474,7 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
+    gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
     codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,

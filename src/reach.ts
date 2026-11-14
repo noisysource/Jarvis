@@ -11,7 +11,7 @@ import { GMAIL_ACCOUNTS } from "./gmail/gmail.js";
 export type ReachTool = { readonly name: string; readonly does: string };
 export type ReachAccount = { readonly name: string; readonly connected: boolean };
 export type ReachNode = {
-  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "code" | "kiro";
+  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "cloud" | "code" | "kiro";
   /** "on": in use; "off": built but switched off in .env; "soon": not built yet. */
   readonly status: "on" | "off" | "soon";
   /** One line about what it is, for the panel. */
@@ -27,13 +27,15 @@ export type ReachNode = {
 };
 
 export type ReachInput = {
-  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "codeAgent">;
+  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "gcloud" | "codeAgent">;
   /** Whether a token file exists: connected, as far as Jarvis can tell without calling Google. */
   readonly exists: (path: string) => Promise<boolean>;
   /** How many draft skills wait for review. */
   readonly draftSkills?: () => Promise<number>;
   /** #125: the GitHub owners with a token. */
   readonly githubOwners?: () => Promise<readonly string[]>;
+  /** #161: the Google Cloud environments with a key, and their projects. */
+  readonly cloudEnvs?: () => Promise<readonly { readonly env: string; readonly project: string }[]>;
   /** #127: his code notes, and studies under way. */
   readonly studied?: () => Promise<{ readonly notes: readonly CodeNote[]; readonly active: readonly StudyState[] }>;
 };
@@ -49,6 +51,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
   const gmailAccounts = await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await exists(config.gmail.tokensPath(name)) })));
   const drafts = config.bareMemory && input.draftSkills ? await input.draftSkills().catch(() => 0) : 0;
   const githubOwners = config.github.enabled && input.githubOwners ? await input.githubOwners().catch(() => []) : [];
+  const cloudEnvs = config.gcloud.enabled && input.cloudEnvs ? await input.cloudEnvs().catch(() => []) : [];
   const studied = config.codeAgent.enabled && input.studied ? await input.studied().catch(() => ({ notes: [], active: [] })) : { notes: [], active: [] };
 
   return [
@@ -127,6 +130,20 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       ],
       accounts: githubOwners.map((name) => ({ name, connected: true })),
       ...(config.github.enabled ? (githubOwners.length === 0 ? { hint: "npm run github:connect -- <owner>" } : {}) : { hint: "GITHUB=on in .env" }),
+    },
+    {
+      id: "cloud",
+      status: config.gcloud.enabled ? onOff(true) : "soon",
+      about: "Reads errors, logs and the database (Firestore) of your Google Cloud environments, read-only, one environment at a time. He can't change or deploy anything. Email addresses are masked.",
+      tools: [
+        { name: "gcloud_errors", does: "recent errors, grouped" },
+        { name: "gcloud_logs", does: "recent log entries" },
+        { name: "gcloud_db_collections", does: "collection names in the database" },
+        { name: "gcloud_db_query", does: "documents of a collection" },
+        { name: "gcloud_db_get", does: "one document" },
+      ],
+      accounts: cloudEnvs.map((e) => ({ name: `${e.env} · ${e.project}`, connected: true })),
+      ...(config.gcloud.enabled ? (cloudEnvs.length === 0 ? { hint: "npm run gcloud:connect -- dev <project-id>" } : {}) : { hint: "GCLOUD=on in .env" }),
     },
     {
       id: "code",
