@@ -94,6 +94,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
         : "Reads your calendars. Adding events is off (CALENDAR_WRITE=on).",
       tools: [
         { name: "calendar_read", does: "read days from one or all calendars" },
+        ...(config.toolCalling ? [{ name: "day_brief", does: "today's brief: calendars, unread email, overnight errors, CI" }] : []),
         ...(config.calendar.write ? [{ name: "calendar_create", does: "propose an event, added after your OK" }] : []),
       ],
       accounts: calendarAccounts,

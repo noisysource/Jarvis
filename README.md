@@ -314,6 +314,13 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        remembers which reads really ran for it, so "did you check?" gets
        a true answer. `TOOL_CALLING=off` in `.env` switches back to
        the code-driven way below. 🧠 Local always uses the code-driven way.
+     - **The day's brief (#49).** "What's on my plate today?", "o que
+       tenho hoje?" or "morning brief": one `day_brief` call reads, in
+       parallel and read-only, today on every connected calendar, unread
+       email from the last day (no promotions or social), errors in the
+       last 24 h in each connected Google Cloud environment, and CI on the
+       default branch of each studied repo. A part that fails is said
+       plainly; EC items are named only as EC work.
      - **Only the tools a question needs (#175).** Tools come in groups
        (calendar, Gmail, GitHub, code, Google Cloud); memory and skills
        are always there. Before Claude sees a question, Jarvis picks the
