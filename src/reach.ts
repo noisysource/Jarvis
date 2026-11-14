@@ -11,7 +11,7 @@ import { GMAIL_ACCOUNTS } from "./gmail/gmail.js";
 export type ReachTool = { readonly name: string; readonly does: string };
 export type ReachAccount = { readonly name: string; readonly connected: boolean };
 export type ReachNode = {
-  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "cloud" | "code" | "kiro";
+  readonly id: "profile" | "memory" | "skills" | "calendar" | "gmail" | "vendus" | "house" | "github" | "cloud" | "code" | "kiro";
   /** "on": in use; "off": built but switched off in .env; "soon": not built yet. */
   readonly status: "on" | "off" | "soon";
   /** One line about what it is, for the panel. */
@@ -27,13 +27,15 @@ export type ReachNode = {
 };
 
 export type ReachInput = {
-  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "gcloud" | "codeAgent">;
+  readonly config: Pick<Config, "bareMode" | "bareProfile" | "toolCalling" | "bareMemory" | "introspection" | "calendar" | "gmail" | "github" | "gcloud" | "vendus" | "house" | "codeAgent">;
   /** Whether a token file exists: connected, as far as Jarvis can tell without calling Google. */
   readonly exists: (path: string) => Promise<boolean>;
   /** How many draft skills wait for review. */
   readonly draftSkills?: () => Promise<number>;
   /** #125: the GitHub owners with a token. */
   readonly githubOwners?: () => Promise<readonly string[]>;
+  /** #8: whether the Vendus key file exists. */
+  readonly vendusConnected?: () => Promise<boolean>;
   /** #161: the Google Cloud environments with a key, and their projects. */
   readonly cloudEnvs?: () => Promise<readonly { readonly env: string; readonly project: string }[]>;
   /** #127: his code notes, and studies under way. */
@@ -51,6 +53,7 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
   const gmailAccounts = await Promise.all(GMAIL_ACCOUNTS.map(async (name) => ({ name, connected: await exists(config.gmail.tokensPath(name)) })));
   const drafts = config.bareMemory && input.draftSkills ? await input.draftSkills().catch(() => 0) : 0;
   const githubOwners = config.github.enabled && input.githubOwners ? await input.githubOwners().catch(() => []) : [];
+  const vendusOn = config.vendus.enabled && input.vendusConnected ? await input.vendusConnected().catch(() => false) : false;
   const cloudEnvs = config.gcloud.enabled && input.cloudEnvs ? await input.cloudEnvs().catch(() => []) : [];
   const studied = config.codeAgent.enabled && input.studied ? await input.studied().catch(() => ({ notes: [], active: [] })) : { notes: [], active: [] };
 
@@ -132,6 +135,25 @@ export const reachView = async (input: ReachInput): Promise<readonly ReachNode[]
       ],
       accounts: githubOwners.map((name) => ({ name, connected: true })),
       ...(config.github.enabled ? (githubOwners.length === 0 ? { hint: "npm run github:connect -- <owner>" } : {}) : { hint: "GITHUB=on in .env" }),
+    },
+    {
+      id: "vendus",
+      status: config.vendus.enabled ? onOff(true) : "soon",
+      about: "Reads KidClub's invoices in Vendus, read-only: totals with and without VAT for a period, and one invoice. He can't issue, change or cancel anything.",
+      tools: [
+        { name: "vendus_invoices", does: "a period's invoices and totals" },
+        { name: "vendus_invoice", does: "one invoice" },
+      ],
+      accounts: vendusOn ? [{ name: "kidclub", connected: true }] : [],
+      ...(config.vendus.enabled ? (vendusOn ? {} : { hint: "npm run vendus:connect" }) : { hint: "VENDUS=on in .env" }),
+    },
+    {
+      id: "house",
+      status: config.house.enabled ? onOff(true) : "soon",
+      about: `Sees the house right now, read-only: the heating automation and why, temperatures, the heat pump, solar, battery and energy, from the domotics bridge's state in ${config.house.env}. He can't change anything in the house yet.`,
+      tools: [{ name: "house_now", does: "the house right now" }],
+      accounts: [],
+      ...(config.house.enabled ? {} : { hint: "HOUSE=on in .env (with GCLOUD=on)" }),
     },
     {
       id: "cloud",

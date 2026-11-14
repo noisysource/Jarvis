@@ -30,6 +30,8 @@ data/github-write-tokens.json
 data/fixes/
 # #177: the morning brief, kept for the day (email senders and subjects)
 data/brief/
+# #8: the Vendus key of Jarvis's Vendus user
+data/vendus.json
 # Google Cloud (#161): which project each environment is, local only
 data/gcloud/
 # Local copies of your repos for the code agent (#126)

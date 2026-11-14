@@ -396,6 +396,25 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        and restart. Ask "anything from the school this week?" or "unread
        at Noisy Source?". Jarvis can't send, delete or label; EC email shows
        only as "EC email, handled by Kiro".
+     - **Vendus (`VENDUS=on`, ☁️ Claude), read-only.** KidClub's invoices:
+       "how much did we invoice this month?", "quanto faturámos em
+       outubro?", VAT for a quarter, one invoice. In Vendus, create a user
+       for Jarvis with the fewest rights (it only needs to see documents),
+       sign in as it, copy its API key (APPS → API), then
+       `npm run vendus:connect` (it checks the key with one read and keeps
+       it in `data/vendus.json`, gitignored, readable only by you), put
+       `VENDUS=on` in `.env` and restart. Jarvis can only GET two paths
+       with it; he can't issue, change or cancel anything. Contract and
+       checks: [docs/vendus.md](docs/vendus.md).
+     - **The house (`HOUSE=on`, with `GCLOUD=on`), read-only.** "Is the
+       heating on?", "why is the pump on?", "how much solar now?". The
+       domotics bridge on the Pi publishes the house's state to the
+       database of `HOUSE_ENV` (default `dev`, where it runs today), and
+       Jarvis reads that one document: the heating automation's own
+       explanation and plan, room and outdoor temperatures, each
+       thermostat, the heat pump, solar, battery, grid and consumption.
+       If the bridge hasn't reported for 15 minutes he says so. He can't
+       change anything in the house yet.
      - **Google Cloud (`GCLOUD=on`, ☁️ Claude), read-only.** Errors and
        logs in your environments, one at a time (start with dev). No key
        file (the organisation blocks service account keys): in that
@@ -460,6 +479,15 @@ Requires Node 22.13 or later (the memory store uses `node:sqlite`, which needs a
        Anthropic allows the Agent SDK on your own plan for your own use; it's
        for you only, never for guests. The trace shows "Claude plan" or the
        dollar cost for each question.
+     - **Keeping the code notes current (#128).** Each night at 04:00 (and
+       a minute after starting, if the last check is a day old) Jarvis asks
+       GitHub, read-only, how many commits touched each studied app since
+       he studied it. Stale notes are marked ("5 commits since") and he
+       says so when he uses them. `CODE_REFRESH=check` (default) only
+       flags; `study` also re-studies up to `CODE_REFRESH_MAX` (default 2)
+       stale apps a night, most changed first, on your Claude plan; `off`
+       turns it off. A whole monorepo's note counts as stale only after 20
+       commits.
      - **Fixes as pull requests (`CODE_FIX=on`, with `CODE_AGENT=on`).**
        When Jarvis has found a problem and you want it fixed, he proposes
        it (`code_fix`) and you get a card: **Prepare it** / **Not now**.

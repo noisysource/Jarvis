@@ -5,21 +5,23 @@
 // answer's path): nothing is drawn for show.
 
 /** @typedef {import("./chat.js").PathStep} PathStep */
-/** @typedef {"profile" | "memory" | "skills" | "calendar" | "gmail" | "github" | "cloud" | "code" | "kiro"} NodeId */
+/** @typedef {"profile" | "memory" | "skills" | "calendar" | "gmail" | "vendus" | "house" | "github" | "cloud" | "code" | "kiro"} NodeId */
 /** @typedef {"reaching" | "used" | "waiting" | "failed" | "handoff"} Reach */
 /** @typedef {"idle" | "off" | "soon" | "kiro"} Rest */
 
 /** Around the core, clockwise from the top. `soon`: not connected yet. */
 export const NODES = /** @type {const} */ ([
   { id: "profile", label: "Profile", angle: -90, rest: "idle" },
-  { id: "memory", label: "Memory", angle: -50, rest: "idle" },
-  { id: "skills", label: "Skills", angle: -10, rest: "idle" },
-  { id: "calendar", label: "Calendar", angle: 30, rest: "idle" },
-  { id: "gmail", label: "Gmail", angle: 70, rest: "idle" },
-  { id: "github", label: "GitHub", angle: 110, rest: "soon" },
-  { id: "cloud", label: "Google Cloud", angle: 150, rest: "soon" },
-  { id: "code", label: "Code agent", angle: 190, rest: "soon" },
-  { id: "kiro", label: "Kiro", angle: 230, rest: "kiro" },
+  { id: "memory", label: "Memory", angle: -57, rest: "idle" },
+  { id: "skills", label: "Skills", angle: -25, rest: "idle" },
+  { id: "calendar", label: "Calendar", angle: 8, rest: "idle" },
+  { id: "gmail", label: "Gmail", angle: 41, rest: "idle" },
+  { id: "vendus", label: "Vendus", angle: 74, rest: "soon" },
+  { id: "house", label: "House", angle: 106, rest: "soon" },
+  { id: "github", label: "GitHub", angle: 139, rest: "soon" },
+  { id: "cloud", label: "Google Cloud", angle: 172, rest: "soon" },
+  { id: "code", label: "Code agent", angle: 205, rest: "soon" },
+  { id: "kiro", label: "Kiro", angle: 237, rest: "kiro" },
 ]);
 
 /**
@@ -34,6 +36,8 @@ export const nodeOfTool = (tool) => {
   if (tool.startsWith("skill_")) return "skills";
   if (tool.startsWith("github_")) return "github";
   if (tool.startsWith("gcloud_")) return "cloud";
+  if (tool.startsWith("vendus_")) return "vendus";
+  if (tool.startsWith("house_")) return "house";
   if (tool.startsWith("code_")) return "code";
   return undefined;
 };

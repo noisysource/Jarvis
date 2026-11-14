@@ -124,6 +124,19 @@ export type Config = {
    */
   readonly gcloud: { readonly enabled: boolean; readonly keysPath: string };
   /**
+   * VENDUS=on (#8): Claude can read KidClub's invoices in Vendus, GET only, two
+   * paths. The key of Jarvis's own Vendus user is in a file under data/
+   * (npm run vendus:connect). Local only for now.
+   */
+  readonly vendus: { readonly enabled: boolean; readonly keyPath: string };
+  /**
+   * HOUSE=on (#166): Claude can read the house's live state, published by the
+   * domotics bridge to the database of HOUSE_ENV (default dev, where the
+   * bridge runs today). Needs GCLOUD=on, with that environment's database
+   * readable. Read-only.
+   */
+  readonly house: { readonly enabled: boolean; readonly env: string };
+  /**
    * CODE_AGENT=on (#126): Claude can ask a code agent (Claude Code, read-only,
    * on a local copy in data/repos/) about one of the repos GITHUB=on reaches.
    * Each question is capped: CODE_AGENT_MAX_USD (default 0.50) and
@@ -148,6 +161,13 @@ export type Config = {
      * High on purpose: a study reads a lot, once. Notes go to `notesPath`.
      */
     readonly study: { readonly maxUsd: number; readonly maxTurns: number; readonly notesPath: string };
+    /**
+     * #128: CODE_REFRESH: each night at 04:00, "check" (default) asks GitHub
+     * what changed since each study and flags stale notes; "study" also
+     * re-studies up to CODE_REFRESH_MAX (default 2) stale ones (Claude plan);
+     * "off" does neither.
+     */
+    readonly refresh: { readonly mode: "off" | "check" | "study"; readonly maxStudies: number };
     /**
      * CODE_FIX=on (#162): Jarvis can propose a fix; after Renato's OK the agent
      * prepares it on a copy (data/fixes), he sees the diff, and his second OK
@@ -320,6 +340,9 @@ const EnvSchema = z.object({
   GMAIL: onOff,
   GITHUB: onOff,
   GCLOUD: onOff,
+  VENDUS: onOff,
+  HOUSE: onOff,
+  HOUSE_ENV: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().regex(/^[a-z][a-z0-9-]{0,19}$/, { error: "must be an environment name like dev" }).default("dev")),
   CODE_AGENT: onOff,
   CODE_AGENT_AUTH: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -328,6 +351,14 @@ const EnvSchema = z.object({
   CODE_AGENT_MODEL: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().regex(/^claude-[a-z0-9.-]{3,60}$/, { error: "must be a Claude model id, e.g. claude-sonnet-5-5" }).default("claude-sonnet-5-5"),
+  ),
+  CODE_REFRESH: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["off", "check", "study"], { error: 'must be "off", "check" or "study"' }).default("check"),
+  ),
+  CODE_REFRESH_MAX: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ error: "must be a whole number from 0 to 10" }).int({ error: "must be a whole number from 0 to 10" }).min(0, { error: "must be a whole number from 0 to 10" }).max(10, { error: "must be a whole number from 0 to 10" }).default(2),
   ),
   CODE_FIX: onOff,
   CODE_FIX_MAX_USD: z.preprocess(
@@ -486,6 +517,11 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     if (raw("CODE_AGENT") !== "on") errors.push("CODE_FIX: needs CODE_AGENT=on (the code agent makes the fix)");
     if (production) errors.push("CODE_FIX: local only for now (its write tokens are files on this Mac)");
   }
+  if (raw("HOUSE") === "on" && raw("GCLOUD") !== "on") errors.push("HOUSE: needs GCLOUD=on (the house's state is in an environment's database)");
+  if (raw("VENDUS") === "on") {
+    if (production) errors.push("VENDUS: local only for now (its key is a file on this Mac, not in Secret Manager)");
+    if (raw("BARE_MODE") !== "on") errors.push("VENDUS: needs BARE_MODE=on");
+  }
   if (raw("GCLOUD") === "on") {
     if (production) errors.push("GCLOUD: local only for now (it signs in through gcloud on this Mac)");
     if (raw("BARE_MODE") !== "on") errors.push("GCLOUD: needs BARE_MODE=on");
@@ -537,7 +573,9 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
-    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
+    vendus: { enabled: e.VENDUS === "on", keyPath: "data/vendus.json" },
+    house: { enabled: e.HOUSE === "on" && e.GCLOUD === "on", env: e.HOUSE_ENV },
+    codeAgent: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on", maxUsd: e.CODE_AGENT_MAX_USD, maxTurns: e.CODE_AGENT_MAX_TURNS, reposPath: "data/repos", auth: e.CODE_AGENT_AUTH, model: e.CODE_AGENT_MODEL, study: { maxUsd: e.CODE_STUDY_MAX_USD, maxTurns: e.CODE_STUDY_MAX_TURNS, notesPath: "data/code" }, refresh: { mode: e.CODE_REFRESH, maxStudies: e.CODE_REFRESH_MAX }, fix: { enabled: e.GITHUB === "on" && e.CODE_AGENT === "on" && e.CODE_FIX === "on", maxUsd: e.CODE_FIX_MAX_USD, maxTurns: e.CODE_FIX_MAX_TURNS, writeTokensPath: "data/github-write-tokens.json", fixesPath: "data/fixes" } },
     ollamaThink: e.OLLAMA_THINK === "on",
     userName: e.JARVIS_USER_NAME,
     tts: { provider: e.TTS_PROVIDER ?? DEFAULTS.ttsProvider, voice: e.TTS_VOICE ?? "", kokoroUrl, piperUrl },
