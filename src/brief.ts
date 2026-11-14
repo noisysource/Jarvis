@@ -15,7 +15,8 @@ import type { CalendarReaders } from "./calendar/accounts.js";
 import type { GcloudReader, LogEntry } from "./gcloud/gcloud.js";
 import { errorsForBrain, errorsSummary, groupErrors, GCLOUD_LIMITS } from "./gcloud/gcloud.js";
 import type { GithubReader, RepoRef } from "./github/github.js";
-import { isEcEmail, searchForBrain, type GmailAccount, type GmailMessage, type GmailReader } from "./gmail/gmail.js";
+import { GMAIL_ACCOUNTS, isEcEmail, searchForBrain, type GmailAccount, type GmailMessage, type GmailReader } from "./gmail/gmail.js";
+import type { CalendarReader } from "./calendar/google.js";
 import type { LlmTool } from "./llm/types.js";
 
 export const DAY_BRIEF_TOOL: LlmTool = {
@@ -36,6 +37,30 @@ export type BriefSources = {
   readonly gmail?: { readonly reader: GmailReader; readonly accounts: readonly GmailAccount[]; readonly isEc: (text: string) => boolean };
   readonly cloud?: { readonly reader: GcloudReader };
   readonly github?: { readonly reader: GithubReader; readonly repos: () => Promise<readonly RepoRef[]> };
+};
+
+/**
+ * The brief's sources from what Jarvis has connected: every calendar account,
+ * every Gmail account, the Google Cloud environments, and CI on the repos he
+ * has studied (#177: the same for the day_brief tool and the morning job).
+ */
+export const briefSources = async (d: {
+  readonly calendar: { readonly read: CalendarReader; readonly accounts?: CalendarReaders; readonly timeZone: string };
+  readonly gmail?: { readonly reader: GmailReader; readonly isEc: (text: string) => boolean };
+  readonly cloud?: GcloudReader;
+  readonly github?: GithubReader;
+  readonly studiedRepos?: () => Promise<readonly string[]>;
+}): Promise<BriefSources> => {
+  const repos = [...new Set(d.github && d.studiedRepos ? await d.studiedRepos().catch(() => []) : [])].flatMap((r) => {
+    const [owner, name] = r.split("/");
+    return owner && name ? [{ owner, name }] : [];
+  });
+  return {
+    calendar: { readers: d.calendar.accounts ?? { personal: d.calendar.read }, timeZone: d.calendar.timeZone },
+    ...(d.gmail ? { gmail: { reader: d.gmail.reader, accounts: GMAIL_ACCOUNTS, isEc: d.gmail.isEc } } : {}),
+    ...(d.cloud ? { cloud: { reader: d.cloud } } : {}),
+    ...(d.github && repos.length > 0 ? { github: { reader: d.github, repos: async () => repos } } : {}),
+  };
 };
 
 type Part<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };

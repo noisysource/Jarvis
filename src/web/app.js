@@ -4,6 +4,7 @@
 // lives in this page's memory only; reload or "New conversation" clears it.
 
 import { followFix } from "./fix.js";
+import { showMorningBrief } from "./morning.js";
 import { makeBrainView } from "./brain.js";
 import { makeCodeMapView } from "./codemap.js";
 import { makeStudiesView } from "./studies.js";
@@ -70,6 +71,8 @@ const byId = (id) => {
 };
 
 const transcript = byId("transcript");
+// #177: the morning brief, as a card above the conversation, once per day.
+void showMorningBrief(transcript);
 const form = /** @type {HTMLFormElement} */ (byId("ask-form"));
 const input = /** @type {HTMLTextAreaElement} */ (byId("question"));
 const sendButton = /** @type {HTMLButtonElement} */ (byId("send"));

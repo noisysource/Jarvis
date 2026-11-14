@@ -26,7 +26,7 @@ import {
 } from "../calendar/read.js";
 import { rangeLabel, readSentence, resolveDatePhrase, shortRangeLabel } from "../calendar/dates.js";
 import { calendarIntent } from "../calendar/intent.js";
-import { checkReadRequest, checkSearchRequest, EC_EMAIL, GMAIL_ACCOUNTS, GMAIL_READ_TOOL, GMAIL_SEARCH_TOOL, isEcEmail, messageForBrain, searchForBrain, type GmailReader } from "../gmail/gmail.js";
+import { checkReadRequest, checkSearchRequest, EC_EMAIL, GMAIL_READ_TOOL, GMAIL_SEARCH_TOOL, isEcEmail, messageForBrain, searchForBrain, type GmailReader } from "../gmail/gmail.js";
 import {
   checkChecksRequest,
   checkIssuesRequest,
@@ -44,7 +44,7 @@ import {
 } from "../github/github.js";
 import { checkFixRequest, CODE_FIX_TOOL, type Fixes } from "../code/fix.js";
 import { checkPrClose, GITHUB_PR_CLOSE_TOOL, type PrCloser } from "../github/pr-close.js";
-import { BRIEF_EMAIL_QUERY, briefForBrain, briefSummary, DAY_BRIEF_TOOL, gatherBrief } from "../brief.js";
+import { BRIEF_EMAIL_QUERY, briefForBrain, briefSources, briefSummary, DAY_BRIEF_TOOL, gatherBrief } from "../brief.js";
 import { GROUP_ABOUT, groupOfTool, groupsByWords, groupsUsedLately, pickGroups, TOOL_GROUPS, TOOLS_MORE, toolsMoreTool, type RouterMode, type ToolGroup, type ToolRouter } from "./tool-groups.js";
 import { checkDbCollections, checkDbGet, checkDbQuery, collectionsForBrain, DB_COLLECTIONS_TOOL, DB_QUERY_TOOL, DB_TOOLS, docForBrain, docsForBrain, type DbReader } from "../gcloud/firestore.js";
 import { checkLogsRequest, errorsForBrain, errorsSummary, GCLOUD_ERRORS_TOOL, GCLOUD_LIMITS, GCLOUD_TOOLS, logsForBrain, type GcloudReader } from "../gcloud/gcloud.js";
@@ -282,7 +282,7 @@ export const barePrompt = (
   const briefLines =
     options.brief === true && options.tools === true
       ? [
-          'For "what\'s on my plate?", "what do I have today?", a morning brief or "anything I should know?", call day_brief once: it reads the calendars, unread email, overnight errors and CI together. Don\'t make separate reads for those.',
+          'For "what\'s on my plate?", "what do I have today?", "good morning", a morning brief or "anything I should know?", call day_brief once: it reads the calendars, unread email, overnight errors and CI together. Don\'t make separate reads for those.',
         ]
       : [];
   const routedLines =
@@ -837,22 +837,15 @@ export const makeBareAnswerer = (deps: {
       if (call.name === DAY_BRIEF_TOOL.name && deps.brief === true && deps.calendar) {
         const started = performance.now();
         const cal = deps.calendar;
-        const notes = deps.code?.study ? await deps.code.study.notes.all().catch(() => []) : [];
-        const repos = [...new Set(notes.map((n) => n.repo))].flatMap((r) => {
-          const [owner, name] = r.split("/");
-          return owner && name ? [{ owner, name }] : [];
+        const study = deps.code?.study;
+        const sources = await briefSources({
+          calendar: cal,
+          ...(deps.gmail ? { gmail: deps.gmail } : {}),
+          ...(deps.gcloud ? { cloud: deps.gcloud.reader } : {}),
+          ...(deps.github ? { github: deps.github.reader } : {}),
+          ...(study ? { studiedRepos: async () => (await study.notes.all()).map((n) => n.repo) } : {}),
         });
-        const facts = await gatherBrief(
-          {
-            calendar: { readers: cal.accounts ?? { personal: cal.read }, timeZone: cal.timeZone },
-            ...(deps.gmail ? { gmail: { reader: deps.gmail.reader, accounts: GMAIL_ACCOUNTS, isEc: deps.gmail.isEc } } : {}),
-            ...(deps.gcloud ? { cloud: { reader: deps.gcloud.reader } } : {}),
-            ...(deps.github && repos.length > 0 ? { github: { reader: deps.github.reader, repos: async () => repos } } : {}),
-          },
-          now,
-          cal.timeZone,
-          signal,
-        );
+        const facts = await gatherBrief(sources, now, cal.timeZone, signal);
         const isEc = deps.gmail?.isEc ?? (() => false);
         const summary = briefSummary(facts, isEc);
         deps.log?.info("day brief", { parts: Object.keys(facts).length - 1, query: BRIEF_EMAIL_QUERY.length, ms: Math.round(performance.now() - started) });

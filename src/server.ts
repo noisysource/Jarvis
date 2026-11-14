@@ -376,6 +376,15 @@ export const makeServer = (
     });
   }
 
+  // #177: today's morning brief for the page's card (prepared on the first load after BRIEF_AT if it wasn't yet).
+  const morningBrief = deps.morningBrief;
+  if (morningBrief) {
+    app.get("/brief/today", async (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json({ brief: (await morningBrief.today().catch(() => undefined)) ?? null });
+    });
+  }
+
   // #158: the code maps from his studies.
   const codeMaps = deps.codeMaps;
   if (codeMaps) {

@@ -63,7 +63,7 @@ const words = (list: string): RegExp =>
 const RULES: readonly { readonly pattern: RegExp; readonly groups: readonly ToolGroup[] }[] = [
   {
     pattern: words(`
-      calendar*, agenda*, brief*, resumo*, anything i should know, meeting*, appointment*, schedul*, book, booked, booking, free, busy, availab*, event*,
+      calendar*, agenda*, brief*, resumo*, anything i should know, good morning, bom dia, meeting*, appointment*, schedul*, book, booked, booking, free, busy, availab*, event*,
       today, tonight, tomorrow, yesterday, week*, weekend*, month, morning, afternoon, evening,
       monday, tuesday, wednesday, thursday, friday, saturday, sunday, plate, invite*, call, calls,
       calendario*, reuniao, reunioes, marcacao, marcar, marca, livre, ocupado, evento*, hoje, amanha, ontem, semana*,

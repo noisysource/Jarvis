@@ -24,6 +24,7 @@ const FILES: readonly { path: string; file: string; contentType: string }[] = [
   { path: "/trace.js", file: "trace.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/studies.js", file: "studies.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/fix.js", file: "fix.js", contentType: "text/javascript; charset=utf-8" },
+  { path: "/morning.js", file: "morning.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/fix-lib.js", file: "fix-lib.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/codemap.js", file: "codemap.js", contentType: "text/javascript; charset=utf-8" },
   { path: "/codemap-lib.js", file: "codemap-lib.js", contentType: "text/javascript; charset=utf-8" },

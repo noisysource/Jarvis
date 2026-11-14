@@ -165,6 +165,12 @@ export type Config = {
   readonly bareMemory: boolean;
   /** INTROSPECTION=on (#108), with MEMORY=on: every night at 03:30, Jarvis reviews his short-term memory. Report in data/introspection/. */
   readonly introspection: boolean;
+  /**
+   * #177: the morning brief, prepared each day at BRIEF_AT (default 07:30, his
+   * time) and shown as a card on the page. On with the calendar and tools
+   * (Claude) in bare mode; BRIEF_SCHEDULE=off turns it off.
+   */
+  readonly morningBrief: { readonly enabled: boolean; readonly hour: number; readonly minute: number; readonly path: string };
   /** TOOL_CALLING (#104, default on): Claude decides itself when to use a tool; code validates each call. Off: code decides, as for the local brain. */
   readonly toolCalling: boolean;
   /**
@@ -366,6 +372,11 @@ const EnvSchema = z.object({
   GMAIL_WRITE: onOff,
   MEMORY: onOff,
   INTROSPECTION: onOff,
+  BRIEF_SCHEDULE: onOff,
+  BRIEF_AT: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().regex(/^([01]?\d|2[0-3]):([0-5]\d)$/, { error: 'must be a time like "07:30"' }).default("07:30"),
+  ),
   GOOGLE_OAUTH_CLIENT_PATH: optionalString,
   GOOGLE_TOKENS_PATH: optionalString,
   WHISPER_HINTS_PATH: optionalString,
@@ -517,6 +528,12 @@ export const loadConfig = (env: Env): Result<Config, string> => {
     toolRouter: e.TOOL_ROUTER ?? "model",
     bareMemory: e.MEMORY === "on",
     introspection: e.MEMORY === "on" && e.INTROSPECTION === "on",
+    morningBrief: {
+      enabled: e.BARE_MODE === "on" && e.CALENDAR === "on" && e.TOOL_CALLING !== "off" && e.BRIEF_SCHEDULE !== "off",
+      hour: Number(e.BRIEF_AT.split(":")[0]),
+      minute: Number(e.BRIEF_AT.split(":")[1]),
+      path: "data/brief",
+    },
     gmail: { enabled: e.GMAIL === "on", write: e.GMAIL === "on" && e.GMAIL_WRITE === "on", tokensPath: (account: string) => `data/google-gmail-${account}.json` },
     github: { enabled: e.GITHUB === "on", tokensPath: "data/github-tokens.json" },
     gcloud: { enabled: e.GCLOUD === "on", keysPath: "data/gcloud" },
